@@ -30,6 +30,13 @@ include(GenerateExportHeader)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Quick)
 
+# In-tree builds set up PhosphorShellPatterns::PhosphorShellPatterns via
+# add_subdirectory in the top-level CMakeLists; stand-alone builds need
+# find_package. Guard so the in-tree path is a no-op.
+if(NOT TARGET PhosphorShellPatterns::PhosphorShellPatterns)
+    find_package(PhosphorShellPatterns CONFIG REQUIRED)
+endif()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PhosphorSurfaces Library
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -77,6 +84,7 @@ target_link_libraries(PhosphorSurfaces
         Qt6::Core
         Qt6::Quick
         PhosphorLayer::PhosphorLayer
+        PhosphorShellPatterns::PhosphorShellPatterns
 )
 
 set_target_properties(PhosphorSurfaces PROPERTIES
