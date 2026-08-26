@@ -15,7 +15,7 @@
 namespace PhosphorCompositor {
 
 /**
- * @brief Compositor-agnostic autotile border state
+ * @brief Compositor-agnostic engine-managed (tiling-family) border state
  *
  * Tracks which windows are tile-managed (drives border RENDERING). Title-bar/
  * borderless state lives in the DecorationManager's owner model, not here, and
@@ -36,17 +36,40 @@ struct BorderState
 };
 
 /**
- * @brief Compositor-agnostic autotile state accessors and pure helpers
+ * @brief Compositor-agnostic tiling-family state accessors and pure helpers
  *
  * These functions operate on BorderState and other pure data structures
  * without touching any compositor APIs. Shared by all compositor plugins.
  */
-namespace AutotileStateHelpers {
+namespace TilingStateHelpers {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Border state accessors (pure data queries)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * @brief The screen a tiled window is tracked on, or empty if it is not tiled.
+ *
+ * Membership and screen come from the SAME entry here, so they cannot
+ * disagree. That matters wherever a consumer needs both facts: the sibling
+ * per-window screen map is written under a narrower condition than
+ * tiled-membership is, so a window can be a tiled member that map has no entry
+ * for, and a consumer requiring both then silently gets "unknown".
+ */
+inline QString screenForTiledWindow(const BorderState& border, const QString& windowId)
+{
+    for (auto it = border.tiledWindowsByScreen.constBegin(); it != border.tiledWindowsByScreen.constEnd(); ++it) {
+        if (it.value().contains(windowId)) {
+            return it.key();
+        }
+    }
+    return QString();
+}
+
+// Deliberately its OWN loop rather than screenForTiledWindow(...).isEmpty():
+// membership must stay a pure "is it in any bucket" test. Routing it through
+// the screen lookup would make a window held under an empty screen key read as
+// untiled, and this predicate has far more callers than that refactor is worth.
 inline bool isTiledWindow(const BorderState& border, const QString& windowId)
 {
     for (auto it = border.tiledWindowsByScreen.constBegin(); it != border.tiledWindowsByScreen.constEnd(); ++it) {
@@ -67,15 +90,15 @@ inline bool isTiledWindow(const BorderState& border, const QString& windowId)
  * Avoids passing 8+ individual references to cleanupClosedWindowState().
  * The caller constructs this from their member variables.
  */
-struct AutotileWindowState
+struct TilingWindowState
 {
     QSet<QString>& notifiedWindows;
     QHash<QString, QString>& notifiedWindowScreens;
     QSet<QString>& minimizeFloatedWindows;
-    QHash<QString, QRect>& autotileTargetZones;
+    QHash<QString, QRect>& tileTargetZones;
     QHash<QString, QRect>& centeredWaylandZones;
     QSet<QString>& monocleMaximizedWindows;
-    QHash<QString, QHash<QString, QRectF>>& preAutotileGeometries;
+    QHash<QString, QHash<QString, QRectF>>& preTileGeometries;
 };
 
 /**
@@ -84,12 +107,12 @@ struct AutotileWindowState
  * Removes the window from all QSet/QHash state maps.
  * Does NOT handle D-Bus calls or compositor-specific cleanup.
  */
-inline void cleanupClosedWindowState(const QString& windowId, BorderState& border, AutotileWindowState& state)
+inline void cleanupClosedWindowState(const QString& windowId, BorderState& border, TilingWindowState& state)
 {
     state.notifiedWindows.remove(windowId);
     state.notifiedWindowScreens.remove(windowId);
     state.minimizeFloatedWindows.remove(windowId);
-    state.autotileTargetZones.remove(windowId);
+    state.tileTargetZones.remove(windowId);
     state.centeredWaylandZones.remove(windowId);
     state.monocleMaximizedWindows.remove(windowId);
     // Closed windows must be removed from every screen bucket — the effect
@@ -103,14 +126,14 @@ inline void cleanupClosedWindowState(const QString& windowId, BorderState& borde
         }
     }
 
-    // Sweep the pre-autotile geometry out of EVERY screen bucket — the same
+    // Sweep the pre-tile geometry out of EVERY screen bucket — the same
     // cross-screen-stale scenario the tiled sweep above defends against
     // (the window crossed screens before closing) would otherwise leak a
     // geometry entry in the old screen's bucket forever.
-    for (auto it = state.preAutotileGeometries.begin(); it != state.preAutotileGeometries.end();) {
+    for (auto it = state.preTileGeometries.begin(); it != state.preTileGeometries.end();) {
         it->remove(windowId);
         if (it->isEmpty()) {
-            it = state.preAutotileGeometries.erase(it);
+            it = state.preTileGeometries.erase(it);
         } else {
             ++it;
         }
@@ -188,5 +211,5 @@ inline QSet<QString> tiledOnScreen(const BorderState& border, const QString& scr
     return border.tiledWindowsByScreen.value(screenId);
 }
 
-} // namespace AutotileStateHelpers
+} // namespace TilingStateHelpers
 } // namespace PhosphorCompositor
