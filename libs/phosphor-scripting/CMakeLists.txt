@@ -68,7 +68,7 @@ if(PLASMAZONES_SYSTEM_LUAU)
 else()
     # Where the committed tarball lives and where we extract it. Kept out of the
     # NOT-TARGET guard so the licence-install below can find the extracted tree.
-    set(_p_luau_tarball "${CMAKE_SOURCE_DIR}/extern/luau-${PHOSPHORSCRIPTING_LUAU_VERSION}.tar.gz")
+    set(_p_luau_tarball "${CMAKE_SOURCE_DIR}/phosphor/extern/luau-${PHOSPHORSCRIPTING_LUAU_VERSION}.tar.gz")
     set(_p_luau_src "${CMAKE_BINARY_DIR}/_luau/luau-${PHOSPHORSCRIPTING_LUAU_VERSION}")
     if(NOT TARGET Luau.VM)
         if(NOT EXISTS "${_p_luau_tarball}")

@@ -74,7 +74,7 @@ else()
     # this lib is configured as a subdirectory of the main project or built
     # standalone for its own tests.
     set(_pz_valijson_tarball
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../extern/valijson-${PHOSPHORFSLOADER_VALIJSON_VERSION}.tar.gz")
+        "${CMAKE_SOURCE_DIR}/phosphor/extern/valijson-${PHOSPHORFSLOADER_VALIJSON_VERSION}.tar.gz")
     if(NOT EXISTS "${_pz_valijson_tarball}")
         message(FATAL_ERROR
             "Vendored valijson tarball missing at ${_pz_valijson_tarball}. It is "
