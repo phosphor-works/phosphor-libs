@@ -134,8 +134,8 @@ set(phosphorshaders_SRCS
 # consumers (notably PhosphorRendering) can link it.
 #
 # No QML facade target here — see the file header for rationale. If a
-# `Phosphor.Shaders` module is added later, follow phosphor-animation-qml
-# 's pattern: separate STATIC qml-module target that links this library
+# `Phosphor.Shaders` module is added later, follow phosphor-animation's
+# PhosphorAnimationQml pattern: separate STATIC qml-module target that links this library
 # (so the QML registration sub-targets don't leak into install(EXPORT)).
 
 add_library(PhosphorShaders SHARED
@@ -150,12 +150,12 @@ add_library(PhosphorShaders::PhosphorShaders ALIAS PhosphorShaders)
 # data/schemas/shader-metadata.schema.json is the single source of truth shared
 # with CI; read at :/phosphorshaders/schemas/shader-metadata.schema.json.
 #
-# NOTE: this reaches into ../../data/schemas (phosphor/data/schemas, this
+# NOTE: this reaches into ../../data/schemas (phosphor-libs/data/schemas, this
 # tier's own shared schema dir -- it was the repo-root data/ before the tier
 # split, which is what the wording below used to mean), so despite the
 # project() fallback above the library is NOT standalone-buildable out of this
 # repo layout as-is — a truly standalone build would have to vendor the schema
-# under libs/phosphor-shaders/schemas/. Kept in phosphor/data/schemas because CI shares
+# under libs/phosphor-shaders/schemas/. Kept in phosphor-libs/data/schemas because CI shares
 # the same file; move it here if standalone packaging is ever required.
 qt6_add_resources(PhosphorShaders "phosphorshaders_schemas"
     PREFIX "/phosphorshaders/schemas"

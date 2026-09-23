@@ -74,7 +74,7 @@ else()
     # whether this lib is configured as a subdirectory of the main project or
     # built standalone for its own tests. Keep the relative spelling: a
     # ${CMAKE_SOURCE_DIR}-anchored path works in-tree but points at
-    # <lib>/phosphor/extern under a standalone configure, which is the mode
+    # <lib>/phosphor-libs/extern under a standalone configure, which is the mode
     # this else() branch exists to serve.
     set(_pz_valijson_tarball
         "${CMAKE_CURRENT_SOURCE_DIR}/../../extern/valijson-${PHOSPHORFSLOADER_VALIJSON_VERSION}.tar.gz")

@@ -17,7 +17,7 @@ script, and reads the result back. It deliberately knows nothing about what the
 scripts compute.
 
 - **`LuauEngine`.** Owns one `lua_State`. Lifecycle: construct → `init`
-  (open restricted stdlib, wire the interrupt callback, install the capped
+  (open Luau's stdlib, which ships no `io` or `package` library, wire the interrupt callback, install the capped
   allocator) → `runPrelude` (zero or more, to install host globals such as a
   domain standard library) → `sandbox` (freeze globals + stdlib) → `loadModule`
   (per script) → `callModule` / `moduleField`. The public surface is entirely
@@ -66,7 +66,7 @@ if (out.status == LuauEngine::CallStatus::Ok) {
 
 ## Vendored Luau
 
-Luau is vendored as a committed source tarball (`phosphor/extern/luau-<ver>.tar.gz`,
+Luau is vendored as a committed source tarball (`phosphor-libs/extern/luau-<ver>.tar.gz`,
 pinned to the version in `PHOSPHORSCRIPTING_LUAU_VERSION` in this library's
 `CMakeLists.txt`), extracted at configure time via `file(ARCHIVE_EXTRACT)` and
 built as part of this library, so source tarballs and offline distro builds are
@@ -91,7 +91,7 @@ project's global build settings.
 ## Dependencies
 
 - `QtCore`, `Threads`
-- Vendored Luau (`phosphor/extern/luau-*.tar.gz`), or a system Luau via `-DPLASMAZONES_SYSTEM_LUAU=ON`
+- Vendored Luau (`phosphor-libs/extern/luau-*.tar.gz`), or a system Luau via `-DPLASMAZONES_SYSTEM_LUAU=ON`
 
 ## See also
 

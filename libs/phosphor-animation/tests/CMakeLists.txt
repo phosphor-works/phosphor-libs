@@ -154,7 +154,7 @@ function(pal_add_test _name)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             # Reuse the in-tree phosphor-layer test mocks.
-            ${CMAKE_SOURCE_DIR}/phosphor/libs/phosphor-layer/tests
+            ${CMAKE_SOURCE_DIR}/phosphor-libs/libs/phosphor-layer/tests
     )
     set_target_properties(${_name} PROPERTIES AUTOMOC ON)
     target_link_libraries(${_name}

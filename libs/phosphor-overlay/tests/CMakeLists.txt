@@ -16,7 +16,7 @@ add_executable(test_overlay_smoke
 # can drive a real PhosphorLayer::Surface over a recording transport instead
 # of needing a live Wayland connection.
 target_include_directories(test_overlay_smoke
-    PRIVATE ${CMAKE_SOURCE_DIR}/phosphor/libs/phosphor-layer/tests
+    PRIVATE ${CMAKE_SOURCE_DIR}/phosphor-libs/libs/phosphor-layer/tests
 )
 
 target_link_libraries(test_overlay_smoke
