@@ -62,7 +62,7 @@ constexpr int MaxGap = 200;
 /// Smallest rect the tiling primitives will emit on either axis.
 /// DUPLICATED, not shared: `PhosphorGeometry::GeometryDefaults::MinRectSizePx`
 /// backs the daemon's enforceMinSizes and `MIN_ZONE_SIZE` in
-/// phosphor/libs/phosphor-tiles/src/pluau/pluau.luau backs the Luau-side guard. All
+/// phosphor-libs/libs/phosphor-tiles/src/pluau/pluau.luau backs the Luau-side guard. All
 /// three must move together — phosphor-tiles does not link phosphor-geometry,
 /// and the Luau copy is a literal by design (locale-safe float parsing).
 constexpr int MinRectSizePx = 50;
@@ -123,7 +123,7 @@ constexpr int MaxOverflowBehavior = 1;
 // Animation duration + stagger limits previously lived here for
 // historical reasons but are NOT autotile-specific — they bound every
 // animation in the system. Moved to
-// phosphor/libs/phosphor-animation/include/PhosphorAnimation/AnimationLimits.h
+// phosphor-libs/libs/phosphor-animation/include/PhosphorAnimation/AnimationLimits.h
 // (PhosphorAnimation::Limits namespace). Consumers that need them
 // should include that header directly; ConfigDefaults already does.
 /// Watchdog deadline for a single Luau call (tile / lifecycle hook) issued via

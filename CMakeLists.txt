@@ -97,6 +97,6 @@ add_subdirectory(libs/phosphor-placement)   # window placement state tracking
 add_subdirectory(libs/phosphor-compositor)  # compositor-plugin SDK
 add_subdirectory(libs/phosphor-control) # reusable Qt6/QML/Kirigami settings-app framework (page controllers, registry, chrome)
 
-# Aggregate target for the moon workspace: `cmake --build build --target phosphor-tier`.
+# Aggregate target for the moon workspace: `cmake --build build --target phosphor-libs-tier`.
 include(PhosphorTier)
-phosphor_tier_target(phosphor-tier)
+phosphor_tier_target(phosphor-libs-tier)
