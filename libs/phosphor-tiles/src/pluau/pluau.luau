@@ -893,6 +893,7 @@ end
 
 -- Port of threeColumnLayout.js
 local function threeColumnLayout(area, count, gap, splitRatio, masterCount, minSizes)
+    if count <= 0 then return {} end -- parity with every other exported layout helper
     local stackCount = count - masterCount
     local leftCount = math.ceil(stackCount / 2)
     local rightCount = stackCount - leftCount
@@ -995,8 +996,7 @@ end
 -- behaviour-preserving: identical output to the inline code it replaces.
 
 -- Standard tile() preamble: no windows → empty; a work area below the minimum
--- tile size → the host's fill fallback. Returns the early-out zone list, or nil
--- when the caller should proceed. Call as:
+-- tile size → pluau fillArea. Returns the early-out list, or nil to proceed:
 --   local early = pluau.guardArea(ctx.area, count); if early then return early end
 local function guardArea(area, count)
     if count <= 0 then return {} end
@@ -1023,9 +1023,9 @@ local function center(start, total, size)
     return start + math.floor((total - size) / 2)
 end
 
--- Square-ish grid shape for `count` cells: cols = ceil(sqrt), rows = ceil(count/cols).
+-- Square-ish grid. max(1, ...) NOT max(..., 1): max(1, nan) is 1, max(nan, 1) is nan. Keeps count < 0 off nan.
 local function gridShape(count)
-    local cols = math.ceil(math.sqrt(count))
+    local cols = math.max(1, math.ceil(math.sqrt(count)))
     local rows = math.ceil(count / cols)
     return cols, rows
 end
@@ -1033,7 +1033,7 @@ end
 -- Running start offsets for a run of `sizes` beginning at `start`, each separated
 -- by `gap`. offsets[1] = start; offsets[i + 1] = offsets[i] + sizes[i] + gap.
 -- Length equals #sizes for non-empty input; an empty `sizes` still yields
--- { start } (both consumers pass at least one size after guardArea).
+-- { start } (every consumer passes at least one size after guardArea).
 local function cumulativeOffsets(start, sizes, gap)
     local offsets = { start }
     for i = 1, #sizes - 1 do

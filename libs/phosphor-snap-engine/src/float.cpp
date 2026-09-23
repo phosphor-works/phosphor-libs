@@ -23,6 +23,13 @@ using PhosphorEngine::UnfloatResult;
 
 void SnapEngine::toggleWindowFloat(const QString& windowId, const QString& screenId)
 {
+    // Guarded locally per the ctor contract: the tracker derefs below are
+    // unconditional, so a stub-dependency engine crashes here in release.
+    Q_ASSERT(m_windowTracker);
+    if (!m_windowTracker) {
+        qCWarning(PhosphorSnapEngine::lcSnapEngine) << "toggleWindowFloat: no window tracker";
+        return;
+    }
     SnapState* state = stateForWindow(windowId);
     const bool currentlyFloating = isFloating(windowId);
     // Managed here means snapped in the primary store OR held anywhere: a
@@ -109,6 +116,13 @@ void SnapEngine::applyFloatGeometryUnlessMinimized(const QString& windowId, cons
 
 void SnapEngine::setWindowFloat(const QString& windowId, bool shouldFloat, const QString& callerScreenId)
 {
+    // Guarded locally per the ctor contract: the tracker derefs below are
+    // unconditional, so a stub-dependency engine crashes here in release.
+    Q_ASSERT(m_windowTracker);
+    if (!m_windowTracker) {
+        qCWarning(PhosphorSnapEngine::lcSnapEngine) << "setWindowFloat: no window tracker";
+        return;
+    }
     // Resolve the screen this float/unfloat acts on:
     // 1. The caller-provided screen (the effect's authoritative live output,
     //    threaded from setWindowFloatingForScreen) — ALWAYS preferred when set.
@@ -343,6 +357,13 @@ bool SnapEngine::applyGeometryForFloat(const QString& windowId, const QString& s
 
 QString SnapEngine::resolveUnfloatScreen(const QString& primaryScreen, const QString& fallbackScreen) const
 {
+    // Guarded locally per the ctor contract: the tracker derefs below are
+    // unconditional, so a stub-dependency engine crashes here in release.
+    Q_ASSERT(m_windowTracker);
+    if (!m_windowTracker) {
+        qCWarning(PhosphorSnapEngine::lcSnapEngine) << "resolveUnfloatScreen: no window tracker";
+        return fallbackScreen;
+    }
     // The existence check spans two identity domains: ScreenManager's tracked
     // ids when a manager is wired (production), else QScreen connector-name
     // matching via ScreenIdentity. Both strip virtual-screen suffixes; the
@@ -477,13 +498,20 @@ UnfloatResult SnapEngine::resolveUnfloatGeometry(const QString& windowId, const 
 
 UnfloatResult SnapEngine::resolveFallbackUnfloatGeometry(const QString& windowId, const QString& fallbackScreen) const
 {
+    // Guarded locally per the ctor contract: the tracker derefs below are
+    // unconditional, so a stub-dependency engine crashes here in release.
+    Q_ASSERT(m_windowTracker);
+    if (!m_windowTracker) {
+        qCWarning(PhosphorSnapEngine::lcSnapEngine) << "resolveFallbackUnfloatGeometry: no window tracker";
+        return {};
+    }
     UnfloatResult result;
 
     // Resolve the window's effective screen — the CALLER's screen first, else
     // the window's tracked float screen. The caller's screen is the effect's
     // authoritative live output threaded down from setWindowFloatingForScreen,
-    // and it wins for the same reason setWindowFloat's tier list gives it tier 1
-    // (:104-114): the tracked association goes stale the moment a floating
+    // and it wins for the same reason setWindowFloat's tier list gives it tier 1:
+    // the tracked association goes stale the moment a floating
     // window drifts across monitors without a windowScreenChanged (Discussion
     // #724), and this screen is load-bearing twice over — the fallback zone is
     // resolved on it AND the rule predicate below stamps ScreenId / derives Mode
@@ -574,6 +602,13 @@ UnfloatResult SnapEngine::resolveFallbackUnfloatGeometry(const QString& windowId
 
 void SnapEngine::handoffReceive(const HandoffContext& ctx)
 {
+    // Guarded locally per the ctor contract: the tracker derefs below are
+    // unconditional, so a stub-dependency engine crashes here in release.
+    Q_ASSERT(m_windowTracker);
+    if (!m_windowTracker) {
+        qCWarning(PhosphorSnapEngine::lcSnapEngine) << "handoffReceive: no window tracker";
+        return;
+    }
     if (ctx.windowId.isEmpty() || ctx.toScreenId.isEmpty()) {
         return;
     }

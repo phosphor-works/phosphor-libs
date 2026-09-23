@@ -31,8 +31,8 @@ phosphorpointer_add_test(test_pointercurve)
 
 # The registry test checks the entry prologue against the shared helper it
 # includes, which lives in the top-level data tree rather than in this lib.
-target_compile_definitions(test_pointershaderregistry PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+target_compile_definitions(test_pointershaderregistry PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\"")
 
 # The curve test pins its mirror of the smoothing kernel and the Catmull-Rom
 # tension against the shared helper those live in, for the same reason.
-target_compile_definitions(test_pointercurve PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+target_compile_definitions(test_pointercurve PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\"")

@@ -339,7 +339,7 @@ inline constexpr const char* kIAnchorSize = "iAnchorSize";
 /// collapses to (0, 0) only when the expanded geometry equals the frame
 /// (an undecorated, shadowless window). Shaders MUST apply the
 /// anchor-space remap (`anchorRemap` in anchor_remap.glsl) on both
-/// runtimes; `tests/unit/ui/effect/test_anchor_uniforms.cpp` pins the kwin
+/// runtimes; `plasmazones/tests/unit/ui/effect/test_anchor_uniforms.cpp` pins the kwin
 /// inset values.
 inline constexpr const char* kIAnchorPosInFbo = "iAnchorPosInFbo";
 
@@ -530,7 +530,7 @@ inline constexpr const char* kIWindowOpacity = "iWindowOpacity";
 /// not counted here — that's a separate runtime-managed slot. The
 /// daemon's `PhosphorRendering::kMaxUserTextures = 4` includes slot 0,
 /// hence the off-by-one in the budget. Pinned to the daemon constant
-/// by the `static_assert` in `libs/phosphor-animation/src/contract_pins.cpp`.
+/// by the `static_assert` in `phosphor/libs/phosphor-animation/src/contract_pins.cpp`.
 ///
 /// The compile-time pin against PhosphorRendering::kMaxUserTextures
 /// lives in src/contract_pins.cpp — see the comment there explaining
@@ -689,7 +689,7 @@ inline QString colorKey(int slot)
 /// If anyone reorders `BaseUniforms`, those asserts fail at compile time
 /// and the canonical GLSL header has to be updated to match. The GLSL side
 /// is exercised at build time by
-/// `tests/unit/ui/shaders/test_animation_shader_bake.cpp`, which runs every
+/// `plasmazones/tests/unit/ui/shaders/test_animation_shader_bake.cpp`, which runs every
 /// built-in animation shader through `qsb` (which in turn computes
 /// std140 offsets) — a layout drift would surface there as a bake
 /// failure.
@@ -737,7 +737,7 @@ inline bool isValidFilterToken(const QString& filter)
 
 // The compile-time link between AnimationShaderContract::kMaxUserTextureSlots
 // and PhosphorRendering::kMaxUserTextures lives in
-// libs/phosphor-animation/src/contract_pins.cpp. It cannot live in this header
+// phosphor/libs/phosphor-animation/src/contract_pins.cpp. It cannot live in this header
 // because translation units that only need contract definitions (notably the
 // kwin-effect, which already pulls in epoxy/gl.h via KWin) must not be forced
 // to also pull in <QtQuick/QSGTextureProvider> via ShaderNodeRhi.h — epoxy and

@@ -53,7 +53,7 @@ class NavigationController;
 class PerScreenConfigResolver;
 } // namespace PhosphorTileEngine
 
-// ScreenManager lives in libs/phosphor-screens; forward-declared here.
+// ScreenManager lives in phosphor/libs/phosphor-screens; forward-declared here.
 namespace PhosphorScreens {
 class ScreenManager;
 }

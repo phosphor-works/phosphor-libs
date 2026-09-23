@@ -139,10 +139,10 @@ pa_add_test(pa_test_shaderparamtranslation test_shaderparamtranslation.cpp)
 set_tests_properties(pa_test_shaderparamtranslation PROPERTIES
     LABELS "phosphoranimation;phosphoranimationshaders")
 
-# Integration test against the actual data/animations/ packs.
+# Integration test against the actual plasmazones/data/animations/ packs.
 pas_add_test(pas_test_builtin_effects test_builtin_effects.cpp)
 target_compile_definitions(pas_test_builtin_effects PRIVATE
-    "PLASMAZONES_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+    "PLASMAZONES_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\""
 )
 
 # ---- Layer animator tests (ex phosphor-animation-layer) ----
@@ -154,7 +154,7 @@ function(pal_add_test _name)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             # Reuse the in-tree phosphor-layer test mocks.
-            ${CMAKE_SOURCE_DIR}/libs/phosphor-layer/tests
+            ${CMAKE_SOURCE_DIR}/phosphor/libs/phosphor-layer/tests
     )
     set_target_properties(${_name} PROPERTIES AUTOMOC ON)
     target_link_libraries(${_name}
