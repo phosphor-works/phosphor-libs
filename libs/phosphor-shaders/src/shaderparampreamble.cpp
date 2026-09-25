@@ -53,7 +53,7 @@ bool isReservedAnimationParamId(const QString& id)
     // Kept in step with the `#define p_...` lines in
     // data/animations/shared/animation_uniforms.glsl by hand: that header is data,
     // not a compiled input, so nothing can assert the pairing. A grep for
-    // "^#define p_" across data/*/shared is what enumerates it.
+    // "^#define p_" across plasmazones/data/*/shared is what enumerates it.
     return id == QLatin1String("reversed");
 }
 

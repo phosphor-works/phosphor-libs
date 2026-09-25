@@ -11,12 +11,12 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 # sandbox (so nothing writes into the developer's real ~/.config/plasmazones).
 # CMAKE_CURRENT_LIST_DIR, not CMAKE_SOURCE_DIR: the latter is the repo root
 # in-tree but this LIBRARY's directory in a standalone configure, so the include
-# looked for libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
+# looked for <tier>/libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
 # generate time. The relative walk reaches the repo root from either. The EXISTS
 # guard covers the remaining case, a genuine extracted `git subtree split` where
 # the repo-root module is not in the subtree at all.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
 else()
     # Stand-ins so the call sites below need no guard of their own.
     # phosphor_append_test_environment is reproduced EXACTLY, because it is
@@ -72,7 +72,7 @@ ps_add_test(ps_test_swapper test_swapper.cpp)
 ps_add_test(ps_test_screenidentity_variants test_screenidentity_variants.cpp)
 ps_add_test(ps_test_screeninfo_variant test_screeninfo_variant.cpp)
 ps_add_test(ps_test_manager_lifecycle test_manager_lifecycle.cpp)
-ps_add_test(ps_test_screenmanager_geometry test_screenmanager_geometry.cpp FakeScreenProvider.cpp FakeScreenProvider.h)
+ps_add_test(ps_test_screenmanager_geometry test_screenmanager_geometry.cpp FakePhysicalScreenSource.cpp FakePhysicalScreenSource.h)
 ps_add_test(ps_test_manager_virtualscreens test_manager_virtualscreens.cpp)
 ps_add_test(ps_test_resolver test_resolver.cpp)
 ps_add_test(ps_test_reservationsplit test_reservationsplit.cpp)
@@ -94,3 +94,24 @@ target_link_libraries(ps_test_screenmanager_geometry PRIVATE PhosphorScreens::Ru
 target_link_libraries(ps_test_resolver PRIVATE PhosphorScreens::PhosphorScreens)
 target_link_libraries(ps_test_plasma_panel_source PRIVATE PhosphorScreens::PhosphorScreens)
 target_link_libraries(ps_test_dbusscreenadaptor PRIVATE PhosphorScreens::PhosphorScreens)
+
+# Two named outputs for the tests that cannot observe anything with one.
+#
+# The offscreen plugin's default screen is unnamed, so identifierFor() gives
+# the empty string and every test needing a physical id skipped itself. Append
+# AFTER the per-test environment above: the list is read last-wins, so this
+# overrides the plain offscreen entry rather than fighting it.
+# ps_test_manager_lifecycle is deliberately NOT in this list. Naming the
+# outputs does un-skip its four physId-gated functions, but three of them
+# then fail: testStoreChangeRefreshesCache, testStoreRemovalDropsSubdivision
+# and testRefreshIsIdempotent all time out waiting for
+# ScreenManager::virtualScreensChanged after an InMemoryConfigStore write.
+# The store does emit changed() and the manager does connect to it, so the
+# gap is in whether refreshVirtualConfigs re-emits for a screen set that
+# came from a configfile. Those assertions have never run, so this is a
+# pre-existing gap rather than a regression; left skipping until someone
+# settles the manager's behaviour rather than shipping a red suite.
+# No if(TEST ...) guard: see the note in phosphor-layer/tests/CMakeLists.txt.
+# ps_test_dbusscreenadaptor is registered unconditionally above.
+phosphor_append_test_environment(ps_test_dbusscreenadaptor
+    "QT_QPA_PLATFORM=offscreen:configfile=${CMAKE_CURRENT_SOURCE_DIR}/two-screens.json")

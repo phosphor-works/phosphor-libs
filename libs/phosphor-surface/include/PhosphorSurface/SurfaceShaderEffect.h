@@ -57,10 +57,10 @@ namespace PhosphorSurfaceShaders {
  * inherits the whole multipass property set from
  * `PhosphorRendering::ShaderEffect`. Four hosts forward them through
  * `composeStageMap`: the overlay decoration host
- * (`src/shared/SurfaceDecoration.qml`, via `OverlayService::applyDecoration`),
+ * (phosphor-surface-quick's `SurfaceDecoration.qml`, via `OverlayService::applyDecoration`),
  * the OSD (`osd.cpp`), the settings decoration preview
- * (`src/settings/pages/decorationpreviewcontroller.cpp`) and the shell chrome
- * (`src/shell/shellchrome.cpp`). A multipass stage is layered
+ * (`plasmazones/src/settings/pages/decorationpreviewcontroller.cpp`) and the shell chrome
+ * (`phosphor-shell/src/shellchrome.cpp`). A multipass stage is layered
  * (`layer.enabled`) because the render node drives its own passes and needs a
  * target isolated from the scene graph's batch renderer.
  *

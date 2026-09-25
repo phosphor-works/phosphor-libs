@@ -14,11 +14,11 @@ namespace PhosphorSurfaceShaders {
 /// Phosphor has four distinct shader registries:
 ///
 ///   1. **Animation/transition shaders** — `AnimationShaderRegistry`,
-///      sourced from `data/animations/*/`. Short-lived transitions
+///      sourced from `plasmazones/data/animations/*/`. Short-lived transitions
 ///      driven by a 0..1 timeline (open, close, snap, drag, etc.).
 ///
 ///   2. **Overlay/zone-background shaders** — `PhosphorShaders::ShaderRegistry`,
-///      sourced from `data/overlays/*/`. Long-lived ambient effects with
+///      sourced from `plasmazones/data/overlays/*/`. Long-lived ambient effects with
 ///      access to the rich `BaseUniforms` UBO (`iMouse`, `iDate`,
 ///      `customColors[16]`, audio-spectrum / wallpaper / multipass
 ///      textures, etc.). Daemon-only, because the overlay family has no
@@ -26,7 +26,7 @@ namespace PhosphorSurfaceShaders {
 ///      which it stopped being when the compositor grew the surface fold.
 ///
 ///   3. **Surface shaders** — `SurfaceShaderRegistry` (this contract),
-///      sourced from `data/surface/*/`. Persistent per-window surface
+///      sourced from `plasmazones/data/surface/*/`. Persistent per-window surface
 ///      layers composited OVER (or as part of) the live window content:
 ///      the decoration band / border, rounded corners, focus tint, and
 ///      similar window-chrome effects. Unlike an animation shader these
@@ -39,7 +39,7 @@ namespace PhosphorSurfaceShaders {
 ///      itself. See the appearance section below.
 ///
 ///   4. **Pointer shaders** — `PhosphorPointerShaders::PointerShaderRegistry`,
-///      sourced from `data/pointer/*/`. Cursor decoration packs,
+///      sourced from `plasmazones/data/pointer/*/`. Cursor decoration packs,
 ///      compositor-only, and the one family with its OWN buffer-pass cap of
 ///      two rather than the shared eight, because its chain runs on every
 ///      frame the pointer is live. `CustomParamsKey.h` is written against
