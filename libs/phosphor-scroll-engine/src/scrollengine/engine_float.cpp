@@ -30,7 +30,8 @@ namespace PhosphorScrollEngine {
 // ── Float management ────────────────────────────────────────────────────────
 
 bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine::PlacementStateKey& key,
-                                       const QString& windowId, const QString& screenId)
+                                       const QString& windowId, const QString& screenId, FloatAnnounce announce,
+                                       bool fullscreenHold, bool applyAfter)
 {
     if (state->isFloating(windowId)) {
         return false;
@@ -52,12 +53,16 @@ bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine:
         if (!m_floatRestore.contains(windowId)) {
             m_floatRestore.insert(windowId, FloatRestore{});
         }
+        if (fullscreenHold) {
+            m_floatRestore[windowId].fullscreenHold = true;
+        }
         m_scrollFloatedWindows.insert(windowId);
-        // Drop the same three per-window memories the main float path below
-        // drops: a retained rect that happens to equal the one the strip
-        // later resolves defeats applyLayout's emit-on-change gate
-        // (reachable — the drag-preview heal that manufactures this residue
-        // clears neither memory), a stale park edge would anchor the
+        // Drop the per-window memories, the rect included (the main path keeps
+        // it as the float-back guard, but a residue has no column rect worth
+        // keeping): a retained rect equal to the one the strip later resolves
+        // defeats applyLayout's emit-on-change gate (reachable: the
+        // drag-preview heal that manufactures this residue clears neither
+        // memory), a stale park edge would anchor the
         // arrival animation to the wrong side, and the windowed-fs memory
         // goes as a symmetry belt (a stale entry there is a set-vs-bool
         // compare that can only force one redundant emit, never suppress).
@@ -65,7 +70,7 @@ bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine:
         m_parkedScrollEdge.remove(windowId);
         m_lastAppliedWindowedFs.remove(windowId);
         m_lastAppliedMaximizedToEdges.remove(windowId);
-        Q_EMIT windowFloatingChanged(windowId, true, screenId.isEmpty() ? key.screenId : screenId);
+        announceFloat(announce, windowId, true, screenId.isEmpty() ? key.screenId : screenId);
         Q_EMIT placementChanged(key.screenId);
         return true;
     }
@@ -121,14 +126,34 @@ bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine:
     // focus-side memory alone.
     const bool wasActiveTile = state->strip().activeWindowId() == windowId;
     state->strip().takeWindow(windowId, params);
+    // The tab the take handed the extent ownership to, and the intent it
+    // inherited with, so the unfloat can tell a column still sized the way
+    // this leave left it from one the user has resized since
+    // (FloatRestore::tabbedHeightHeirId). The surviving sibling the stack
+    // anchor names locates the column.
+    if (restore.ownedTabbedHeight && !restore.stackAnchor.isEmpty()) {
+        const int heirColumn = state->strip().columnOfWindow(restore.stackAnchor);
+        if (heirColumn >= 0) {
+            restore.tabbedHeightHeirId = state->strip().columns().at(heirColumn).heightOwnerId;
+            restore.tabbedHeightHeirIntent = state->strip().windowHeightIntent(restore.tabbedHeightHeirId);
+        }
+    }
     state->addFloating(windowId);
     if (wasActiveTile) {
         state->setLastFloatingFocus(windowId);
         state->setFloatingHasFocus(true);
     }
+    // The hold is on the slot BEFORE the announce: the daemon's close-capture
+    // probe (isFullscreenFloated) runs synchronously inside it, and a hold
+    // applied afterwards let that capture store the output rect as free
+    // geometry.
+    restore.fullscreenHold = fullscreenHold;
     m_floatRestore.insert(windowId, restore);
     m_scrollFloatedWindows.insert(windowId);
-    m_lastAppliedRect.remove(windowId);
+    // m_lastAppliedRect is KEPT: it is the column rect the float-back refusal
+    // compares against (lastManagedRect), and the daemon samples the float-back
+    // after this float. unfloatWindowInternal drops it on re-adoption.
+    //
     // A float leaves the strip, so a remembered park edge is orphaned: the
     // aliveness prune never reclaims it (the window stays alive), and the
     // stale entry would anchor the arrival animation to the wrong side when
@@ -139,7 +164,12 @@ bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine:
     // emit-gate memory goes with it.
     m_lastAppliedWindowedFs.remove(windowId);
     m_lastAppliedMaximizedToEdges.remove(windowId);
-    Q_EMIT windowFloatingChanged(windowId, true, screenId.isEmpty() ? key.screenId : screenId);
+    announceFloat(announce, windowId, true, screenId.isEmpty() ? key.screenId : screenId);
+    // A batching caller (an arrival burst's deferred apply) relayouts once
+    // for the whole batch and announces the strip itself.
+    if (!applyAfter) {
+        return true;
+    }
     // Background-context guard: see windowClosed.
     if (key == currentKeyForScreen(key.screenId)) {
         applyLayout(key.screenId, false);
@@ -148,8 +178,18 @@ bool ScrollEngine::floatWindowInternal(ScrollState* state, const PhosphorEngine:
     return true;
 }
 
+void ScrollEngine::announceFloat(FloatAnnounce announce, const QString& windowId, bool floating,
+                                 const QString& screenId)
+{
+    if (announce == FloatAnnounce::Active) {
+        Q_EMIT windowFloatingChanged(windowId, floating, screenId);
+    } else {
+        Q_EMIT windowFloatingStateSynced(windowId, floating, screenId);
+    }
+}
+
 bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& windowId, const QString& screenId,
-                                         bool applyAfter)
+                                         bool applyAfter, FloatAnnounce announce)
 {
     // Captured before any mutation so the heal arm below and the guard at
     // the tail both read the context the window actually belongs to.
@@ -192,7 +232,11 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
         }
         return false;
     }
-    const ScrollLayoutParams params = layoutParamsForScreen(contextScreen);
+    // The window's OWN context (layoutParamsForKey), not the screen's current
+    // desktop: a background-context return must use its own gap rules. The
+    // screen form is the fallback for a window the reverse map has no key for.
+    const ScrollLayoutParams params =
+        key.screenId.isEmpty() ? layoutParamsForScreen(contextScreen) : layoutParamsForKey(key);
     // Restore the remembered column slot (minimize/unminimize and float
     // round-trips keep their place); fall back to next-to-focus.
     const bool hadSlot = m_floatRestore.contains(windowId);
@@ -221,8 +265,21 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
         inserted = state->strip().insertWindowAt(restore.column, windowId, restore.width, restore.display, params);
     }
     if (!inserted) {
-        inserted = state->strip().insertWindow(windowId, params.defaultColumnWidth,
-                                               effectiveDefaultColumnDisplay(contextScreen), params);
+        // A window that never held a tile (a seeded entry, or none) opens the
+        // way the open path would open it, so under "the client decides" its
+        // column takes the client's own width, the twin of the height commit
+        // below. A slot whose insert failed keeps the configured default: its
+        // window had a column shape of its own, which this fresh column is
+        // not.
+        const ColumnDisplay display = effectiveDefaultColumnDisplay(contextScreen);
+        ColumnWidth width = params.defaultColumnWidth;
+        if (restore.column < 0 && restore.tileIndex < 0) {
+            if (const auto clientSize =
+                    clientSizeForDecidedWidth(windowId, contextScreen, overridesForScreen(contextScreen))) {
+                width = clientDecidedColumnWidth(*clientSize, params, display);
+            }
+        }
+        inserted = state->strip().insertWindow(windowId, width, display, params);
     }
     if (!inserted) {
         // Every insert refused (an empty id is the only way today). The float
@@ -259,15 +316,21 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
         // fresh insert just seeded — so a window floated at open and then
         // unfloated came back at Auto instead of the configured default.
         if (restore.column >= 0 || restore.tileIndex >= 0) {
-            state->strip().setWindowHeightIntent(windowId, restore.height);
+            // Re-stated, not written as a bid: a tab that did NOT own its
+            // tabbed column comes back without taking the column from the tab
+            // that sizes it, which a non-Auto intent written through
+            // setWindowHeightIntent would.
+            state->strip().restateWindowHeightIntent(windowId, restore.height);
             // And the extent ownership, when this window held it. Not implied
             // by the height write: that claims nothing for an Auto intent, and
             // a tab can legitimately own the column while asking for the whole
             // work area. Without this the column keeps the height of whichever
-            // tab came on show when this one floated out.
-            if (restore.ownedTabbedHeight) {
-                state->strip().setTabbedHeightOwner(windowId);
-            }
+            // tab came on show when this one floated out. Only while the
+            // column is still sized the way this window's leave left it
+            // (restoreTabbedHeightOwner): a resize since then is the user's
+            // newer word on the column, and reclaiming would revert it. That
+            // helper documents the one such resize it cannot see.
+            restoreTabbedHeightOwner(state->strip(), windowId, restore);
             // The maximize-to-edges flag the lone-tile capture carried:
             // declared column state nothing else re-derives, so a
             // minimize/unminimize round trip of a maximized column's only
@@ -290,8 +353,12 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
             // changes the work area the bound is measured against, and these
             // are persisted pixels that do not self-heal.
             commitClientDecidedHeight(state->strip(), windowId, contextScreen, overridesForScreen(contextScreen),
-                                      layoutParamsForScreen(contextScreen, state->strip().columnCount()));
+                                      key.screenId.isEmpty()
+                                          ? layoutParamsForScreen(contextScreen, state->strip().columnCount())
+                                          : layoutParamsForKey(key, state->strip().columnCount()));
         }
+        // Unconditional: a passive return of a window that is not focused makes
+        // it the strip's active column until the next focus report.
         state->strip().focusWindow(windowId, params);
         // No setFloatingHasFocus(false) here: removeFloating already cleared
         // the pair when this window held it (the wasFloatFocus capture above
@@ -302,7 +369,11 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
     // floatWindowInternal uses, so an empty caller hint cannot mislabel the
     // announcement's screen (both current callers pass a matching screen;
     // this pins the contract).
-    Q_EMIT windowFloatingChanged(windowId, false, contextScreen);
+    announceFloat(announce, windowId, false, contextScreen);
+    // The rect the float kept as the float-back guard: the window is a tile
+    // again, and a kept rect equal to the one the strip resolves now would
+    // gate away its first windowsTiled batch (handoffReceive's reason).
+    m_lastAppliedRect.remove(windowId);
     // Batch callers (snapAllWindows) relayout once for the whole batch.
     if (applyAfter) {
         // Background-context guard, same terms as floatWindowInternal:
@@ -318,6 +389,16 @@ bool ScrollEngine::unfloatWindowInternal(ScrollState* state, const QString& wind
 }
 
 void ScrollEngine::setWindowFloat(const QString& rawWindowId, bool shouldFloat, const QString& screenId)
+{
+    // The tracking adaptor's entry (minimize, a drag float, the shell map): an
+    // engine-side transition that leaves the window where it is (F557,
+    // shell_map_float). The float verbs announce Active through
+    // setWindowFloatAnnounced themselves (F578).
+    setWindowFloatAnnounced(rawWindowId, shouldFloat, screenId, FloatAnnounce::Passive);
+}
+
+void ScrollEngine::setWindowFloatAnnounced(const QString& rawWindowId, bool shouldFloat, const QString& screenId,
+                                           FloatAnnounce announce)
 {
     const QString windowId = canonicalizeForLookup(rawWindowId);
     PhosphorEngine::PlacementStateKey key;
@@ -365,12 +446,19 @@ void ScrollEngine::setWindowFloat(const QString& rawWindowId, bool shouldFloat, 
         // re-apply the adopted tile relayouts unclamped until the client
         // happens to re-report, which for a fixed-size window is never.
         const FloatRestore adopted = m_floatRestore.value(windowId);
-        if (target->strip().insertWindow(windowId, params.defaultColumnWidth,
-                                         effectiveDefaultColumnDisplay(targetScreen), params, adopted.minWidth,
-                                         adopted.minHeight)) {
+        // A fresh column, so "the client decides" sizes it the way it sizes
+        // an open, the width twin of the height commit below.
+        const ColumnDisplay display = effectiveDefaultColumnDisplay(targetScreen);
+        ColumnWidth width = params.defaultColumnWidth;
+        if (const auto clientSize =
+                clientSizeForDecidedWidth(windowId, targetScreen, overridesForScreen(targetScreen))) {
+            width = clientDecidedColumnWidth(*clientSize, params, display);
+        }
+        if (target->strip().insertWindow(windowId, width, display, params, adopted.minWidth, adopted.minHeight)) {
             // The tile owns the clamp from here; a refused insert keeps the
             // entry so a later attempt still has it.
             m_floatRestore.remove(windowId);
+            m_closedFullscreenHolds.remove(windowId); // any re-entry ends the closed-hold answer
             // Third unfloat route: clear the mode-transition float marker
             // like unfloatWindowInternal/handoffRelease do.
             m_scrollFloatedWindows.remove(windowId);
@@ -394,15 +482,210 @@ void ScrollEngine::setWindowFloat(const QString& rawWindowId, bool shouldFloat, 
     }
 
     if (shouldFloat) {
-        floatWindowInternal(state, key, windowId, screenId);
+        floatWindowInternal(state, key, windowId, screenId, announce);
     } else {
-        unfloatWindowInternal(state, windowId, key.screenId);
+        unfloatWindowInternal(state, windowId, key.screenId, true, announce);
+    }
+}
+
+bool ScrollEngine::setWindowFullscreenFloat(const QString& rawWindowId, bool floating, const QString& screenId)
+{
+    // The wire carries a screen hint, but both directions act on and announce
+    // the window's own tracked screen (key.screenId), so the hint is unused.
+    Q_UNUSED(screenId)
+    const QString windowId = canonicalizeForLookup(rawWindowId);
+    PhosphorEngine::PlacementStateKey key;
+    ScrollState* state = stateForWindow(windowId, &key);
+    if (!state) {
+        return false;
+    }
+    if (floating) {
+        // A window that already floats under ANOTHER owner (a user float, a
+        // rule float, a minimize-float) keeps that owner: refusing means the
+        // exit never unfloats something the compositor did not float. A repeat
+        // hold of THIS call's own float answers true and changes nothing, so an
+        // effect re-entering after a lost return does not read "refused" as
+        // "not ours" and drop its record while the engine keeps the hold. The
+        // hold rides the slot, so every other unfloat route (a user Meta+F
+        // during the hold, a handoff, a close) consumes it with the slot and
+        // the compositor's later return finds nothing of ours to undo.
+        if (state->isFloating(windowId)) {
+            return m_floatRestore.value(windowId).fullscreenHold;
+        }
+        // QString(): the announce then resolves key.screenId, the same screen
+        // the return announces on, so the hint never mislabels the passive emit.
+        return floatWindowInternal(state, key, windowId, QString(), FloatAnnounce::Passive,
+                                   /*fullscreenHold=*/true);
+    }
+    if (!m_floatRestore.value(windowId).fullscreenHold) {
+        return false;
+    }
+    // Seated without the relayout, so the verdict below runs on the model
+    // before any batch goes out.
+    if (!unfloatWindowInternal(state, windowId, key.screenId, /*applyAfter=*/false, FloatAnnounce::Passive)) {
+        return false;
+    }
+    // The return is the compositor's, so it re-runs the oversized verdict the
+    // open path and the min-size report apply: a client that pinned a minimum
+    // past the work area during the hold, or whose committed floor no longer
+    // fits it, would otherwise sit tiled at a size no column can honour, and
+    // the compositor re-reports a minimum only when it changes. A user's own
+    // unfloat stays manual (toggleWindowFloat does not come here). Ahead of
+    // the apply, the open path's order: a window that floats again never has
+    // its column configured first, and its float relayouts the strip itself.
+    if (!floatIfOutgrowsWorkArea(state, key, windowId, "setWindowFullscreenFloat: return of")) {
+        applyReturnedTile(key);
+    }
+    return true;
+}
+
+void ScrollEngine::applyReturnedTile(const PhosphorEngine::PlacementStateKey& key)
+{
+    // unfloatWindowInternal's applyAfter tail, run once the return's verdict
+    // has kept the window tiled: the background-context guard, then the
+    // announce for a managed set that changed either way.
+    if (key == currentKeyForScreen(key.screenId)) {
+        applyLayout(key.screenId, false);
+    }
+    Q_EMIT placementChanged(key.screenId);
+}
+
+void ScrollEngine::restoreTabbedHeightOwner(ScrollStrip& strip, const QString& windowId, const FloatRestore& slot)
+{
+    if (!slot.ownedTabbedHeight) {
+        return;
+    }
+    // An entry the drag paths captured names no heir: the hold leaves no room
+    // for a resize, so it hands the ownership back outright. One that names an
+    // heir hands it back only while the column is still sized the way the
+    // leave left it.
+    if (!slot.tabbedHeightHeirId.isEmpty()) {
+        const int colIdx = strip.columnOfWindow(windowId);
+        if (colIdx < 0) {
+            return;
+        }
+        const Column& col = strip.columns().at(colIdx);
+        // An heir still in the column must still own it with the intent it
+        // inherited. An heir that has LEFT the column (closed, floated,
+        // dragged away) passed the ownership on through the leave's hand-off,
+        // which is not a resize, so the column counts as untouched. A claim
+        // made by another tab before the heir left looks the same from here
+        // and is reclaimed too: nothing records which of the two moved the
+        // ownership once the heir is gone. A resize made AFTER the heir left,
+        // against the tab that took the column over from it, is reverted the
+        // same way. This is the accepted cost of keying the test on the heir
+        // alone, since telling those cases apart would need a record of every
+        // ownership move made while this window was away.
+        if (col.indexOfWindow(slot.tabbedHeightHeirId) >= 0
+            && (col.heightOwnerId != slot.tabbedHeightHeirId
+                || !(strip.windowHeightIntent(slot.tabbedHeightHeirId) == slot.tabbedHeightHeirIntent))) {
+            return;
+        }
+    }
+    strip.setTabbedHeightOwner(windowId);
+}
+
+void ScrollEngine::announceReleasedFullscreenHolds()
+{
+    // A hold is not placement intent, and the engine adopting these windows
+    // floats from its own slot and rules, never from the shared bit. Announced
+    // passively, outside the state walk that released them, so the daemon's
+    // sync clears the WTS bit before its release handler runs and no window
+    // the next engine tiles is left reading "floating" for the session.
+    const QStringList holds = std::exchange(m_releasedFullscreenHolds, {});
+    for (const QString& windowId : holds) {
+        Q_EMIT windowFloatingStateSynced(windowId, false, QString());
+    }
+}
+
+bool ScrollEngine::isFullscreenFloated(const QString& windowId) const
+{
+    const QString id = canonicalizeForLookup(windowId);
+    return m_floatRestore.value(id).fullscreenHold || m_closedFullscreenHolds.contains(id);
+}
+
+void ScrollEngine::forgetClosedFullscreenHold(const QString& windowId)
+{
+    const QString id = canonicalizeForLookup(windowId);
+    m_closedFullscreenHolds.remove(id);
+    // The daemon calls this once its close capture has read lastManagedRect,
+    // which is why windowClosed keeps the rect, and also right after a LIVE
+    // release it routes through windowClosed (the tiling adaptor's
+    // releaseWindowTrackingVia, the daemon's cross-screen release), which
+    // takes no capture. Either way a window no strip here holds any more loses
+    // the rect now. For a closed window the capture was its reader, and
+    // nothing else would reclaim it while the daemon runs (the aliveness prune
+    // fires at bring-up). For a released live window it was also the
+    // float-back refusal's comparand (the daemon's managed-frame predicate);
+    // that refusal keeps the daemon's own record of the frame the window
+    // settled at under management, which is what a float-back read off the
+    // live window carries, so what goes unguarded is only the rect this engine
+    // last offered where the client never settled on it. A window still held
+    // is either live (the capture ran ahead of the engine's own close, which
+    // then calls this again) or re-adopted, and its rect is the emit gate's
+    // memory, so it stays.
+    if (!m_states.hasWindow(id)) {
+        m_lastAppliedRect.remove(id);
+    }
+}
+
+void ScrollEngine::rememberReleasedFullscreenHold(const QString& windowId)
+{
+    if (m_floatRestore.value(windowId).fullscreenHold) {
+        m_releasedFullscreenHolds.append(windowId);
+    }
+}
+
+void ScrollEngine::settleReannouncedFullscreenHold(const QString& windowId)
+{
+    // A same-key re-announce of a window held out for its OWN fullscreen: the
+    // compositor left fullscreen with no record of the hold (an effect
+    // restart) and announces instead of returning. Put it back in its slot.
+    // The effect's bring-up alive list exempts a live fullscreen window, so
+    // the prune no longer drops the hold first and this arm is the return
+    // path. A re-announce of a window that is STILL fullscreen is kept out
+    // only by the effect's first-contact reject (frame == FullScreenArea).
+    // Inside an arrival burst the apply is deferred with the burst's other
+    // keys rather than run synchronously per arrival.
+    PhosphorEngine::PlacementStateKey key;
+    ScrollState* state = stateForWindow(windowId, &key);
+    if (!state || !m_floatRestore.value(windowId).fullscreenHold) {
+        return;
+    }
+    qCInfo(lcScrollEngine) << "windowOpened: re-announce of fullscreen-floated" << windowId
+                           << "— returning it to the strip";
+    if (m_arrivalBurstDepth > 0) {
+        if (unfloatWindowInternal(state, windowId, key.screenId, /*applyAfter=*/false, FloatAnnounce::Passive)) {
+            // setWindowFullscreenFloat's return verdict, for its reason: this
+            // is the compositor's return too. Run without its own relayout, so
+            // a window that floats again leaves the strip inside the burst and
+            // the deferred apply below lays out the strip once, without it.
+            floatIfOutgrowsWorkArea(state, key, windowId, "windowOpened: return of", /*applyAfter=*/false);
+            // The value records "arrival took focus"; a return never does, so
+            // an existing true is left alone.
+            if (!m_burstPendingApplies.contains(key)) {
+                m_burstPendingApplies.insert(key, false);
+            }
+            // The deferred apply emits placementChanged only when the anchor
+            // moved; the strip's structure changed regardless, and this is
+            // the engine's only way to mark DirtyScrollStrips (the tracking
+            // service's scheduleSaveState, DirtyAll, also sets that bit).
+            // windowOpened's burst path emits it unconditionally for the same
+            // reason.
+            Q_EMIT placementChanged(key.screenId);
+        }
+        return;
+    }
+    // setWindowFullscreenFloat's order: seated, judged, and only then applied.
+    if (unfloatWindowInternal(state, windowId, key.screenId, /*applyAfter=*/false, FloatAnnounce::Passive)
+        && !floatIfOutgrowsWorkArea(state, key, windowId, "windowOpened: return of")) {
+        applyReturnedTile(key);
     }
 }
 
 void ScrollEngine::toggleWindowFloat(const QString& rawWindowId, const QString& screenId)
 {
-    // setWindowFloat canonicalizes its own input; canonicalizeForLookup is
+    // setWindowFloatAnnounced canonicalizes its own input; canonicalizeForLookup is
     // idempotent, so passing the resolved id through is a single-pass
     // pipeline, not a second translation.
     const QString windowId = canonicalizeForLookup(rawWindowId);
@@ -410,7 +693,7 @@ void ScrollEngine::toggleWindowFloat(const QString& rawWindowId, const QString& 
     if (!state) {
         // Report instead of absorbing the press silently: a toggle aimed at
         // an untracked window would resolve floating=false below and
-        // setWindowFloat's no-state arm silently rejects the float. Every
+        // setWindowFloatAnnounced's no-state arm silently rejects the float. Every
         // other navigation shortcut produces feedback, and a silent
         // shortcut reads as broken — mirrors SnapEngine::toggleWindowFloat
         // and the autotile facade's not_managed report. Direct callers only:
@@ -424,7 +707,7 @@ void ScrollEngine::toggleWindowFloat(const QString& rawWindowId, const QString& 
         return;
     }
     const bool floating = state->isFloating(windowId);
-    setWindowFloat(windowId, !floating, screenId);
+    setWindowFloatAnnounced(windowId, !floating, screenId, FloatAnnounce::Active);
 }
 
 } // namespace PhosphorScrollEngine

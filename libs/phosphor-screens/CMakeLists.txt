@@ -7,7 +7,7 @@
 # or QtDBus surface they never use:
 #
 #   PhosphorScreens::Core     — pure POD/serialiser surface: ScreenInfo,
-#                               ScreenIdentity, Swapper, QtScreenProvider,
+#                               ScreenIdentity, Swapper, QtPhysicalScreenSource,
 #                               VirtualScreen, and the IConfigStore /
 #                               IPanelSource interfaces. Qt6::Core/Gui only —
 #                               NO Wayland. POD-only consumers (zones, overlay)
@@ -28,6 +28,18 @@ cmake_minimum_required(VERSION 3.16)
 # PhosphorScreens's own version — used for SOVERSION. When split to a
 # standalone repo, this becomes the project() version.
 set(PHOSPHORSCREENS_VERSION "0.1.0")
+
+# The Qt floor this library requires AND advertises in its generated
+# PhosphorScreensConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
+# the two cannot drift, with its own value for a STANDALONE build, where that
+# variable does not exist. The fallback is not optional: the Config template
+# substitutes this, and an undefined variable expands to nothing and ships a config
+# whose find_dependency(Qt6 ...) carries no version floor at all.
+if(DEFINED QT_MIN_VERSION)
+    set(PHOSPHORSCREENS_QT_MIN ${QT_MIN_VERSION})
+else()
+    set(PHOSPHORSCREENS_QT_MIN "6.10.0")
+endif()
 
 if(NOT PROJECT_VERSION)
     project(PhosphorScreens VERSION ${PHOSPHORSCREENS_VERSION} LANGUAGES CXX)
@@ -62,8 +74,8 @@ include(GenerateExportHeader)
 # libs; existing libs were flattened during the phosphor-control
 # scaffolding pass. See libs/phosphor-screens/CHANGES.md for the rename
 # history.
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui)
-find_package(Qt6 6.10 REQUIRED COMPONENTS DBus)
+find_package(Qt6 ${PHOSPHORSCREENS_QT_MIN} REQUIRED COMPONENTS Core Gui)
+find_package(Qt6 ${PHOSPHORSCREENS_QT_MIN} REQUIRED COMPONENTS DBus)
 
 # PhosphorIdentity ships VirtualScreenId — the cross-process ID format
 # helpers that VirtualScreen.h consumes. INTERFACE-only dependency, so
@@ -137,10 +149,10 @@ set(phosphorscreenscore_public_HDRS
     include/PhosphorScreens/IConfigStore.h
     include/PhosphorScreens/InMemoryConfigStore.h
     include/PhosphorScreens/IPanelSource.h
-    include/PhosphorScreens/IScreenProvider.h
+    include/PhosphorScreens/IPhysicalScreenSource.h
     include/PhosphorScreens/NoOpPanelSource.h
     include/PhosphorScreens/PhysicalScreen.h
-    include/PhosphorScreens/QtScreenProvider.h
+    include/PhosphorScreens/QtPhysicalScreenSource.h
     include/PhosphorScreens/ScreenIdentity.h
     include/PhosphorScreens/ScreenInfo.h
     include/PhosphorScreens/Swapper.h
@@ -150,7 +162,7 @@ set(phosphorscreenscore_public_HDRS
 add_library(PhosphorScreensCore SHARED
     ${phosphorscreenscore_public_HDRS}
     src/screenslogging.h
-    src/qtscreenprovider.cpp
+    src/qtphysicalscreensource.cpp
     src/screenidentity.cpp
     src/screeninfo.cpp
     src/screenslogging.cpp
@@ -158,6 +170,12 @@ add_library(PhosphorScreensCore SHARED
 )
 
 add_library(PhosphorScreens::Core ALIAS PhosphorScreensCore)
+# EXPORT_NAME so the INSTALLED package exports the same name the alias above
+# gives in-tree. install(EXPORT) namespaces the TARGET name, not the alias, so
+# without this the package shipped PhosphorScreens::PhosphorScreensCore while every consumer
+# in the repo writes PhosphorScreens::Core — a name an installed or standalone
+# consumer could not resolve at all.
+set_target_properties(PhosphorScreensCore PROPERTIES EXPORT_NAME Core)
 
 generate_export_header(PhosphorScreensCore
     BASE_NAME PhosphorScreensCore
@@ -210,6 +228,12 @@ add_library(PhosphorScreensRuntime SHARED
 )
 
 add_library(PhosphorScreens::Runtime ALIAS PhosphorScreensRuntime)
+# EXPORT_NAME so the INSTALLED package exports the same name the alias above
+# gives in-tree. install(EXPORT) namespaces the TARGET name, not the alias, so
+# without this the package shipped PhosphorScreens::PhosphorScreensRuntime while every consumer
+# in the repo writes PhosphorScreens::Runtime — a name an installed or standalone
+# consumer could not resolve at all.
+set_target_properties(PhosphorScreensRuntime PROPERTIES EXPORT_NAME Runtime)
 
 generate_export_header(PhosphorScreensRuntime
     BASE_NAME PhosphorScreensRuntime
@@ -228,7 +252,7 @@ target_include_directories(PhosphorScreensRuntime
 
 target_link_libraries(PhosphorScreensRuntime
     PUBLIC
-        # Manager.h surfaces QtScreenProvider / IConfigStore / VirtualScreen
+        # Manager.h surfaces QtPhysicalScreenSource / IConfigStore / VirtualScreen
         # (all Core POD types), so Core is a PUBLIC dependency.
         PhosphorScreens::Core
         Qt6::Core

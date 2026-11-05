@@ -15,6 +15,10 @@
 
 #include <optional>
 
+namespace PhosphorEngine {
+class DesktopRemap;
+}
+
 namespace PhosphorSnapEngine {
 
 /// Per-screen snap placement state.
@@ -176,46 +180,6 @@ public:
         Q_EMIT stateChanged();
     }
 
-    /// The windows whose desktop tag equals @p desktop, sorted by id. Empty for
-    /// a non-positive @p desktop (0 is the all-desktops sentinel, not a
-    /// desktop). SnapEngine::reapDesktopState uses it to announce the placement
-    /// drops reapDesktopValues is about to make.
-    QStringList windowsTaggedWithDesktop(int desktop) const;
-
-    /// Dynamic-workspaces arm: release every window tagged with a destroyed
-    /// desktop and reset the last-used memo if it named that desktop. The snap
-    /// assignments are desktop-tagged per window inside EVERY state (including
-    /// the global holder), so a state whose own key survives a desktop's death
-    /// can still hold stale values — the key-level prune cannot reach these.
-    /// 0 (sticky / on-all-desktops) is a sentinel and is never touched by
-    /// either arm.
-    ///
-    /// The whole per-window record goes (removeWindowData), not just the tag.
-    /// Erasing the tag alone and keeping the zone and screen entries is the
-    /// worse of the two shapes: an absent tag and a stamped 0 are
-    /// indistinguishable to buildOccupiedZoneSet, which reads
-    /// value(windowId, 0) and passes both on every desktop, so the window's
-    /// zone reads OCCUPIED everywhere; and windowsOnScreenAndDesktop, which
-    /// matches the tag by value, excludes both, so cross-desktop directional
-    /// focus can no longer land on it. Nothing re-stamps the tag: the window
-    /// registry's virtualDesktop is a positional number KWin does not re-push
-    /// across a renumber (see WindowMetadata::virtualDesktop), and the only
-    /// production recordResidence caller is the cross-screen unfloat. So the
-    /// window is treated exactly as one in a store the desktop's death
-    /// destroys — its placement is gone, and SnapEngine::reapDesktopState
-    /// announces that to the same consumers the store prune announces to.
-    void reapDesktopValues(int desktop);
-
-    /// Dynamic-workspaces arm: rewrite the per-window desktop tags and the
-    /// last-used memo per `oldToNew` (absent = unchanged; 0 sentinel kept).
-    /// A mapping carrying ANY target below 1 is refused WHOLE
-    /// (PhosphorEngine::desktopRenumberMappingIsValid) and nothing moves — a
-    /// renumber names surviving desktops, so a 0 target is a malformed map,
-    /// not an instruction to make windows sticky. All-or-nothing rather than
-    /// per entry so this arm agrees with the state-map and context-tracker
-    /// rewrites that run beside it in SnapEngine::renumberDesktopState.
-    void renumberDesktopValues(const QHash<int, int>& oldToNew);
-
     // ═══════════════════════════════════════════════════════════════════════════
     // Floating State
     // ═══════════════════════════════════════════════════════════════════════════
@@ -271,9 +235,9 @@ public:
     /// of this store and INTO @p target, rewriting the LIVE screen assignment to
     /// @p newScreenId so target->screenForWindow(windowId) reports the destination
     /// monitor (the #724 cross-monitor determinism requirement). The pre-float
-    /// zone/screen ride along UNCHANGED: they name the SOURCE monitor's home zone,
-    /// preserved so an unfloat on any monitor restores the home zone (cross-monitor
-    /// restore is allowed; there is no refusal guard). The global-scalar fields
+    /// zone/screen move UNCHANGED: only a move to another monitor drops them (and
+    /// the zone) first, and a re-key on the same monitor (another desktop, a
+    /// split, an EDID rename) keeps them. The global-scalar fields
     /// (last-used-zone, user-snapped classes) are NOT moved — they stay global.
     /// No-op when @p target is null/this or the window has no entry in this store.
     void migrateWindowTo(SnapState* target, const QString& windowId, const QString& newScreenId);
@@ -321,6 +285,15 @@ public:
     {
         return m_lastUsedDesktop;
     }
+    /// Shift every desktop number this store records (each window's desktop
+    /// and the last-used zone's) the way Plasma renumbers desktops when
+    /// @p removedDesktop goes: higher numbers move down by one, and a value ON
+    /// the removed desktop reads as unknown (0).
+    void renumberDesktopsAfterRemoval(int removedDesktop);
+    /// The same for any change of KWin's desktop list: every number moves to the
+    /// position @p remap gives its desktop, and one on a removed desktop reads as
+    /// unknown (0). A number outside the old list is left as it is.
+    void remapDesktops(const PhosphorEngine::DesktopRemap& remap);
     /// Monotonic stamp bumped every time this store's last-used zone is set to a
     /// non-empty value (via updateLastUsedZone / restoreLastUsedZone). 0 means
     /// "never set". The facade compares stamps across stores to pick the single
@@ -392,9 +365,8 @@ private:
     /// stable instance id, WITHOUT seeding — the daemon seeds once per window in
     /// WindowTrackingAdaptor::setWindowMetadata, so every snap accessor here only
     /// looks up. Returns the input verbatim when the instance has no canonical
-    /// entry (or no registry is attached, e.g. unit tests), which also makes the
-    /// bare-appId alias writes (addPreFloat*/clearPreFloatZone) safe. See the
-    /// .cpp header comment.
+    /// entry (or no registry is attached, e.g. unit tests). See the .cpp
+    /// header comment.
     QString canonicalizeForLookup(const QString& rawWindowId) const;
 
     /// Shared body of unassignWindow / unsnapForFloat. Removes the window's

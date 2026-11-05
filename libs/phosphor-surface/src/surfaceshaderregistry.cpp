@@ -305,14 +305,39 @@ std::optional<SurfaceShaderEffect> parseEffect(const QString& effectDir, const Q
         // so it still holds RAW RELATIVE names. Left set, they survive toJson /
         // operator== and feed the file watcher + content signature CWD-relative
         // (bogus) paths. Clearing it is the whole point of this coherence block.
+        //
+        // SAY SO when there was something to clear. Dropping a declared chain
+        // silently is how a pack ships a fully transparent "blur" with no
+        // diagnostic at any level: the author declared seven buffer shaders,
+        // forgot `multipass: true`, and nothing told them. The fail-closed
+        // branch above warns for its own case, so this covers the other one.
+        if (!e.bufferShaderPaths.isEmpty()) {
+            qCWarning(lcRegistry) << "Surface effect" << e.id << "declares" << e.bufferShaderPaths.size()
+                                  << "buffer shader(s) but not \"multipass\": true, so every one of them is "
+                                     "dropped and the pack renders single-pass";
+        }
         e.bufferShaderPaths.clear();
         e.bufferWraps.clear();
+        // bufferScales belongs with its two sibling override arrays and was the
+        // one the block missed. It claims the same positional alignment with a
+        // bufferShaderPaths that is now empty, and it survives toJson and
+        // operator== exactly as they do, so leaving it set makes a single-pass
+        // pack compare unequal to an identical one that never declared it and
+        // re-emit per-pass scales for passes it does not have.
+        e.bufferScales.clear();
         e.bufferFilters.clear();
         e.bufferWrap.clear();
         e.bufferFilter.clear();
         e.bufferFeedback = false;
         e.useDepthBuffer = false;
         e.bufferScale = 1.0;
+        // halfFloatBuffers belongs in the same reset for the same reason as the
+        // rest: it is a buffer-only field, it survives toJson and it
+        // participates in operator==, so a single-pass pack that declared it
+        // compared unequal to an identical one that never did. Reset to its
+        // DECLARED DEFAULT, which is true here and not false like the flags
+        // above it — this block resets to defaults, not to zero.
+        e.halfFloatBuffers = true;
     }
 
     return e;
@@ -617,6 +642,13 @@ QVariantMap SurfaceShaderRegistry::translateSurfaceParams(const SurfaceShaderEff
     // surface-layer resolution) can swap a packaged texture without
     // touching the pack on disk.
     //
+    // These override keys are honoured on the DAEMON path only. The
+    // kwin-effect compositor calls translateSurfaceParams for the scalar and
+    // colour slots and ignores the texture keys, uploading `effect.textures`
+    // once per pack and caching for the pack's lifetime; see the
+    // `SurfaceShaderEffect::textures` doc. Anything added here that a surface
+    // decoration must show on a real window needs a compositor arm too.
+    //
     // Slot offset: the canonical surface contract reserves `uTexture0`
     // for the captured surface. `effect.textures[0]` therefore maps to
     // `uTexture1` and so on. friendlyParams may use the GLSL slot name
@@ -804,6 +836,59 @@ QList<PhosphorShaders::EntryCandidate> SurfaceShaderRegistry::surfaceEntryCandid
         "    fragColor = pSurface(vTexCoord);\n"
         "}\n");
     return {PhosphorShaders::EntryCandidate{QStringLiteral("pSurface"), surfaceMain}};
+}
+
+QString SurfaceShaderRegistry::compositorVertexSource()
+{
+    return QStringLiteral(
+        "#version 450\n"
+        "\n"
+        "layout(location = 0) in vec2 position;\n"
+        "layout(location = 1) in vec2 texCoord;\n"
+        "\n"
+        "layout(location = 0) out vec2 vTexCoord;\n"
+        "\n"
+        "uniform mat4 modelViewProjectionMatrix;\n"
+        "\n"
+        "void main() {\n"
+        "    vTexCoord = texCoord;\n"
+        "    gl_Position = modelViewProjectionMatrix * vec4(position, 0.0, 1.0);\n"
+        "}\n");
+}
+
+QString SurfaceShaderRegistry::compositorBufferVertexSource()
+{
+    return QStringLiteral(
+        "#version 450\n"
+        "layout(location = 0) in vec2 position;\n"
+        "layout(location = 1) in vec2 texCoord;\n"
+        "layout(location = 0) out vec2 vTexCoord;\n"
+        "void main() {\n"
+        "    vTexCoord = texCoord;\n"
+        "    gl_Position = vec4(position, 0.0, 1.0);\n"
+        "}\n");
+}
+
+QString SurfaceShaderRegistry::compositorPresentVertexSource()
+{
+    return QStringLiteral(
+        "#version 450\n"
+        "\n"
+        "layout(location = 0) in vec2 position;\n"
+        "layout(location = 1) in vec2 texCoord;\n"
+        "\n"
+        "layout(location = 0) out vec2 vTexCoord;\n"
+        "\n"
+        "uniform mat4 modelViewProjectionMatrix;\n"
+        "\n"
+        "void main() {\n"
+        "#ifdef PZ_KWIN_OFFSCREEN_TEXCOORDS_TOP_DOWN\n"
+        "    vTexCoord = vec2(texCoord.x, 1.0 - texCoord.y);\n"
+        "#else\n"
+        "    vTexCoord = texCoord;\n"
+        "#endif\n"
+        "    gl_Position = modelViewProjectionMatrix * vec4(position, 0.0, 1.0);\n"
+        "}\n");
 }
 
 } // namespace PhosphorSurfaceShaders

@@ -7,6 +7,18 @@ cmake_minimum_required(VERSION 3.16)
 
 set(PHOSPHORWORKSPACES_VERSION "0.1.0")
 
+# The Qt floor this library requires AND advertises in its generated
+# PhosphorWorkspacesConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
+# the two cannot drift, with its own value for a STANDALONE build, where that
+# variable does not exist. The fallback is not optional: the Config template
+# substitutes this, and an undefined variable expands to nothing and ships a config
+# whose find_dependency(Qt6 ...) carries no version floor at all.
+if(DEFINED QT_MIN_VERSION)
+    set(PHOSPHORWORKSPACES_QT_MIN ${QT_MIN_VERSION})
+else()
+    set(PHOSPHORWORKSPACES_QT_MIN "6.10.0")
+endif()
+
 if(NOT PROJECT_VERSION)
     project(PhosphorWorkspaces VERSION ${PHOSPHORWORKSPACES_VERSION} LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 20)
@@ -17,24 +29,19 @@ include(GenerateExportHeader)
 
 set(CMAKE_AUTOMOC ON)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Dependencies
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# Found via add_subdirectory in the in-tree build; the guarded find_package
-# arms are what make a standalone configure of this directory work.
+# Sibling Phosphor libraries this one links. Each lookup is GUARDED rather than
+# unconditional: in-tree the parent add_subdirectory()s the sibling before this
+# directory, so its ALIAS target already exists and the find_package is skipped.
+# A STANDALONE configure (the project() guard above says this directory supports
+# one) has no such target, and without these it failed at target_link_libraries
+# with "links to X::X but the target was not found".
 
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus)
-
-# PhosphorEngine supplies IVirtualDesktopManager, which VirtualDesktopManager
-# implements and its public header includes. PUBLIC — the type is part of this
-# library's own API surface.
+# the shared placement policy every engine builds on
 if(NOT TARGET PhosphorEngine::PhosphorEngine)
     find_package(PhosphorEngine CONFIG REQUIRED)
 endif()
 
-# PhosphorIdentity supplies VirtualScreenId, used to resolve a virtual screen
-# id back to its parent output. PRIVATE — the include lives in the .cpp.
+# the window-identity types the placement API keys on
 if(NOT TARGET PhosphorIdentity::PhosphorIdentity)
     find_package(PhosphorIdentity CONFIG REQUIRED)
 endif()
@@ -97,11 +104,6 @@ elseif(TARGET KF6::Activities)
     target_link_libraries(PhosphorWorkspaces PRIVATE KF6::Activities)
 endif()
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWorkspaces" OR BUILD_TESTING)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -157,3 +159,11 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorWorkspacesConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorWorkspaces
 )
+
+# The workspace-map and reconciler suites need nothing beyond Qt, so the tree is
+# entered unconditionally. The ActivityManager suite inside it gates itself on
+# the activities library.
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWorkspaces" OR BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

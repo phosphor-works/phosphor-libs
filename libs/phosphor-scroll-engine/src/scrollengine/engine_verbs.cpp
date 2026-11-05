@@ -6,6 +6,7 @@
 #include <PhosphorEngine/LayerFocusSwitch.h>
 #include <PhosphorEngine/WindowRegistry.h>
 
+#include "enginelimits.h"
 #include "scrollverbresolve_p.h"
 // lcScrollEngine is used below and reaches this file only through a sibling
 // translation unit under a UNITY build, so its absence breaks a non-unity
@@ -158,14 +159,18 @@ QStringList ScrollEngine::focusedColumnWindows(const QString& screenId) const
 // A helper struct + lambda was considered and rejected: every verb would
 // still need the three names plus the bail-out, and the macro keeps almost
 // every verb body in this file a one-liner. The names are part of the macro's
-// documented contract. P_SCROLL_VERB is #undef'd at the end of this file; the
-// tail note explains why P_SCROLL_RESOLVE deliberately is not.
+// documented contract. Both verb macros are #undef'd after the last verb that
+// uses them, ahead of the windowed-fullscreen trio; the note there explains
+// why P_SCROLL_RESOLVE deliberately is not.
 // The hand-expanded verbs are the ones the macro cannot express:
-// consumeOrExpelWindow (two ops, one feedback), resetStripToDefaults (the
-// override map resolved once for three defaults), scrollViewByPercent (params
-// needed before the op), the windowed-fullscreen trio (background-context
-// guards) and the float-layer verbs at the tail (feedback branches differ per
-// arm, not just per outcome).
+// consumeWindowIntoColumn (source resolved after the op), consumeOrExpelWindow
+// (two ops, one feedback), the two maximize toggles (a bool answer and a
+// window-addressed arm), resetStripToDefaults (the override map resolved once
+// for three defaults), the two scrollView verbs (params needed before the op),
+// focusColumnAtIndex (the arrow needs the previous index), the
+// windowed-fullscreen trio (its own guard, and background-context guards) and
+// the float-layer verbs (feedback branches differ per arm, not just per
+// outcome).
 void ScrollEngine::consumeWindowIntoColumn(const QString& screenId)
 {
     // Hand-expanded from P_SCROLL_VERB for the SOURCE slot, the way
@@ -240,7 +245,20 @@ void ScrollEngine::consumeOrExpelWindow(int delta, const QString& screenId)
 
 void ScrollEngine::centerColumn(const QString& screenId)
 {
-    P_SCROLL_VERB(screenId, state->strip().centerActiveColumn(params), "center", false, QString());
+    // The strip answers whether the ANCHOR moved, and re-attaches a panned
+    // view even when it did not (centerActiveColumn). That re-attach is
+    // persisted state the macro's no-change arm never announces, so it is
+    // republished here; the press still reports no_target, since nothing on
+    // screen moved.
+    P_SCROLL_VERB(screenId, ([&]() {
+                      const bool wasDetached = state->strip().viewDetached();
+                      const bool moved = state->strip().centerActiveColumn(params);
+                      if (!moved && wasDetached && !state->strip().viewDetached()) {
+                          Q_EMIT placementChanged(screen);
+                      }
+                      return moved;
+                  }()),
+                  "center", false, QString());
 }
 
 void ScrollEngine::toggleColumnTabbed(const QString& screenId)
@@ -311,23 +329,22 @@ bool ScrollEngine::toggleMaximizeColumn(const QString& screenId, const QString& 
     // call arrived. Nothing in tree dispatches this verb from the compositor
     // any more (that is toggleMaximizeToEdges below), but the answer is the
     // same question a scripted caller has to ask, and the twins are kept
-    // identical on purpose, with ONE deliberate exception. The twin logs its
+    // identical on purpose, with THREE deliberate exceptions. The twin logs its
     // refusal and this verb does not, because the twin's refusal answers a
     // button press the user watched do nothing while this one answers a
     // scripted D-Bus call that reads the false it gets back. See the note at
-    // that log.
+    // that log. The twin expels the asking active tile of a shared column
+    // before it toggles, where this width verb always acts on the column
+    // whole. And the twin carries an isInfoEnabled diagnostic block before its
+    // toggle that this verb does not.
     if (!canonicalId.isEmpty()) {
         PhosphorEngine::PlacementStateKey key;
         ScrollState* state = stateForWindow(canonicalId, &key);
         if (!state || state->strip().isEmpty() || key.screenId.isEmpty()) {
             return false;
         }
-        // Resolved from the window's SCREEN: layoutParamsForScreen has no
-        // context parameter and answers for that screen's current desktop and
-        // activity. The gaps and per-screen overrides of a background context
-        // can differ, and this is the same approximation every other
-        // window-keyed strip mutation on this engine lives with; the values
-        // that matter to the toggle (work area, axis) are per-screen.
+        // Resolved from the window's OWN context (layoutParamsForKey), so a
+        // background-context toggle uses that context's gaps and overrides.
         const ScrollLayoutParams params = layoutParamsForKey(key);
         const bool changed = state->strip().toggleMaximizeColumnForWindow(canonicalId, params);
         if (changed) {
@@ -369,13 +386,16 @@ bool ScrollEngine::toggleMaximizeToEdges(const QString& screenId, const QString&
     // and the quiet named path (this verb IS the compositor interception's
     // dispatch target, so a background client maximizing itself must not pop
     // an OSD over the user's work). The comments there carry the reasons; the
-    // only difference below is which strip op runs. The two bodies were left
+    // differences below are which strip op runs and the tab expel ahead of
+    // it. The two bodies were left
     // separate rather than folded into one helper because the shared prologue
     // would have to live on ScrollEngine's private interface to reach
     // stateForWindow and applyLayout, and it earns less than it costs at two
-    // call sites. They must stay in step by hand, with the one recorded
-    // exception below: the refusal here is LOGGED and the twin's is not, for
-    // the reason the log itself gives.
+    // call sites. They must stay in step by hand, with the three recorded
+    // exceptions below: the refusal here is LOGGED and the twin's is not, for
+    // the reason the log itself gives, the asking active tab of a tabbed
+    // column is expelled first, and the isInfoEnabled diagnostic block runs
+    // here only.
     //
     // The changed-reporting answer matters MOST here: this verb is what the
     // maximize interception dispatches, and the effect no longer writes KWin's
@@ -404,7 +424,51 @@ bool ScrollEngine::toggleMaximizeToEdges(const QString& screenId, const QString&
             return false;
         }
         const ScrollLayoutParams params = layoutParamsForKey(key);
-        const bool changed = state->strip().toggleMaximizeToEdgesForWindow(canonicalId, params);
+        // A WINDOW-addressed maximize is about that window, not its tab group.
+        // This arm is the compositor interception's target: the window's own
+        // request, a titlebar click or a client maximizing itself. Applied to
+        // the column it maximized every tab in it, and the state outlived the
+        // window that asked. Seen live: a game opens as a tab in its launcher's
+        // column, maximizes itself on the way to fullscreen, then leaves the
+        // strip, and the launcher is left stretched across the output. So the
+        // asking tab is expelled into its own column first and THAT column is
+        // maximized. The focused-column shortcut (the empty-id arm below) still
+        // maximizes a tab group whole.
+        //
+        // Only on the way IN: an un-maximize must reach the column that holds
+        // the state. Only for the ACTIVE TILE of the ACTIVE column, tested on
+        // the raw activeTileIdx: the strip's expel takes no window id and
+        // removes exactly that tile, while activeWindowId() walks past a
+        // minimized active tile and would let the expel take a different
+        // window than the one asking. A background tab's request keeps the
+        // column-wide behaviour rather than moving the strip's active column.
+        // For ANY shared column, tabbed or stacked: the request names one
+        // window, and the neighbours it shares a column with did not ask.
+        // Only with a real work area: that is the toggle's one remaining
+        // refusal, so checking it here means an expel is always followed by a
+        // toggle that takes. The result is folded into `changed` regardless,
+        // so a restructure can never go out without its relayout.
+        //
+        // Deliberately NOT gated on floatingHasFocus or on the context being
+        // the current one. Nothing here takes focus (applyLayout below runs
+        // with focusAfter false, and only for the current context), and a
+        // background strip is restructured on its own state like every other
+        // window-keyed mutation in this file.
+        bool expelled = false;
+        if (const int ownerIdx = state->strip().columnOfWindow(canonicalId);
+            ownerIdx >= 0 && ownerIdx == state->strip().activeColumnIndex()) {
+            const Column& owner = state->strip().columns().at(ownerIdx);
+            if (owner.tiles.size() > 1 && !owner.maximizedToEdges && owner.activeTileIdx >= 0
+                && owner.activeTileIdx < owner.tiles.size()
+                && owner.tiles.at(owner.activeTileIdx).windowId == canonicalId
+                && params.axis.mainSize(params.workArea) > 0) {
+                qCInfo(lcScrollEngine) << "toggleMaximizeToEdges: expelling" << canonicalId
+                                       << "from its shared column before maximizing it alone";
+                expelled = state->strip().expelWindowFromColumn(params);
+            }
+        }
+        const bool toggled = state->strip().toggleMaximizeToEdgesForWindow(canonicalId, params);
+        const bool changed = toggled || expelled;
         // The RESOLVED rect, not just the flag: "did the column end up covering
         // the raw work area" is the question a maximize report actually needs
         // answered, and it is the one the flag alone cannot settle — the effect
@@ -552,8 +616,18 @@ void ScrollEngine::equalizeWindowHeights(const QString& screenId)
 void ScrollEngine::centerVisibleColumns(const QString& screenId)
 {
     // "span" distinguishes the whole-group centering from centerColumn's
-    // single-column copy in the OSD (both ride the "center" action).
-    P_SCROLL_VERB(screenId, state->strip().centerVisibleColumns(params), "center", false, QStringLiteral("span"));
+    // single-column copy in the OSD (both ride the "center" action). The
+    // re-attach of a panned view that moved no anchor is republished for
+    // centerColumn's reason.
+    P_SCROLL_VERB(screenId, ([&]() {
+                      const bool wasDetached = state->strip().viewDetached();
+                      const bool moved = state->strip().centerVisibleColumns(params);
+                      if (!moved && wasDetached && !state->strip().viewDetached()) {
+                          Q_EMIT placementChanged(screen);
+                      }
+                      return moved;
+                  }()),
+                  "center", false, QStringLiteral("span"));
 }
 
 void ScrollEngine::scrollViewByPercent(qreal percent, const QString& screenId)
@@ -580,14 +654,14 @@ void ScrollEngine::scrollViewByPercent(qreal percent, const QString& screenId)
     // undefined, and a caller outside this repo can pass 1e12 as easily as a
     // NaN — the same hazard `setColumnWidth` guards against a few functions
     // below, and for the same reason. Bounded before the round rather than
-    // after, since after is already too late. The band is far wider than any
-    // meaningful scroll (a hundred viewports) and far inside int.
-    constexpr qreal kMaxScrollPx = 1e6;
+    // after, since after is already too late. The band (kMaxScrollViewPx) is
+    // the one the pixel verb bounds to.
+    constexpr qreal kMaxScrollPx = kMaxScrollViewPx;
     const qreal rawPx = std::isfinite(percent)
         ? qBound(-kMaxScrollPx, percent / 100.0 * params.axis.mainSize(params.workArea), kMaxScrollPx)
         : 0.0;
     const int deltaPx = qRound(rawPx);
-    scrollViewResolved(deltaPx, screen, state, params);
+    scrollViewResolved(deltaPx, screen, state, params, /*announce=*/true);
 }
 
 void ScrollEngine::scrollViewByPx(int px, const QString& screenId)
@@ -602,11 +676,25 @@ void ScrollEngine::scrollViewByPx(int px, const QString& screenId)
                                   screen);
         return;
     }
-    scrollViewResolved(px, screen, state, params);
+    // Past the empty-strip answer above, the pan reports nothing at all. The
+    // placement map calls this once per frame while the user drags its lens,
+    // and the navigation card would keep coming back for the whole drag: on
+    // every frame of a successful pan, and on every frame of a drag held
+    // against the strip's end (no_target) or held still (a zero pan,
+    // no_movement). The user is already watching the strip, which shows all
+    // three answers. The empty strip still reports, since there is no strip
+    // to watch.
+    //
+    // Bounded here as well as at the D-Bus adaptor, to the band the percent
+    // verb uses: this is exported API, so the entry states its own range
+    // rather than leaning on one caller's. ScrollStrip::scrollViewBy sums wide
+    // and would take any int, so the bound only ever trims a pan the strip
+    // would clamp at its end anyway.
+    scrollViewResolved(qBound(-kMaxScrollViewPx, px, kMaxScrollViewPx), screen, state, params, /*announce=*/false);
 }
 
 void ScrollEngine::scrollViewResolved(int deltaPx, const QString& screen, ScrollState* state,
-                                      const ScrollLayoutParams& params)
+                                      const ScrollLayoutParams& params, bool announce)
 {
     const QString sourceWindow = state->strip().activeWindowId();
     const bool changed = deltaPx != 0 && state->strip().scrollViewBy(deltaPx, params);
@@ -617,6 +705,9 @@ void ScrollEngine::scrollViewResolved(int deltaPx, const QString& screen, Scroll
         // floating window.
         applyLayout(screen, false);
         Q_EMIT placementChanged(screen);
+    }
+    if (!announce) {
+        return;
     }
     // The active window is unchanged either way — that is the verb's whole
     // point — so the target slot carries it back unchanged on success too.
@@ -831,11 +922,11 @@ void ScrollEngine::moveFocusedToFloating(const QString& screenId)
     // from `screen`, and floatWindowInternal's announcement uses the id it is
     // handed — a foreign raw hint would label the change with a screen that
     // does not own the window. A SUCCESSFUL press is deliberately silent (no
-    // navigationFeedback): the verb delegates to setWindowFloat and the
+    // navigationFeedback): the verb floats through setWindowFloatAnnounced (Active) and the
     // window visibly moving IS the feedback, the rule snapAllWindows also
     // follows — only refusals speak. Pinned by
     // moveToFloatingAndBackAnswersEveryPress.
-    setWindowFloat(windowId, true, screen);
+    setWindowFloatAnnounced(windowId, true, screen, FloatAnnounce::Active);
 }
 
 void ScrollEngine::moveFocusedToTiling(const QString& screenId)
@@ -872,7 +963,7 @@ void ScrollEngine::moveFocusedToTiling(const QString& screenId)
     }
     // Resolved screen for the same reason as moveFocusedToFloating, and the
     // same silent-success convention.
-    setWindowFloat(windowId, false, screen);
+    setWindowFloatAnnounced(windowId, false, screen, FloatAnnounce::Active);
 }
 
 void ScrollEngine::switchFocusBetweenFloatingAndTiling(const QString& screenId)
@@ -953,12 +1044,14 @@ void ScrollEngine::switchFocusBetweenFloatingAndTiling(const QString& screenId)
 
 void ScrollEngine::toggleWindowedFullscreen(const QString& screenId)
 {
-    // Hand-expanded (not P_SCROLL_VERB) for toggleColumnTabbed's reason —
-    // the op is layout-neutral and never reads layout params — but the two
-    // diverge downstream: this verb's feedback carries the resulting state
-    // as the reason token, and the OSD has dedicated arms for it.
+    // Hand-expanded (not P_SCROLL_VERB) for toggleColumnTabbed's reason: the
+    // op is layout-neutral and never reads layout params, but the two diverge
+    // downstream, since this verb's feedback carries the resulting state as
+    // the reason token, and the OSD has dedicated arms for it.
     const QString screen = resolveOperationScreen(screenId);
-    ScrollState* state = screen.isEmpty() ? nullptr : stateForKey(currentKeyForScreen(screen), false);
+    // m_states directly, the const spelling stateForScreen() const uses:
+    // stateForKey is non-const for its create arm, which this never wants.
+    ScrollState* state = screen.isEmpty() ? nullptr : m_states.stateForKey(currentKeyForScreen(screen));
     if (!state || state->strip().isEmpty()) {
         // Logged for toggleMaximizeToEdges' reason: this answers a KEYPRESS,
         // and both refusal arms are otherwise silent. The OSD feedback below
@@ -989,6 +1082,9 @@ void ScrollEngine::toggleWindowedFullscreen(const QString& screenId)
                                   state->lastFloatingFocus(), QString(), screen);
         return;
     }
+    // An empty active id falls through on purpose: the strip op refuses it
+    // itself, and the log and no_target feedback below are that refusal's
+    // report.
     const QString sourceWindow = state->strip().activeWindowId();
     const bool changed = state->strip().toggleActiveWindowedFullscreen();
     // Read once and reused by the success reason below, so the log and the
@@ -1063,7 +1159,9 @@ void ScrollEngine::reapplyWindowGeometry(const QString& windowId)
     // full-area frame, and as a toggle-off restoring a window to its old
     // PARK spot off-screen). Evicting the memory makes the next relayout
     // treat the rect as new and re-emit. Background-context guard as in
-    // clearWindowedFullscreen: a background strip re-emits on activation.
+    // clearWindowedFullscreen: a background strip re-emits on activation. That
+    // is the one no-op: a fullscreen hold returned on a non-current desktop
+    // gets no re-emit until the desktop returns.
     m_lastAppliedRect.remove(id);
     if (!key.screenId.isEmpty() && key == currentKeyForScreen(key.screenId)) {
         applyLayout(key.screenId, false);

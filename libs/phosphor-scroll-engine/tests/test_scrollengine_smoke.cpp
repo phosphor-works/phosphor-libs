@@ -1,20 +1,6 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-// FILE-SIZE EXCEPTION (sanctioned): this file is around 2400 lines, past the
-// 1150 hard ceiling.
-//
-// The case for it: the split-by-concern work the rule asks for has already
-// been done. Sixteen siblings carry the rest of the suite (enumerated below),
-// each owning a coherent concern, and what remains here is the core smoke
-// path — tracking, ordering, float state, capture, context teardown, handoff.
-// Splitting that residue again would divide one narrative across two files
-// without giving either a concern of its own, and a reader following an
-// engine regression would then have to know which half to open.
-//
-// Reviewed at the same time as the file's other exception-worthy neighbours;
-// a new concern takes a sibling rather than growing this.
-
 // Headless ScrollEngine smoke test: tracking, ordering, float state, capture,
 // context teardown, and handoff semantics.
 //
@@ -24,8 +10,8 @@
 // retile) wire the geometry-provider seam instead, and the strip geometry they
 // assert on is the engine's own, not the strip model's.
 //
-// Sixteen siblings carry the rest of the suite, split off at this file's size
-// ceiling: test_scrollengine_persistence.cpp owns the stash focus/anchor carry
+// Siblings carry the rest of the suite, each owning a concern of its own:
+// test_scrollengine_persistence.cpp owns the stash focus/anchor carry
 // and the serialize/restore blob, test_scrollengine_zonenumbers.cpp owns the
 // zone-number walk and the verbs that address it, test_scrollengine_perscreen
 // owns the per-screen override resolution, test_scrollengine_draginsert owns
@@ -37,20 +23,17 @@
 // test_scrollengine_behaviour.cpp owns the per-screen BEHAVIOUR overrides,
 // test_scrollengine_snapshot.cpp owns stripSnapshot and its index contract,
 // test_scrollengine_template.cpp owns the strip-template seed and its
-// blueprint progress, test_scrollengine_desktopreap.cpp owns the
-// dynamic-workspaces desktop axis (identity reap and renumber),
-// test_scrollengine_maximize.cpp owns the maximize-column claim (the flag
-// riding tiles the user cannot see, two columns maximized at once, the named
-// verb's second press, and survival across a mode round trip),
-// test_scrollengine_stripcontext.cpp owns
+// blueprint progress, and test_scrollengine_maximize.cpp owns the
+// maximize-column claim (the flag riding tiles the user cannot see, two
+// columns maximized at once, the named verb's second press, and survival
+// across a mode round trip), test_scrollengine_stripcontext.cpp owns
 // strip IDENTITY across the seam (the announced epoch, its lifecycle drops,
 // and the context-switch force-emit that rides the same transitions),
 // test_scrollengine_focusreport.cpp owns the compositor focus-report
 // contract, test_scrollengine_grouping.cpp owns same-application and
-// named tab grouping, test_scrollengine_tabfocus.cpp owns the tile-focus
+// named tab grouping, and test_scrollengine_tabfocus.cpp owns the tile-focus
 // family (cycleTab, focusTab, and the float refusal and view hand-back they
-// share with the stack-end verbs), and test_scrollengine_handoff.cpp owns the
-// cross-screen handoff path.
+// share with the stack-end verbs).
 
 #include <PhosphorEngine/ICrossSurfaceResolver.h>
 #include <PhosphorScrollEngine/ScrollEngine.h>
@@ -92,7 +75,7 @@ private Q_SLOTS:
     void backgroundCloseResolvesGapsForTheWindowsOwnContext();
     void contextKeysSeparateDesktops();
     void floatRestoresDisplayIntent();
-    void pruneStatesForDesktopDropsWindowBookkeeping();
+    void pruneDropsWindowBookkeeping();
     void pruneRemovedScreenAndActivitiesSweep();
     void stackedTileFloatRoundTripRestoresSlot();
     void scheduledRetileRunsUnderEventLoop();
@@ -136,13 +119,11 @@ private Q_SLOTS:
     void contextSwitchFlagRidesChangedScreenSets();
 
 private:
-    // NOTE: windowOpened's cross-screen snap-restore defer gate
-    // (setSnappingModeResolver + placementStore().peek) is deliberately
-    // untested here: makeEngine passes a null IWindowTrackingService, and
-    // faking the full tracking service just for the peek would drag half
-    // of phosphor-placement into this smoke suite. The gate's daemon-side
-    // wiring mirrors AutotileEngine's, whose twin is covered at the
-    // integration layer.
+    // NOTE: the reopen claim (claimCrossScreenReopen, which reads the
+    // placement store) is deliberately untested here: makeEngine passes a
+    // null IWindowTrackingService, and faking the full tracking service just
+    // for the store would drag half of phosphor-placement into this smoke
+    // suite. It is covered at the integration layer.
     static ScrollEngine* makeEngine(QObject* parent)
     {
         auto* engine = new ScrollEngine(nullptr, nullptr, parent);
@@ -273,7 +254,7 @@ void TestScrollEngineSmoke::floatPullsOutAndRestoresSlot()
     engine->windowOpened(QStringLiteral("app|b"), QStringLiteral("S1"), 0, 0);
     engine->windowOpened(QStringLiteral("app|c"), QStringLiteral("S1"), 0, 0);
 
-    QSignalSpy floatSpy(engine, &PhosphorEngine::PlacementEngineBase::windowFloatingChanged);
+    QSignalSpy floatSpy(engine, &PhosphorEngine::PlacementEngineBase::windowFloatingStateSynced);
     engine->setWindowFloat(QStringLiteral("app|b"), true, QStringLiteral("S1"));
     QVERIFY(engine->isWindowFloatingInScroll(QStringLiteral("app|b")));
     QVERIFY(engine->isModeSpecificFloated(QStringLiteral("app|b")));
@@ -411,11 +392,12 @@ void TestScrollEngineSmoke::lastManagedRectSurvivesClose()
 
 void TestScrollEngineSmoke::pruneStaleWindowsReclaimsRectsAndSeeds()
 {
-    // Aliveness sweep: because the rect memory is retained through close and
-    // handoffRelease, this prune is its SOLE reclaimer, and it is keyed on
-    // aliveness alone — the window below was untracked long before the
-    // prune, so the tracking sweep (whose count the return value reports)
-    // cannot be what dropped it.
+    // Aliveness sweep: the rect memory is retained through close and
+    // handoffRelease, and when no post-capture forgetClosedFullscreenHold
+    // reaches a closed window (the daemon's capture never ran) this prune is
+    // its reclaimer, keyed on aliveness alone — the window below was untracked
+    // long before the prune, so the tracking sweep (whose count the return
+    // value reports) cannot be what dropped it.
     {
         QObject owner;
         ScrollEngine* engine = makeProviderEngine(&owner, {QStringLiteral("S1")});
@@ -549,9 +531,9 @@ void TestScrollEngineSmoke::floatRestoresDisplayIntent()
     QCOMPARE(columnDisplayOf(QStringLiteral("app|b")), ColumnDisplay::Tabbed);
 }
 
-void TestScrollEngineSmoke::pruneStatesForDesktopDropsWindowBookkeeping()
+void TestScrollEngineSmoke::pruneDropsWindowBookkeeping()
 {
-    // Side-map regression: pruning a desktop's state must
+    // dropWindowBookkeeping regression: pruning a desktop's state must
     // sweep the per-window side maps — the float marker is the observable
     // one headless (m_lastAppliedRect never populates without a screen
     // manager).
@@ -574,12 +556,11 @@ void TestScrollEngineSmoke::pruneRemovedScreenAndActivitiesSweep()
     // sub-screens ("S1/vs:0", the PhosphorIdentity separator) are swept,
     // but an id that merely shares the prefix ("S10") is not. Activities:
     // only states whose key names an activity absent from the valid list
-    // go; activity-less states stay.
+    // go; activity-less states stay, and an empty list prunes nothing (F423).
     QObject owner;
     ScrollEngine* engine = makeEngine(&owner);
-    // The default fixture only activates S1/S2; the sub-screen and the
-    // prefix-sharing sibling must be MANAGED or the sweep asserts below
-    // pass vacuously.
+    // The fixture activates only S1/S2; the sub-screen and the prefix-sharing
+    // sibling must be MANAGED or the sweep asserts below pass vacuously.
     engine->setActiveScreens(
         {QStringLiteral("S1"), QStringLiteral("S1/vs:0"), QStringLiteral("S10"), QStringLiteral("S2")});
     engine->windowOpened(QStringLiteral("app|p"), QStringLiteral("S1"), 0, 0);
@@ -589,10 +570,9 @@ void TestScrollEngineSmoke::pruneRemovedScreenAndActivitiesSweep()
     QVERIFY(engine->isWindowTracked(QStringLiteral("app|v")));
     QVERIFY(engine->isWindowTracked(QStringLiteral("app|s10")));
 
-    // The prune hands the windows back the same way the screens-set sweep
-    // does — they are alive, only their output is gone — so the daemon's
-    // restore consumers hear one windowsReleased naming both the physical
-    // screen and the swept sub-screen.
+    // The prune hands the windows back as the screens-set sweep does (alive,
+    // only their output gone), so the daemon's restore consumers hear one
+    // windowsReleased naming the physical screen and the swept sub-screen.
     QSignalSpy releasedSpy(engine, &ScrollEngine::windowsReleased);
     engine->pruneStatesForRemovedScreen(QStringLiteral("S1"));
     QCOMPARE(releasedSpy.count(), 1);
@@ -610,6 +590,8 @@ void TestScrollEngineSmoke::pruneRemovedScreenAndActivitiesSweep()
     engine->setCurrentActivity(QStringLiteral("actB"));
     engine->windowOpened(QStringLiteral("app|b"), QStringLiteral("S2"), 0, 0);
     engine->setWindowFloat(QStringLiteral("app|b"), true, QStringLiteral("S2"));
+    engine->pruneStatesForActivities({});
+    QVERIFY(engine->isWindowTracked(QStringLiteral("app|b")));
     engine->pruneStatesForActivities({QStringLiteral("actA")});
     QVERIFY(!engine->isWindowTracked(QStringLiteral("app|b")));
     QVERIFY(!engine->isModeSpecificFloated(QStringLiteral("app|b")));
@@ -960,7 +942,11 @@ void TestScrollEngineSmoke::minSizeOutgrowingWorkAreaFloatsTheWindow()
     QVERIFY(state);
     QCOMPARE(state->strip().columnCount(), 2);
 
-    QSignalSpy floatSpy(engine, &ScrollEngine::windowFloatingChanged);
+    // An engine-decided float announces PASSIVE (windowFloatingStateSynced):
+    // the daemon mirrors it with no float OSD and no restore to a free
+    // geometry the client already refused. The active channel stays silent.
+    QSignalSpy floatSpy(engine, &ScrollEngine::windowFloatingStateSynced);
+    QSignalSpy activeSpy(engine, &ScrollEngine::windowFloatingChanged);
     // In-bounds growth keeps the window tiled; the column widens instead.
     // Minimums ALONG the strip, so they transpose with the fixture: 900
     // widens the column, 1300 outgrows the work area entirely.
@@ -987,6 +973,7 @@ void TestScrollEngineSmoke::minSizeOutgrowingWorkAreaFloatsTheWindow()
     QCOMPARE(floatSpy.count(), 1);
     QCOMPARE(floatSpy.last().at(0).toString(), QStringLiteral("app|a"));
     QCOMPARE(floatSpy.last().at(1).toBool(), true);
+    QCOMPARE(activeSpy.count(), 0);
     // Engine-decided float, so it carries the mode marker (the daemon's
     // mode-transition capture keys off it) and the restore entry holds the
     // clamp that forced the float.
@@ -2369,7 +2356,7 @@ void TestScrollEngineSmoke::migrateOutAnnouncesDroppedFloat()
     // The announcement rides windowFloatingStateSynced. A migration is the
     // engine's own bookkeeping, not a user float action, so the daemon must
     // mirror the state without restoring geometry or raising an OSD; only the
-    // explicit setWindowFloat below is an active transition.
+    // user toggle below is an active transition.
     QObject owner;
     ScrollEngine* engine = makeEngine(&owner);
     QSignalSpy floatSpy(engine, &PhosphorEngine::PlacementEngineBase::windowFloatingStateSynced);
@@ -2377,7 +2364,7 @@ void TestScrollEngineSmoke::migrateOutAnnouncesDroppedFloat()
 
     // windowOpened's context migration.
     engine->windowOpened(QStringLiteral("app|a"), QStringLiteral("S1"), 0, 0);
-    engine->setWindowFloat(QStringLiteral("app|a"), true, QStringLiteral("S1"));
+    engine->toggleWindowFloat(QStringLiteral("app|a"), QStringLiteral("S1"));
     QCOMPARE(activeFloatSpy.count(), 1); // the user float is the ACTIVE arm
     QCOMPARE(floatSpy.count(), 0);
     engine->windowOpened(QStringLiteral("app|a"), QStringLiteral("S2"), 0, 0);

@@ -51,10 +51,16 @@ public:
     }
     const UboUploadRegion& operator[](int i) const
     {
-        // Match push()'s defensive style: assert the caller stays within the
-        // populated range. Callers iterate [0, size()) via begin()/end(), so a
-        // stray index is a programming error.
+        // Debug-assert AND release-guard the same bound, which is what
+        // "match push()'s defensive style" was supposed to mean: the assert
+        // alone compiles out under NDEBUG and left an out-of-bounds read on
+        // the std::array. Production consumers iterate via begin()/end(); the
+        // indexed form is used by the profile tests.
         Q_ASSERT(i >= 0 && i < m_count);
+        if (i < 0 || i >= m_count) {
+            static const UboUploadRegion empty{};
+            return empty;
+        }
         return m_regions[static_cast<size_t>(i)];
     }
     const UboUploadRegion* begin() const
@@ -187,8 +193,8 @@ struct UboFrameState
 /// surface-decoration runtime is the uniform buffer: its struct, byte size,
 /// per-frame fill, and dirty-upload region dispatch. This interface abstracts
 /// exactly that seam — bindings stay unabstracted because the surface binding
-/// map (UBO@0, iChannel0-3@2-5, uTexture0@7) is a strict subset of the overlay
-/// map.
+/// map (UBO@0, iChannel0-7@2-9, uTexture0@11) is a strict subset of the
+/// overlay map. Numbers from PhosphorShaders::Bindings (ShaderBindings.h).
 ///
 /// Implementations hold their concrete UBO POD struct and expose its bytes via
 /// data()/mutableData() so the node can drive updateDynamicBuffer directly.
@@ -235,6 +241,26 @@ public:
     }
     virtual void setAppField1(int /*value*/)
     {
+    }
+
+    /// Whether the last `fill()` wrote a field the caller's own dirty flags do
+    /// not know about, and so needs the SCENE-HEADER region uploaded even though
+    /// nothing node-side changed. Consumes the flag: a second call answers false.
+    ///
+    /// EXISTS BECAUSE fill() HAD NO WAY TO SAY SO. It writes into the profile's
+    /// own buffer, while what actually reaches the GPU is chosen separately by
+    /// `dirtyRegions()` from the CALLER's flags, with no channel back. So a field
+    /// the profile refreshes on its own schedule was written to memory nobody
+    /// uploaded. `iDate` is the one such field: it advances once a second on a
+    /// clock of its own, not on any node-side event.
+    ///
+    /// Defaults to false, which is exactly the behaviour every implementation had
+    /// before this existed, so a profile with no self-scheduled field ignores it.
+    /// Appended at the end of the interface deliberately: this is an installed
+    /// header, and new virtuals go last.
+    virtual bool consumeSelfRefreshedSceneHeader()
+    {
+        return false;
     }
 };
 

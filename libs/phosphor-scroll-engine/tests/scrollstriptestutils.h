@@ -4,7 +4,7 @@
 #pragma once
 
 // Shared fixture helpers for the PhosphorScrollEngine suites that fixture
-// against a screen — the four strip-model files and the ten engine files.
+// against a screen — the strip-model files and the engine files.
 // (test_stripaxis and test_scrollpark stand alone: they exercise the mapper
 // and the park geometry directly and need no screen fixture.) One definition of the
 // 1200x800 geometry, because a work area that drifts between files quietly
@@ -420,6 +420,23 @@ inline bool isHidden(const PhosphorScrollEngine::ResolvedStrip& resolved, const 
 inline bool resolveContains(const PhosphorScrollEngine::ResolvedStrip& resolved, const QString& windowId)
 {
     return findTile(resolved, windowId) != nullptr;
+}
+
+/// @p windowId's rect among @p screenId's visibleTiles, or a null rect when it
+/// has none. What a case reads after a user resize or a drop instead of the
+/// last windowsTiled batch: a relayout that lands the window exactly on the
+/// frame it already sits at sends no batch, by the emit-on-change gate, so the
+/// last batch can still show the old rect.
+inline QRect tileRectOn(const PhosphorScrollEngine::ScrollEngine* engine, const QString& screenId,
+                        const QString& windowId)
+{
+    const auto tiles = engine->visibleTiles(screenId);
+    for (const auto& tile : tiles) {
+        if (tile.windowId == windowId) {
+            return tile.rect;
+        }
+    }
+    return {};
 }
 
 } // namespace ScrollTestUtils

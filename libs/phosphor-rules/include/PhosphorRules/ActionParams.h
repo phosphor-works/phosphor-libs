@@ -15,7 +15,7 @@
 // descriptor validators check every one of them at load, and the APPEARANCE numbers
 // (MaxBorderWidth, MaxAnimationDurationMs) are re-checked on the way out by the
 // compositor, which static_asserts against these very constants
-// (kwin-effect/plasmazoneseffect/shader_resolve.cpp). The chain and preset bounds
+// (plasmazones/kwin-effect/plasmazoneseffect/shader_resolve.cpp). The chain and preset bounds
 // below are enforced at this load boundary ONLY — no consumer re-derives them — so
 // they live here for one vocabulary rather than for a second check.
 //
@@ -31,7 +31,7 @@ namespace PhosphorRules {
 // ruleaction_builtins_appearance.cpp / ruleaction_builtins_indicators.cpp, the
 // config-layer v3→v4 migration that ports legacy AnimationAppRule entries, the
 // rule-editor UI, and the KWin-effect-side resolvers in
-// `kwin-effect/plasmazoneseffect/shader_resolve.cpp`).
+// `plasmazones/kwin-effect/plasmazoneseffect/shader_resolve.cpp`).
 // A future rename (e.g. `effectId` → `effect_id`) updates one entry here and
 // flows everywhere instead of being hard-coded once per reader.
 namespace ActionParam {
@@ -260,7 +260,7 @@ inline constexpr double MaxAnimationDurationMs = 2000.0;
 /// Upper bound for the context-domain gap actions (`SetInnerGap`,
 /// `SetOuterGap`, and the four per-side variants), in logical px. Equal to
 /// `PlasmaZones::Defaults::MaxGap` / `PhosphorEngine::GeometryDefaults::MaxGap`
-/// (pinned by a static_assert in src/daemon/daemon.cpp). This is the range the
+/// (pinned by a static_assert in plasmazones/src/daemon/daemon.cpp). This is the range the
 /// rule editor OFFERS: it is published as the parameter's schema `max`, which
 /// is the spin box's ceiling, and every placement arm clamps a resolved gap to
 /// it, so a larger value could never be drawn anyway.
@@ -339,10 +339,10 @@ inline constexpr double MaxTabIndicatorLengthRatio = 1.0;
 /// is mirrored at three more sites, so widening it means editing four places.
 /// The config layer owns the canonical pair
 /// (ConfigDefaults::scrollingTabIndicatorFontWeight{Min,Max}() in
-/// src/config/configdefaults_scrolling.h). The KWin effect mirrors it twice:
-/// kFontWeightMin / kFontWeightMax in kwin-effect/tilinghandler/scrolltabs.cpp
+/// plasmazones/src/config/configdefaults_scrolling.h). The KWin effect mirrors it twice:
+/// kFontWeightMin / kFontWeightMax in plasmazones/kwin-effect/tilinghandler/scrolltabs.cpp
 /// name it, and the global loader in
-/// kwin-effect/plasmazoneseffect/daemon_settings_scrolltabs.cpp spells it as
+/// plasmazones/kwin-effect/plasmazoneseffect/daemon_settings_scrolltabs.cpp spells it as
 /// bare literals.
 ///
 /// The floor is 100, not 0 — a zero weight is not a lighter font, it is an

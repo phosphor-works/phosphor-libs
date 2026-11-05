@@ -5,8 +5,8 @@
 
 #include "PhosphorScreens/IConfigStore.h"
 #include "PhosphorScreens/IPanelSource.h"
-#include "PhosphorScreens/IScreenProvider.h"
-#include "PhosphorScreens/QtScreenProvider.h"
+#include "PhosphorScreens/IPhysicalScreenSource.h"
+#include "PhosphorScreens/QtPhysicalScreenSource.h"
 #include "reservationsplit.h"
 #include "screenslogging.h"
 
@@ -15,6 +15,7 @@
 #include <PhosphorWayland/LayerSurface.h>
 
 #include <QEvent>
+#include <QPoint>
 #include <QScreen>
 #include <QThread>
 #include <QTimer>
@@ -27,11 +28,11 @@ namespace PhosphorScreens {
 ScreenManager::ScreenManager(ScreenManagerConfig cfg, QObject* parent)
     : QObject(parent)
     , m_cfg(cfg)
-    // Default to a live Qt-backed provider when the host didn't inject one.
+    // Default to a live Qt-backed source when the host didn't inject one.
     // Parented to `this`, so the manager owns it and it shares the manager's
-    // lifetime — matching the "consumer owns an injected provider, manager
+    // lifetime — matching the "consumer owns an injected source, manager
     // owns the default" split documented on ScreenManagerConfig.
-    , m_screenProvider(m_cfg.screenProvider ? m_cfg.screenProvider : new QtScreenProvider(this))
+    , m_physicalScreenSource(m_cfg.physicalScreenSource ? m_cfg.physicalScreenSource : new QtPhysicalScreenSource(this))
 {
 }
 
@@ -47,10 +48,10 @@ void ScreenManager::start()
     }
     m_running = true;
 
-    connect(m_screenProvider, &IScreenProvider::screenAdded, this, &ScreenManager::onProviderScreenAdded);
-    connect(m_screenProvider, &IScreenProvider::screenRemoved, this, &ScreenManager::onProviderScreenRemoved);
-    connect(m_screenProvider, &IScreenProvider::screenGeometryChanged, this,
-            &ScreenManager::onProviderScreenGeometryChanged);
+    connect(m_physicalScreenSource, &IPhysicalScreenSource::screenAdded, this, &ScreenManager::onSourceScreenAdded);
+    connect(m_physicalScreenSource, &IPhysicalScreenSource::screenRemoved, this, &ScreenManager::onSourceScreenRemoved);
+    connect(m_physicalScreenSource, &IPhysicalScreenSource::screenGeometryChanged, this,
+            &ScreenManager::onSourceScreenGeometryChanged);
 
     // Populate m_trackedScreens BEFORE any signal-emitting step that follows
     // (panelSource->start, refreshVirtualConfigs). A synchronous IPanelSource
@@ -136,10 +137,11 @@ void ScreenManager::stop()
     m_trackedScreens.clear();
 
     // Explicit per-signal disconnects, matching the start() connects.
-    disconnect(m_screenProvider, &IScreenProvider::screenAdded, this, &ScreenManager::onProviderScreenAdded);
-    disconnect(m_screenProvider, &IScreenProvider::screenRemoved, this, &ScreenManager::onProviderScreenRemoved);
-    disconnect(m_screenProvider, &IScreenProvider::screenGeometryChanged, this,
-               &ScreenManager::onProviderScreenGeometryChanged);
+    disconnect(m_physicalScreenSource, &IPhysicalScreenSource::screenAdded, this, &ScreenManager::onSourceScreenAdded);
+    disconnect(m_physicalScreenSource, &IPhysicalScreenSource::screenRemoved, this,
+               &ScreenManager::onSourceScreenRemoved);
+    disconnect(m_physicalScreenSource, &IPhysicalScreenSource::screenGeometryChanged, this,
+               &ScreenManager::onSourceScreenGeometryChanged);
 
     m_availableGeometryCache.clear();
     // Invalidate derived caches so a post-stop effectiveScreenIds() /
@@ -169,21 +171,28 @@ void ScreenManager::stop()
     // so keeping stale rects across a stop/start cycle would only risk a
     // transient mismatch before that push lands.
     m_compositorAvailableGeometry.clear();
+    // Same for the compositor's pixel sizes, pending and accepted alike: the
+    // effect re-reports every output when it registers again, and the host
+    // accepts each afresh. The seeds stay, like m_virtualConfigs, because the
+    // host's own record is their source. Nothing is announced: the manager
+    // tracks no screen once stopped.
+    m_compositorPixelSizes.clear();
+    m_acceptedPixelSizes.clear();
 }
 
 QVector<PhysicalScreen> ScreenManager::screens() const
 {
-    return m_screenProvider->screens();
+    return m_physicalScreenSource->screens();
 }
 
 PhysicalScreen ScreenManager::primaryScreen() const
 {
-    return m_screenProvider->primaryScreen();
+    return m_physicalScreenSource->primaryScreen();
 }
 
 PhysicalScreen ScreenManager::screenByName(const QString& name) const
 {
-    const auto all = m_screenProvider->screens();
+    const auto all = m_physicalScreenSource->screens();
     for (const auto& screen : all) {
         if (screen.name == name) {
             return screen;
@@ -194,11 +203,11 @@ PhysicalScreen ScreenManager::screenByName(const QString& name) const
 
 void ScreenManager::syncTrackedScreens()
 {
-    // The provider is the single source of truth for the connected-output
-    // set. Every lifecycle slot resyncs through here rather than mutating
+    // The source is authoritative for the connected-output set. Every
+    // lifecycle slot resyncs through here rather than mutating
     // m_trackedScreens incrementally, so the tracked geometry/identifier
-    // snapshots never drift from the provider's current view.
-    m_trackedScreens = m_screenProvider->screens();
+    // snapshots never drift from the source's current view.
+    m_trackedScreens = m_physicalScreenSource->screens();
 }
 
 PhysicalScreen ScreenManager::trackedScreenByName(const QString& name) const
@@ -216,11 +225,11 @@ PhysicalScreen ScreenManager::trackedScreenFor(const QString& screenId) const
     if (screenId.isEmpty()) {
         // Empty resolves to the primary output — mirrors the historical
         // ScreenIdentity::findByIdOrName contract callers depend on.
-        return trackedScreenByName(m_screenProvider->primaryScreen().name);
+        return trackedScreenByName(m_physicalScreenSource->primaryScreen().name);
     }
     // A physical screen ID is either the EDID-aware identifier or the bare
     // connector name; accept both. The disambiguated "base/CONNECTOR" form
-    // matches the identifier branch exactly — it is what the provider
+    // matches the identifier branch exactly — it is what the source
     // stamped onto PhysicalScreen::identifier.
     for (const auto& screen : m_trackedScreens) {
         if (screen.identifier == screenId || screen.name == screenId) {
@@ -236,7 +245,7 @@ void ScreenManager::createGeometrySensor(const PhysicalScreen& screen)
         return;
     }
     // Layer-shell sensor windows need a real output to attach to. A
-    // synthetic screen (FakeScreenProvider, no QScreen) gets none —
+    // synthetic screen (FakePhysicalScreenSource, no QScreen) gets none —
     // calculateAvailableGeometry falls back to the panel-source / Qt path
     // for it, which is exactly the behaviour a headless test wants.
     if (!screen.qscreen) {
@@ -308,6 +317,14 @@ void ScreenManager::destroyGeometrySensor(const QString& screenName)
     // a same-connector reconnect starts from the heuristic until the effect
     // re-pushes a fresh clientArea for the new output.
     m_compositorAvailableGeometry.remove(screenName);
+    // The accepted pixel size goes the same way: it was accepted for the
+    // monitor that left, and a different one on the same connector must
+    // answer its own seed until the host accepts a report for it. The
+    // PENDING report stays (see setCompositorPixelSize). Not announced, as
+    // nothing reads an untracked screen's size.
+    m_acceptedPixelSizes.remove(screenName);
+    // A sensor created for the connector later maps afresh.
+    m_mappedScaleSensors.remove(screenName);
 }
 
 void ScreenManager::calculateAvailableGeometry(const PhysicalScreen& screen)
@@ -494,7 +511,7 @@ void ScreenManager::onSensorGeometryChanged(const QString& screenName)
 void ScreenManager::onPanelOffsetsChanged(QScreen* screen)
 {
     // The panel source still identifies screens by QScreen* — resolve to the
-    // tracked PhysicalScreen so the recompute runs against the provider's
+    // tracked PhysicalScreen so the recompute runs against the source's
     // geometry snapshot. An untracked screen (hotplug race) is skipped; the
     // panelGeometryReady latch below still advances.
     if (screen) {
@@ -613,18 +630,34 @@ qreal ScreenManager::logicalScale(QScreen* screen) const
 
 bool ScreenManager::eventFilter(QObject* watched, QEvent* event)
 {
-    if (event && event->type() == QEvent::DevicePixelRatioChange) {
+    const bool scaleChange = event && event->type() == QEvent::DevicePixelRatioChange;
+    const bool expose = event && event->type() == QEvent::Expose;
+    if (scaleChange || expose) {
         // Reverse-resolve the sensor to its screen rather than capturing the
         // name: the map is small (one entry per output) and a captured name
         // would need its own teardown to stay honest.
         for (auto it = m_geometrySensors.constBegin(); it != m_geometrySensors.constEnd(); ++it) {
-            if (it.value() == watched) {
-                const PhysicalScreen screen = trackedScreenByName(it.key());
+            if (it.value() != watched) {
+                continue;
+            }
+            const PhysicalScreen screen = trackedScreenByName(it.key());
+            if (scaleChange) {
                 if (screen.isValid()) {
                     Q_EMIT logicalScaleChanged(screen);
                 }
-                break;
+            } else if (it.value()->isExposed() && !m_mappedScaleSensors.contains(it.key())) {
+                // The first expose follows the compositor's first configure,
+                // and KWin settles the surface's preferred scale before that
+                // (see isLogicalScaleSensorMapped), so the scale the sensor
+                // carries now is the compositor's. A scale change event alone
+                // would miss an integer output, whose real scale is the
+                // fallback's and so never changes.
+                m_mappedScaleSensors.insert(it.key());
+                if (screen.isValid()) {
+                    Q_EMIT logicalScaleSensorMapped(screen);
+                }
             }
+            break;
         }
     }
     // Never filtered: the sensor still needs the event.
@@ -699,6 +732,185 @@ void ScreenManager::setCompositorAvailableGeometry(const QString& screenName, co
     }
 }
 
+void ScreenManager::setCompositorPixelSize(const QString& connectorName, const QSize& pixelSize)
+{
+    if (connectorName.isEmpty()) {
+        return;
+    }
+
+    // An empty size clears the pending entry (the effect sends 0x0 for an
+    // output it no longer has). Both paths early-return when nothing changed,
+    // so the effect re-reporting every output collapses to a no-op instead of
+    // re-running every listener's evaluation. Neither touches the accepted
+    // report: only acceptCompositorPixelSize moves what pixelSize answers.
+    if (!pixelSize.isEmpty()) {
+        if (m_compositorPixelSizes.value(connectorName) == pixelSize) {
+            return;
+        }
+        m_compositorPixelSizes.insert(connectorName, pixelSize);
+        qCInfo(lcPhosphorScreens) << "Compositor pixel size pending for" << connectorName << "=" << pixelSize;
+    } else {
+        if (m_compositorPixelSizes.remove(connectorName) == 0) {
+            return;
+        }
+        qCInfo(lcPhosphorScreens) << "Compositor pixel size clear pending for" << connectorName;
+    }
+    Q_EMIT compositorPixelSizeChanged(connectorName);
+}
+
+void ScreenManager::acceptCompositorPixelSize(const QString& connectorName)
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    // An untracked connector has no screen to answer for. Its report stays
+    // pending, for the host to accept once the connector's screen arrives,
+    // and the accepted store holds only tracked connectors, as
+    // destroyGeometrySensor keeps it.
+    if (connectorName.isEmpty() || !trackedScreenByName(connectorName).isValid()) {
+        return;
+    }
+    // A pending clear drops the accepted report, so the screen falls back to
+    // its seed. Unchanged either way is a no-op, which keeps a host that
+    // accepts on every evaluation from announcing a move nobody made.
+    if (const auto pending = m_compositorPixelSizes.constFind(connectorName);
+        pending != m_compositorPixelSizes.constEnd()) {
+        if (const auto accepted = m_acceptedPixelSizes.constFind(connectorName);
+            accepted != m_acceptedPixelSizes.constEnd() && accepted.value() == pending.value()) {
+            return;
+        }
+        m_acceptedPixelSizes.insert(connectorName, pending.value());
+        qCInfo(lcPhosphorScreens) << "Compositor pixel size accepted for" << connectorName << "=" << pending.value();
+    } else {
+        if (m_acceptedPixelSizes.remove(connectorName) == 0) {
+            return;
+        }
+        qCInfo(lcPhosphorScreens) << "Compositor pixel size clear accepted for" << connectorName;
+    }
+    Q_EMIT acceptedPixelSizeChanged(connectorName);
+}
+
+std::optional<QSize> ScreenManager::pendingPixelSize(const QString& connectorName) const
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    if (const auto it = m_compositorPixelSizes.constFind(connectorName); it != m_compositorPixelSizes.constEnd()) {
+        return it.value();
+    }
+    return std::nullopt;
+}
+
+bool ScreenManager::hasLogicalScaleSensor(const PhysicalScreen& screen) const
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    // A sensor exists from createGeometrySensor until destroyGeometrySensor,
+    // mapped or not. logicalScale reads it only once it is mapped, and the
+    // eventFilter announces the scale it maps with.
+    return !m_geometrySensors.value(screen.name).isNull();
+}
+
+bool ScreenManager::isLogicalScaleSensorMapped(const PhysicalScreen& screen) const
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    return hasLogicalScaleSensor(screen) && m_mappedScaleSensors.contains(screen.name);
+}
+
+void ScreenManager::seedPixelSize(const QString& physicalScreenId, const QSize& pixelSize)
+{
+    if (physicalScreenId.isEmpty() || PhosphorIdentity::VirtualScreenId::isVirtual(physicalScreenId)) {
+        return;
+    }
+    if (!pixelSize.isEmpty()) {
+        if (m_seededPixelSizes.value(physicalScreenId) == pixelSize) {
+            return;
+        }
+        m_seededPixelSizes.insert(physicalScreenId, pixelSize);
+    } else if (m_seededPixelSizes.remove(physicalScreenId) == 0) {
+        return;
+    }
+
+    // The seed answers only for a tracked screen whose connector has no
+    // accepted report. Anywhere else the change is not visible through
+    // pixelSize(). The answer moved, and a host gating reports may want to
+    // act on the move, so both signals go out.
+    for (const auto& screen : std::as_const(m_trackedScreens)) {
+        if (screen.identifier == physicalScreenId && !m_acceptedPixelSizes.contains(screen.name)) {
+            Q_EMIT acceptedPixelSizeChanged(screen.name);
+            Q_EMIT compositorPixelSizeChanged(screen.name);
+            break;
+        }
+    }
+}
+
+std::optional<QSize> ScreenManager::resolvePixelSize(const QString& screenId, bool* reported) const
+{
+    if (reported) {
+        *reported = false;
+    }
+    // An empty id answers nothing here, unlike screenGeometry's
+    // primary-output fallback: a size condition must describe the screen it
+    // was asked about, never a stand-in.
+    if (screenId.isEmpty()) {
+        return std::nullopt;
+    }
+    const bool isVirtual = PhosphorIdentity::VirtualScreenId::isVirtual(screenId);
+    const QString physId = isVirtual ? PhosphorIdentity::VirtualScreenId::extractPhysicalId(screenId) : screenId;
+    const PhysicalScreen screen = trackedScreenFor(physId);
+    if (!screen.isValid()) {
+        return std::nullopt;
+    }
+
+    // The accepted report only. A pending one may describe a mode the logical
+    // geometry has not caught up with, or another monitor, until the host
+    // accepts it (setCompositorPixelSize).
+    QSize physical;
+    bool fromReport = false;
+    if (const auto it = m_acceptedPixelSizes.constFind(screen.name); it != m_acceptedPixelSizes.constEnd()) {
+        physical = it.value();
+        fromReport = true;
+    } else if (!screen.identifier.isEmpty()) {
+        physical = m_seededPixelSizes.value(screen.identifier);
+    }
+    if (physical.isEmpty()) {
+        return std::nullopt;
+    }
+    if (!isVirtual) {
+        if (reported) {
+            *reported = fromReport;
+        }
+        return physical;
+    }
+
+    // A virtual screen's share of the output's pixels, split the way its
+    // logical rect is split (rebuildVirtualGeometryCache), over the pixel
+    // rect instead. Looked up by id, never by index, for the reason
+    // getScreenInfo gives.
+    const auto cfgIt = m_virtualConfigs.constFind(physId);
+    if (cfgIt == m_virtualConfigs.constEnd()) {
+        return std::nullopt;
+    }
+    for (const auto& def : cfgIt->screens) {
+        if (def.id == screenId) {
+            if (reported) {
+                *reported = fromReport;
+            }
+            return def.absoluteGeometry(QRect(QPoint(), physical)).size();
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<QSize> ScreenManager::pixelSize(const QString& screenId) const
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    return resolvePixelSize(screenId, nullptr);
+}
+
+bool ScreenManager::isPixelSizeReported(const QString& screenId) const
+{
+    PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
+    bool reported = false;
+    resolvePixelSize(screenId, &reported);
+    return reported;
+}
+
 void ScreenManager::propagateIdentifierDrift(const QHash<QString, QString>& oldIds)
 {
     // Compare each still-tracked screen's prior identifier (captured before
@@ -738,15 +950,36 @@ void ScreenManager::propagateIdentifierDrift(const QHash<QString, QString>& oldI
             invalidateVirtualGeometryCache(newId);
         }
 
+        // The pixel-size seed is the same monitor's, so it moves with the id.
+        // A seed the host had at newId from an earlier session is replaced
+        // when one exists at oldId, and otherwise starts answering for this
+        // screen, which only matters while no accepted report covers its
+        // connector.
+        const QSize seedBefore = m_seededPixelSizes.value(oldId);
+        if (const auto seeded = m_seededPixelSizes.constFind(oldId); seeded != m_seededPixelSizes.constEnd()) {
+            m_seededPixelSizes.erase(seeded);
+            m_seededPixelSizes.insert(newId, seedBefore);
+        }
+        const QString connectorName = screen.name;
+        const bool seedAnswerChanged =
+            m_seededPixelSizes.value(newId) != seedBefore && !m_acceptedPixelSizes.contains(connectorName);
+
         qCInfo(lcPhosphorScreens) << "Screen identifier drift:" << oldId << "→" << newId;
         Q_EMIT screenIdentifierChanged(oldId, newId);
+        // After the flip is announced, so a listener that re-reads the size
+        // under the screen's id already knows the new one. Both signals, as
+        // seedPixelSize sends them for a seed that moves the answer.
+        if (seedAnswerChanged) {
+            Q_EMIT acceptedPixelSizeChanged(connectorName);
+            Q_EMIT compositorPixelSizeChanged(connectorName);
+        }
     }
 }
 
-void ScreenManager::onProviderScreenAdded(const PhysicalScreen& screen)
+void ScreenManager::onSourceScreenAdded(const PhysicalScreen& screen)
 {
     // Mutates the GUI-thread-only caches via syncTrackedScreens / sensor
-    // creation — assert the IScreenProvider emitted on the GUI thread.
+    // creation — assert the IPhysicalScreenSource emitted on the GUI thread.
     PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
     if (!screen.isValid()) {
         return;
@@ -755,7 +988,7 @@ void ScreenManager::onProviderScreenAdded(const PhysicalScreen& screen)
     // so a topology-driven disambiguation flip on the *existing* screens is
     // detectable. Scenario: a second same-model monitor joining promotes the
     // first monitor's ID from bare "Manuf:Model:Serial" to
-    // "Manuf:Model:Serial/CONNECTOR". The provider recomputes identifiers on
+    // "Manuf:Model:Serial/CONNECTOR". The source recomputes identifiers on
     // add; propagateIdentifierDrift then migrates any persisted VS config
     // keyed on the old bare form so it does not silently orphan.
     QHash<QString, QString> oldIds;
@@ -777,10 +1010,10 @@ void ScreenManager::onProviderScreenAdded(const PhysicalScreen& screen)
     Q_EMIT screenAdded(screen);
 }
 
-void ScreenManager::onProviderScreenRemoved(const PhysicalScreen& screen)
+void ScreenManager::onSourceScreenRemoved(const PhysicalScreen& screen)
 {
     // Mutates the GUI-thread-only caches (virtual-geometry cache, sensor map)
-    // — assert the IScreenProvider emitted on the GUI thread.
+    // — assert the IPhysicalScreenSource emitted on the GUI thread.
     PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
     if (!screen.isValid()) {
         return;
@@ -815,10 +1048,10 @@ void ScreenManager::onProviderScreenRemoved(const PhysicalScreen& screen)
     Q_EMIT screenRemoved(screen);
 }
 
-void ScreenManager::onProviderScreenGeometryChanged(const PhysicalScreen& screen)
+void ScreenManager::onSourceScreenGeometryChanged(const PhysicalScreen& screen)
 {
     // Mutates the GUI-thread-only caches (virtual-geometry + available-geometry)
-    // — assert the IScreenProvider emitted on the GUI thread.
+    // — assert the IPhysicalScreenSource emitted on the GUI thread.
     PS_SCREEN_MANAGER_ASSERT_GUI_THREAD();
     if (!screen.isValid()) {
         return;
@@ -842,7 +1075,7 @@ void ScreenManager::onProviderScreenGeometryChanged(const PhysicalScreen& screen
     // onSensorGeometryChanged and onPanelOffsetsChanged already perform.
     //
     // Recompute against the freshly-synced tracked snapshot rather than the
-    // signal payload, matching onProviderScreenAdded's createGeometrySensor
+    // signal payload, matching onSourceScreenAdded's createGeometrySensor
     // call — the manager operates on its own tracked set, not raw payloads.
     calculateAvailableGeometry(trackedScreenByName(screen.name));
     Q_EMIT screenGeometryChanged(screen);

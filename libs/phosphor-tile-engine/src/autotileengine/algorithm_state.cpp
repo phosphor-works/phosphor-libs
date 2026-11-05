@@ -28,6 +28,7 @@
 #include <PhosphorZones/Zone.h>
 #include <PhosphorScreens/ScreenIdentity.h>
 #include "engine_internal.h"
+#include "evacueepark_p.h"
 
 // Qt and std
 #include <QDebug>
@@ -370,8 +371,11 @@ PhosphorTiles::TilingState* AutotileEngine::tilingStateForScreen(const QString& 
         return nullptr;
     }
 
-    const TilingStateKey key = currentKeyForScreen(screenId);
+    return tilingStateForKey(currentKeyForScreen(screenId));
+}
 
+PhosphorTiles::TilingState* AutotileEngine::tilingStateForKey(const TilingStateKey& key)
+{
     // Check for existing state before validating screen existence — existing
     // states are valid even if the screen is temporarily disconnected (e.g.,
     // monitor power-off during a desktop switch). Only gate NEW state creation
@@ -379,14 +383,14 @@ PhosphorTiles::TilingState* AutotileEngine::tilingStateForScreen(const QString& 
     return m_states.forKey(key, [&]() -> PhosphorTiles::TilingState* {
         // Reject unknown screens to prevent unbounded state creation from bogus
         // D-Bus callers. Session bus only (same user), but still good hygiene.
-        if (!isKnownScreen(screenId)) {
+        if (!isKnownScreen(key.screenId)) {
             qCWarning(PhosphorTileEngine::lcTileEngine)
-                << "AutotileEngine::tilingStateForScreen: unknown screen" << screenId;
+                << "AutotileEngine::tilingStateForKey: unknown screen" << key.screenId;
             return nullptr;
         }
 
         // Create new state for this screen+desktop+activity with parent ownership
-        auto* state = new PhosphorTiles::TilingState(screenId, this);
+        auto* state = new PhosphorTiles::TilingState(key.screenId, this);
 
         // Initialize with config defaults
         state->setMasterCount(m_config->masterCount);
@@ -571,29 +575,55 @@ QSet<int> AutotileEngine::desktopsWithActiveState() const
     for (auto it = m_states.states().constBegin(); it != m_states.states().constEnd(); ++it) {
         out.insert(it.key().desktop);
     }
+    // A parked context sits where the prune of the output took the state, and
+    // the daemon's count prune reaches only the desktops listed here (F1100).
+    // Its grants name its own desktop.
+    if (m_evacueePark) {
+        for (const auto& contexts : std::as_const(m_evacueePark->byOutput)) {
+            for (const ParkedTileContext& ctx : contexts) {
+                out.insert(ctx.key.desktop);
+            }
+        }
+    }
+    // So do the per-context entries no state need hold, which
+    // pruneStatesForDesktop drops as well: a tuned flag, a stashed bag or a
+    // dirty memo left on an unlisted desktop goes to the desktop that takes
+    // its number next (F1126).
+    for (const QSet<TilingStateKey>* keys :
+         {&m_userTunedSplitRatio, &m_userTunedMasterCount, &m_dirtyBackgroundContexts}) {
+        for (const TilingStateKey& key : *keys) {
+            out.insert(key.desktop);
+        }
+    }
+    for (const auto& entry : m_scriptStateStash) {
+        out.insert(entry.first.desktop);
+    }
     return out;
 }
 
 void AutotileEngine::pruneStatesForDesktop(int removedDesktop)
 {
+    const auto onRemovedDesktop = [removedDesktop](const TilingStateKey& key) {
+        return key.desktop == removedDesktop;
+    };
     // The dirty-background memo for the desktop goes with its states: the
     // count-shrink path prunes without renumbering, so nothing else would
     // drop an entry a re-created desktop number could inherit.
-    m_dirtyBackgroundContexts.removeIf([removedDesktop](const TilingStateKey& key) {
-        return key.desktop == removedDesktop;
-    });
+    m_dirtyBackgroundContexts.removeIf(onRemovedDesktop);
+    // So do the user-tuned flags, whether or not a state holds the key: a
+    // stateless one left behind would hand a stale "tuned" skip in
+    // propagateGlobal* to the desktop that takes the number next, since the
+    // remap moves only the flags of desktops that survive (F1033).
+    m_userTunedSplitRatio.removeIf(onRemovedDesktop);
+    m_userTunedMasterCount.removeIf(onRemovedDesktop);
     int pruned = 0;
     QStringList releasedWindows;
     QSet<QString> releasedScreens;
     m_states.removeStatesIf(
         [&](const TilingStateKey& key, PhosphorTiles::TilingState*) {
-            return key.desktop == removedDesktop;
+            return onRemovedDesktop(key);
         },
         [&](const TilingStateKey& key, PhosphorTiles::TilingState* state) {
-            // Drop the per-key user-tuned flags with the state so a reused desktop
-            // number can't inherit a stale "tuned" skip in propagateGlobal*.
-            m_userTunedSplitRatio.remove(key);
-            m_userTunedMasterCount.remove(key);
             // Through the FULL teardown, not a bare deleteLater. A deleted
             // desktop's windows are ALIVE (KWin relocates them), so skipping it
             // lost each one's autotile slot snapshot into the unified record,
@@ -622,117 +652,36 @@ void AutotileEngine::pruneStatesForDesktop(int removedDesktop)
     m_states.removeWindowsIf([&](const QString&, const TilingStateKey& key) {
         return key.desktop == removedDesktop;
     });
-    // The tuned flags are inserted keyed by currentKeyForScreen whether or not a
-    // state exists at that key, so the onRemove hook above only reaches the ones
-    // whose key currently HOLDS a state. An orphaned flag would survive the
-    // desktop's death and renumberDesktopState would then shift it onto a live
-    // number — exactly the stale "tuned" skip the hook's own comment prevents.
-    // Sweep both sets unconditionally.
-    const auto eraseTunedForDesktop = [removedDesktop](QSet<TilingStateKey>& set) {
-        for (auto it = set.begin(); it != set.end();) {
-            if (it->desktop == removedDesktop) {
-                it = set.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    };
-    eraseTunedForDesktop(m_userTunedSplitRatio);
-    eraseTunedForDesktop(m_userTunedMasterCount);
+    if (!releasedWindows.isEmpty()) {
+        Q_EMIT windowsReleased(releasedWindows, releasedScreens);
+    }
     // Stashed bags for the dead desktop go with it. Desktop NUMBERS are reused
     // after a renumber, so leaving them would hand a recreated key someone
     // else's layout.
     std::erase_if(m_scriptStateStash, [&](const auto& entry) {
         return entry.first.desktop == removedDesktop;
     });
-    // Clear the sticky-pin override for entries referencing the removed desktop:
-    // a screen pinned to a now-deleted desktop number must drop the entry (the
-    // per-output desktop map is deliberately left alone — see pruneDesktop).
-    m_context.pruneDesktop(removedDesktop);
-    // Announce LAST, after every context sweep above: the daemon's
-    // windowsReleased handler re-resolves each released window's screen and
-    // zone, and it must not see this engine's half-swept context. Matches the
-    // scroll engine's ordering and this file's own removed-screen arm.
-    if (!releasedWindows.isEmpty()) {
-        Q_EMIT windowsReleased(releasedWindows, releasedScreens);
+    // A context parked for an output's return on the desktop, and the places
+    // it granted there, have nowhere left to land. The renumber drops them too,
+    // but the prune of a shrunk desktop count runs without one (F1100).
+    if (m_evacueePark) {
+        for (auto outIt = m_evacueePark->byOutput.begin(); outIt != m_evacueePark->byOutput.end();) {
+            QVector<ParkedTileContext>& contexts = outIt.value();
+            contexts.removeIf([removedDesktop](const ParkedTileContext& ctx) {
+                return ctx.key.desktop == removedDesktop;
+            });
+            outIt = contexts.isEmpty() ? m_evacueePark->byOutput.erase(outIt) : std::next(outIt);
+        }
     }
+    // Clear the sticky-pin override and the per-output virtual-desktop map (#648)
+    // for entries referencing the removed desktop — a screen pinned to a
+    // now-deleted desktop number must drop the entry; the effect re-reports the
+    // screen's true (renumbered) desktop shortly after.
+    m_context.pruneDesktop(removedDesktop);
     if (pruned > 0) {
         qCInfo(PhosphorTileEngine::lcTileEngine)
             << "Pruned" << pruned << "TilingStates for removed desktop" << removedDesktop;
     }
-}
-
-void AutotileEngine::reapDesktopState(int desktop)
-{
-    // The prune below (shared with the count-derived caller) covers everything
-    // except the drag-insert preview,
-    // which it never cancels (screen removal does; the desktop axis predates
-    // identity-based reaps). A preview anchored in the dying context must not
-    // survive into a renumbered world. The live anchor is the TARGET SCREEN's
-    // current desktop, not the global one — per-output desktops make those
-    // diverge routinely, and a preview judged against the global current
-    // could survive the reap and lazily recreate state at the dead key.
-    if (m_dragInsertPreview
-        && ((m_dragInsertPreview->hadPriorState && m_dragInsertPreview->priorKey.desktop == desktop)
-            || m_context.currentKeyForScreen(m_dragInsertPreview->targetScreenId).desktop == desktop)) {
-        cancelDragInsertPreview();
-    }
-    pruneStatesForDesktop(desktop);
-}
-
-void AutotileEngine::renumberDesktopState(const QHash<int, int>& oldToNew)
-{
-    // Gate the WHOLE pass on the shared validity rule, not just the two arms
-    // that gate themselves. m_states.renumberDesktops and
-    // m_context.renumberDesktops refuse a poisoned mapping outright, so
-    // applying it to the tuned flags and the script stash below would shift
-    // those onto numbers no key or pin moved to — the split state the
-    // all-or-nothing rule exists to prevent.
-    if (oldToNew.isEmpty() || !PhosphorEngine::desktopRenumberMappingIsValid(oldToNew)) {
-        return;
-    }
-    // Cancelled unconditionally, even when the mapping does not touch the
-    // preview's desktop. A drag-insert preview is transient by contract (it is
-    // unwound by every prune and every teardown on this path), so the
-    // over-cancel costs a preview the user is still holding a drag over and
-    // nothing else, while a surviving preview anchored on a key that moved
-    // under it would commit into the wrong context. The scroll engine's
-    // renumber makes the same call for the same reason.
-    if (m_dragInsertPreview) {
-        cancelDragInsertPreview();
-    }
-    m_states.renumberDesktops(oldToNew);
-    m_context.renumberDesktops(oldToNew);
-    // Per-key tuned flags and stashed script bags move with their keys.
-    const auto renumberKeySet = [&oldToNew](QSet<TilingStateKey>& set) {
-        QSet<TilingStateKey> next;
-        next.reserve(set.size());
-        for (const TilingStateKey& key : std::as_const(set)) {
-            TilingStateKey moved = key;
-            moved.desktop = oldToNew.value(key.desktop, key.desktop);
-            next.insert(moved);
-        }
-        set = next;
-    };
-    renumberKeySet(m_userTunedSplitRatio);
-    renumberKeySet(m_userTunedMasterCount);
-    // The dirty-background memo is keyed by context too, so a pending
-    // background retile follows its desktop to the new number.
-    renumberKeySet(m_dirtyBackgroundContexts);
-    // PRECONDITION: oldToNew is injective. A renumber names surviving desktops
-    // after a removal, so two old numbers never map to one new one. If that
-    // ever stopped holding, the emplace below would keep the first arrival and
-    // silently drop the colliding stash (QSet's insert in renumberKeySet
-    // dedupes the same way), which is the documented behaviour rather than an
-    // arbitrary merge — a bag belongs to exactly one context.
-    std::unordered_map<TilingStateKey, StashedScriptState> movedStash;
-    movedStash.reserve(m_scriptStateStash.size());
-    for (auto& [key, stash] : m_scriptStateStash) {
-        TilingStateKey moved = key;
-        moved.desktop = oldToNew.value(key.desktop, key.desktop);
-        movedStash.emplace(moved, std::move(stash));
-    }
-    m_scriptStateStash = std::move(movedStash);
 }
 
 void AutotileEngine::pruneStatesForRemovedScreen(const QString& physicalScreenId)
@@ -753,15 +702,6 @@ void AutotileEngine::pruneStatesForRemovedScreen(const QString& physicalScreenId
     const auto matches = [&physicalScreenId](const QString& screenId) {
         return !screenId.isEmpty() && PhosphorIdentity::VirtualScreenId::samePhysical(screenId, physicalScreenId);
     };
-    // Unwind a preview anchored on the dying output BEFORE the teardown, while
-    // both its states still exist — a preview left over it would strand on a
-    // dead key and commit would materialise a fresh empty state there. The
-    // scroll twin's removed-screen prune cancels on exactly these two terms.
-    if (m_dragInsertPreview
-        && (matches(m_dragInsertPreview->targetScreenId)
-            || (m_dragInsertPreview->hadPriorState && matches(m_dragInsertPreview->priorKey.screenId)))) {
-        cancelDragInsertPreview();
-    }
     int pruned = 0;
     QStringList releasedWindows;
     QSet<QString> releasedScreens;
@@ -844,16 +784,6 @@ void AutotileEngine::pruneStatesForRemovedScreen(const QString& physicalScreenId
         m_activeScreen.clear();
     }
     m_context.removeScreensIf(matches);
-    // Drop the dead output from the active set BEFORE the emit, the same way
-    // the scroll twin does it (engine_context.cpp): the daemon's screenRemoved
-    // path never runs updateEngineScreens, so until the next recompute
-    // isActiveOnScreen would keep answering true for an output that is gone.
-    // The windowsReleased handler asks exactly that question to tell a context
-    // prune (engine still runs there) from a genuine release, so a stale claim
-    // makes every unplugged autotile window skip its float clear and restore.
-    for (auto it = m_autotileScreens.begin(); it != m_autotileScreens.end();) {
-        it = matches(*it) ? m_autotileScreens.erase(it) : std::next(it);
-    }
     if (!releasedWindows.isEmpty()) {
         Q_EMIT windowsReleased(releasedWindows, releasedScreens);
     }
@@ -865,19 +795,13 @@ void AutotileEngine::pruneStatesForRemovedScreen(const QString& physicalScreenId
 
 void AutotileEngine::pruneStatesForActivities(const QStringList& validActivities)
 {
-    const QSet<QString> valid(validActivities.begin(), validActivities.end());
-    const auto stale = [&valid](const QString& activity) {
-        return !activity.isEmpty() && !valid.contains(activity);
-    };
-    // Same preview unwind as the desktop and removed-screen prunes, on the
-    // activity axis (the scroll sibling's activity prune cancels on exactly
-    // these terms). The TARGET's live key, not the global current: per-output
-    // desktops aside, the preview's target screen resolves its own context.
-    if (m_dragInsertPreview
-        && ((m_dragInsertPreview->hadPriorState && stale(m_dragInsertPreview->priorKey.activity))
-            || stale(m_context.currentKeyForScreen(m_dragInsertPreview->targetScreenId).activity))) {
-        cancelDragInsertPreview();
+    // An empty list is the activity service going away, not every activity
+    // being removed: pruning against it would drop every activity's tiling
+    // state for good (F423).
+    if (validActivities.isEmpty()) {
+        return;
     }
+    const QSet<QString> valid(validActivities.begin(), validActivities.end());
     m_dirtyBackgroundContexts.removeIf([&valid](const TilingStateKey& key) {
         return !key.activity.isEmpty() && !valid.contains(key.activity);
     });
@@ -908,35 +832,24 @@ void AutotileEngine::pruneStatesForActivities(const QStringList& validActivities
     m_states.removeWindowsIf([&](const QString&, const TilingStateKey& key) {
         return !key.activity.isEmpty() && !valid.contains(key.activity);
     });
-    // Unconditional tuned-flag sweep, for the same reason as the desktop prune:
-    // the flags are keyed by currentKeyForScreen whether or not a state exists
-    // there, so the hook above cannot reach an orphaned one.
-    const auto eraseTunedForStaleActivity = [&stale](QSet<TilingStateKey>& set) {
-        for (auto it = set.begin(); it != set.end();) {
-            if (stale(it->activity)) {
-                it = set.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    };
-    eraseTunedForStaleActivity(m_userTunedSplitRatio);
-    eraseTunedForStaleActivity(m_userTunedMasterCount);
+    if (!releasedWindows.isEmpty()) {
+        Q_EMIT windowsReleased(releasedWindows, releasedScreens);
+    }
     std::erase_if(m_scriptStateStash, [&](const auto& entry) {
         return !entry.first.activity.isEmpty() && !valid.contains(entry.first.activity);
     });
-    // The tracked current activity can name one that just died, and it keeps
-    // naming it until the compositor's currentActivityChanged arrives. Until
-    // then currentKeyForScreen hands out keys under a dead activity and
-    // PerScreenStates::forKey lazily rebuilds state there, undoing this prune
-    // one placement at a time.
-    const QString currentActivity = m_context.currentActivity();
-    if (stale(currentActivity)) {
-        m_context.pruneActivity(currentActivity);
-    }
-    // Announce LAST, after every context sweep above, matching the desktop arm.
-    if (!releasedWindows.isEmpty()) {
-        Q_EMIT windowsReleased(releasedWindows, releasedScreens);
+    // A parked context of a removed activity never comes back into view, so
+    // its windows would read as parked for good and a grant on it would never
+    // be taken. A grant names its own context's activity, so it goes with it
+    // (F1024).
+    if (m_evacueePark) {
+        for (auto outIt = m_evacueePark->byOutput.begin(); outIt != m_evacueePark->byOutput.end();) {
+            QVector<ParkedTileContext>& contexts = outIt.value();
+            contexts.removeIf([&valid](const ParkedTileContext& ctx) {
+                return !ctx.key.activity.isEmpty() && !valid.contains(ctx.key.activity);
+            });
+            outIt = contexts.isEmpty() ? m_evacueePark->byOutput.erase(outIt) : std::next(outIt);
+        }
     }
     if (pruned > 0) {
         qCInfo(PhosphorTileEngine::lcTileEngine) << "Pruned" << pruned << "TilingStates for removed activities";

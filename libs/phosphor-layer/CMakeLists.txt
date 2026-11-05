@@ -15,6 +15,18 @@ cmake_minimum_required(VERSION 3.16)
 
 set(PHOSPHORLAYER_VERSION "0.1.0")
 
+# The Qt floor this library requires AND advertises in its generated
+# PhosphorLayerConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
+# the two cannot drift, with its own value for a STANDALONE build, where that
+# variable does not exist. The fallback is not optional: the Config template
+# substitutes this, and an undefined variable expands to nothing and ships a config
+# whose find_dependency(Qt6 ...) carries no version floor at all.
+if(DEFINED QT_MIN_VERSION)
+    set(PHOSPHORLAYER_QT_MIN ${QT_MIN_VERSION})
+else()
+    set(PHOSPHORLAYER_QT_MIN "6.10.0")
+endif()
+
 if(NOT PROJECT_VERSION)
     project(PhosphorLayer VERSION ${PHOSPHORLAYER_VERSION} LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 20)
@@ -44,7 +56,7 @@ option(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND "Build PhosphorWaylandTransport (requi
 # with a mismatched error, and the library uses a handful of 6.6-era APIs
 # (QWindow::visibility semantics, Q_DECLARE_FLAGS underlying-type handling)
 # that silently misbehave on older versions rather than failing to compile.
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 ${PHOSPHORLAYER_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
 if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
     # PhosphorWayland provides the default ILayerShellTransport implementation.
     # Listed as PUBLIC dep so downstream consumers using PhosphorWaylandTransport
@@ -219,8 +231,13 @@ if(NOT PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
     # pulls PhosphorWayland symbols, so shipping it in a minimal build would
     # break any consumer that #includes it expecting the target to resolve.
     install(CODE "
+        # \$ENV{DESTDIR}, like the two install(CODE) blocks in
+        # plasmazones/CMakeLists.txt. Without it a staged package build --
+        # which is every packaging path here: PKGBUILD, debian/rules via dh,
+        # and rpm's %cmake_install -- would delete this header from the BUILD
+        # HOST's real prefix instead of from the staging root.
         file(REMOVE
-            \"\${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer/defaults/PhosphorWaylandTransport.h\")
+            \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer/defaults/PhosphorWaylandTransport.h\")
     ")
 endif()
 

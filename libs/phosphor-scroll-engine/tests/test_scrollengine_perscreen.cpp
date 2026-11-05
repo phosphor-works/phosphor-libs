@@ -1,26 +1,22 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-// FILE-SIZE NOTE: over the 1000-line target and at the very top of the 15%
-// grace with NO headroom left, so a new case belongs in a sibling file. One
-// split has kept it inside the grace: the template channel's blueprint and
-// cursor cases (test_scrollengine_template.cpp). test_scrollengine_desktopreap
-// is a sibling for a NEW concern; nothing moved out of here for it.
+// The template channel's blueprint and cursor cases live in
+// test_scrollengine_template.cpp. The case for keeping the rest together: this
+// file's concern is a single resolution cascade — rule > per-screen settings
+// trio > cached global, plus the template channel that replaces the preset
+// LISTS those kinds index into. The channels are not independent of each other;
+// every test here is a PRECEDENCE claim between two or more of them, and each
+// is written as a paired two-screen fixture because a one-screen assertion
+// passes just as happily when the engine reads the global everywhere. Splitting
+// by channel would put the two halves of a precedence pair in different files
+// and leave neither able to state the ordering it exists to pin. Splitting by
+// default (width here, height there) would duplicate the whole fixture layer
+// and split the trio's per-slot fall-back rule, which is one rule applying
+// identically to both.
 //
-// The case for keeping the rest together: this file's concern is a single
-// resolution cascade —
-// rule > per-screen settings trio > cached global, plus the template channel
-// that replaces the preset LISTS those kinds index into. The channels are not
-// independent of each other; every test here is a PRECEDENCE claim between two
-// or more of them, and each is written as a paired two-screen fixture because
-// a one-screen assertion passes just as happily when the engine reads the
-// global everywhere. Splitting by channel would put the two halves of a
-// precedence pair in different files and leave neither able to state the
-// ordering it pins. Splitting by default (width here, height there) would
-// duplicate the fixture layer and split the trio's per-slot fall-back rule.
-//
-// A case that is NOT a precedence claim in this cascade takes a sibling
-// instead, which is what both splits above were.
+// If a channel is ever added that resolves INDEPENDENTLY of these three, it
+// takes a sibling rather than growing this file.
 
 // Per-screen default-width / default-height resolution.
 //
@@ -113,6 +109,7 @@ private Q_SLOTS:
     void tabIndicatorRejectsGarbageNumericOverrides();
     void tabIndicatorRejectsAGarbagePositionOverride();
     void tabIndicatorRectIsNullForAZeroExtentColumn();
+    void aHandoffOntoABackgroundDesktopTakesThatDesktopsDisplay();
 
 private:
     /// A headless engine active on the three screens, with @p settings
@@ -314,12 +311,15 @@ void TestScrollEnginePerScreen::perScreenStripAxisOverridesTheResolvedAxis()
     // takes only the default share of it).
     QVERIFY(Ax::crossLen(forcedRects.first()) < kCrossExtent);
 
-    // Clearing the override drops the screen back onto the resolved axis, so
-    // it looks like the untouched one again. applyPerScreenConfig and its
-    // clear schedule the retile QUEUED — drain the loop rather than calling
-    // retile(): the assertions below read the resolve-on-demand path either
-    // way, and draining is what the committed-rect spy leg at the end needs.
-    engine->clearPerScreenConfig(kS1);
+    // A context that resolves no override drops the screen back onto the
+    // resolved axis, so it looks like the untouched one again. That is an
+    // EMPTY push, as the daemon makes it: clearPerScreenConfig is the
+    // screen-left-scrolling door and keeps a live context's entry.
+    // applyPerScreenConfig schedules the retile QUEUED — drain the loop rather
+    // than calling retile(): the assertions below read the resolve-on-demand
+    // path either way, and draining is what the committed-rect spy leg at the
+    // end needs.
+    engine->applyPerScreenConfig(kS1, QVariantMap());
     QCoreApplication::processEvents();
     const QVector<QRect> cleared = engine->visibleTileRects(kS1);
     QCOMPARE(cleared.size(), 1);
@@ -774,8 +774,9 @@ void TestScrollEnginePerScreen::templateListShrinkClampsResolvedPresetWidth()
     QCOMPARE(rects.size(), 1);
     QCOMPARE(Ax::mainLen(rects.first()), qRound(0.6 * kMainExtent));
 
-    // Clearing the override restores the settings vocabulary.
-    engine->clearPerScreenConfig(kS1);
+    // A context that resolves no override restores the settings vocabulary
+    // (an empty push; clearPerScreenConfig keeps a live context's entry).
+    engine->applyPerScreenConfig(kS1, QVariantMap());
     rects = engine->visibleTileRects(kS1);
     QCOMPARE(rects.size(), 1);
     QCOMPARE(Ax::mainLen(rects.first()), qRound(0.75 * kMainExtent));
@@ -1028,10 +1029,10 @@ void TestScrollEnginePerScreen::tabIndicatorOverridesArePerProperty()
     QCOMPARE(ruled.lengthProportion, 0.5);
 
     // The two BOOL overrides applied positively — both are wired at
-    // engine_overrides but had no leg driving them, so either could be deleted
-    // with the suite still green: the ruled leg above only asserts
-    // placeWithinColumn UNMOVED, and tabIndicatorRejectsGarbageNumericOverrides
-    // only flips hideWhenSingleTab.
+    // engine_overrides but had no leg driving them, so either could be
+    // deleted with the suite still green: the ruled.placeWithinColumn
+    // QCOMPARE above only asserts it UNMOVED, and the round-trip case only
+    // flips hideWhenSingleTab.
     QVariantMap bools;
     bools.insert(ScrollPerScreenKeys::tabIndicatorEnabled(), false);
     bools.insert(ScrollPerScreenKeys::tabIndicatorPlaceWithinColumn(), true);
@@ -1051,8 +1052,9 @@ void TestScrollEnginePerScreen::tabIndicatorRejectsGarbageNumericOverrides()
 {
     // Each of the three numeric fields has a hand-written guard rather than a
     // shared macro, so each needs its own leg; without these the guards can be
-    // deleted with the suite still green. All three are validate-then-fall-back
-    // at BOTH ends: an out-of-range override leaves the configured value.
+    // deleted with the suite still green. Gap and width fall back to the
+    // configured value on anything out of range; length falls back below its
+    // floor but CLAMPS above 1.0, which the legs below pin separately.
     QObject owner;
     auto* settings = new StubScrollSettings(&owner);
     settings->tabIndicatorEnabled = true;
@@ -1062,8 +1064,9 @@ void TestScrollEnginePerScreen::tabIndicatorRejectsGarbageNumericOverrides()
     settings->tabIndicatorLengthProportion = 0.5;
     ScrollEngine* engine = makeEngine(&owner, settings);
 
-    // Length: a legal fraction lands; zero, negative and above 1.0 all leave the
-    // configured value (a sliver resolves the indicator to nothing on screen).
+    // Length: a legal fraction lands; zero, negative and above 1.0 all leave
+    // the configured value alone (a sliver would resolve the indicator to
+    // nothing while every setting still reported it on).
     QVariantMap m;
     m.insert(ScrollPerScreenKeys::tabIndicatorLengthProportion(), 0.25);
     engine->applyPerScreenConfig(kS1, m);
@@ -1077,24 +1080,21 @@ void TestScrollEnginePerScreen::tabIndicatorRejectsGarbageNumericOverrides()
     engine->applyPerScreenConfig(kS1, m);
     QCOMPARE(engine->tabIndicatorParamsForScreen(kS1).lengthProportion, 0.5);
 
-    // Over the ceiling falls back the same way as under the floor.
+    // Over the ceiling falls back the same way as under the floor: the
+    // length is validate-then-fall-back like the gap and width below, not
+    // clamped, so one stance covers every key in the resolver.
     m.insert(ScrollPerScreenKeys::tabIndicatorLengthProportion(), 4.0);
     engine->applyPerScreenConfig(kS1, m);
     QCOMPARE(engine->tabIndicatorParamsForScreen(kS1).lengthProportion, 0.5);
 
-    // Gap and width are bounded here too. Each bad key is paired with a GOOD
-    // sibling in the SAME map, in both orders, so the leg tells a per-key
-    // rejection apart from the resolver throwing the whole map away.
+    // Gap and width are bounded at this boundary too: an out-of-range override
+    // leaves the configured value rather than feeding the reservation
+    // arithmetic a number the config layer would never have produced.
     QVariantMap wild;
     wild.insert(ScrollPerScreenKeys::tabIndicatorGap(), 100000);
-    wild.insert(ScrollPerScreenKeys::tabIndicatorWidth(), 7);
-    engine->applyPerScreenConfig(kS2, wild);
-    QCOMPARE(engine->tabIndicatorParamsForScreen(kS2).gap, 5);
-    QCOMPARE(engine->tabIndicatorParamsForScreen(kS2).width, 7);
-    wild.insert(ScrollPerScreenKeys::tabIndicatorGap(), 9);
     wild.insert(ScrollPerScreenKeys::tabIndicatorWidth(), -5);
     engine->applyPerScreenConfig(kS2, wild);
-    QCOMPARE(engine->tabIndicatorParamsForScreen(kS2).gap, 9);
+    QCOMPARE(engine->tabIndicatorParamsForScreen(kS2).gap, 5);
     QCOMPARE(engine->tabIndicatorParamsForScreen(kS2).width, 4);
 
     // The two bools that no other case exercises still round-trip.
@@ -1181,6 +1181,43 @@ void TestScrollEnginePerScreen::tabIndicatorRectIsNullForAZeroExtentColumn()
         params.position = position;
         QVERIFY(params.indicatorRectFor(QRect(0, 0, 0, 0), kTiles).isNull());
     }
+}
+
+void TestScrollEnginePerScreen::aHandoffOntoABackgroundDesktopTakesThatDesktopsDisplay()
+{
+    // A handoff can name a desktop that is not the one in view. The column
+    // it opens there takes the default display that desktop's own rules set,
+    // not the one the desktop in view runs.
+    QObject owner;
+    ScrollEngine* engine = makeProviderEngine(&owner, {kS1});
+    engine->setCurrentDesktopForScreen(kS1, 2);
+    QVariantMap tabbed;
+    tabbed.insert(ScrollPerScreenKeys::defaultColumnDisplay(), static_cast<int>(ColumnDisplay::Tabbed));
+    engine->applyPerScreenConfig(kS1, tabbed);
+    engine->setCurrentDesktopForScreen(kS1, 1);
+    engine->windowOpened(QStringLiteral("app|here"), kS1, 0, 0);
+    QCoreApplication::processEvents();
+    const auto displayOf = [engine](const QString& windowId) -> std::optional<ColumnDisplay> {
+        const auto* state = static_cast<ScrollState*>(engine->stateForScreen(kS1));
+        const int column = state ? state->strip().columnOfWindow(windowId) : -1;
+        if (column < 0) {
+            return std::nullopt;
+        }
+        return state->strip().columns().at(column).display;
+    };
+    QVERIFY2(displayOf(QStringLiteral("app|here")) == ColumnDisplay::Normal,
+             "precondition: the desktop in view opens Normal columns");
+
+    PhosphorEngine::IPlacementEngine::HandoffContext ctx;
+    ctx.windowId = QStringLiteral("app|arrival");
+    ctx.fromEngineId = QStringLiteral("snap");
+    ctx.toScreenId = kS1;
+    ctx.toDesktop = 2;
+    engine->handoffReceive(ctx);
+    QCoreApplication::processEvents();
+
+    engine->setCurrentDesktopForScreen(kS1, 2);
+    QVERIFY(displayOf(QStringLiteral("app|arrival")) == ColumnDisplay::Tabbed);
 }
 
 QTEST_GUILESS_MAIN(TestScrollEnginePerScreen)

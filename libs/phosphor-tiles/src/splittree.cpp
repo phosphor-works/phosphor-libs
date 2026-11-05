@@ -197,9 +197,10 @@ void SplitTree::insertAtEndImpl(const QString& windowId, qreal initialRatio)
     splitLeaf(rm, windowId, initialRatio);
 }
 
-// NOTE: insertAtEndRaw has no depth guard of its own. It relies on the caller
-// (rebuildFromOrder) to cap the input list at MaxRuntimeTreeDepth entries,
-// since a right-leaning chain of N leaves has height N.
+// NOTE: insertAtEndRaw carries its own depth guard (below), AND the caller
+// (rebuildFromOrder) caps the input list at MaxRuntimeTreeDepth entries.
+// The two are belt-and-braces: a right-leaning chain of N leaves has
+// height N, so either alone would bound it.
 void SplitTree::insertAtEndRaw(const QString& windowId, qreal initialRatio)
 {
     if (leafForWindow(windowId)) {
@@ -263,6 +264,16 @@ void SplitTree::remove(const QString& windowId)
 
     SplitNode* parent = leaf->parent;
     Q_ASSERT(parent);
+    // Release-build pair, matching splitLeaf's `Q_ASSERT(leaf); if (!leaf)
+    // return;`. A non-root leaf with no parent is the same corrupt-tree class
+    // the sibling check below already detects and recovers from, so asserting
+    // it in debug and dereferencing it in release was inconsistent with the
+    // very next branch.
+    if (!parent) {
+        qCWarning(PhosphorTiles::lcTilesLib)
+            << "SplitTree::remove: leaf is not the root but has no parent — tree corrupt";
+        return;
+    }
 
     // Determine sibling (the other child of parent)
     std::unique_ptr<SplitNode> sibling;

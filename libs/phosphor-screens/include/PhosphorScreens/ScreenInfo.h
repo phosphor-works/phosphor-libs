@@ -8,7 +8,7 @@
 //   QML consumers binding individual keys via QVariantMap should be aware
 //   that the variant map produced by screenInfoListToVariantList() emits
 //   `width`, `height`, `resolution`, `x`, `y`, and `isVirtualScreen` with
-//   the semantics documented in libs/phosphor-screens/CHANGES.md. In
+//   the semantics documented in phosphor-libs/libs/phosphor-screens/CHANGES.md. In
 //   particular, `isVirtualScreen` is ALWAYS present (was: only when
 //   true); QML that uses `Object.keys(map).includes('isVirtualScreen')`
 //   to disambiguate physical-vs-virtual must be audited. See the
@@ -28,6 +28,7 @@
 //   downstream producers, so the existing convention is locked in.
 
 #include <QList>
+#include <QSize>
 #include <QString>
 #include <QVariantList>
 
@@ -70,6 +71,22 @@ struct PHOSPHORSCREENSCORE_EXPORT ScreenInfo
     int virtualIndex = -1;
     /** User-facing name for virtual screens (e.g. "Left"). */
     QString virtualDisplayName;
+    /**
+     * The screen's size in device pixels (a virtual screen's own region
+     * share), as the producer's getScreenInfo reply carries it under
+     * `pixelSize`. width/height above are logical and this is not. An
+     * invalid QSize when the producer reported none. Not emitted by
+     * screenInfoListToVariantList().
+     */
+    QSize pixelSize;
+    /**
+     * True when @ref pixelSize is a size the producer's own rules read: the
+     * compositor's accepted report of the output's mode or the size last
+     * accepted for that monitor (`pixelSizeSource` "reported" or "seeded" in the
+     * getScreenInfo reply). False when it is the producer's estimate from the
+     * logical size and scale ("estimated"), which no rule sees, or absent.
+     */
+    bool pixelSizeKnown = false;
 };
 
 /**

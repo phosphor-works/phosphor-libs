@@ -9,7 +9,19 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-set(PHOSPHORSCROLLENGINE_VERSION "0.1.0")
+set(PHOSPHORSCROLLENGINE_VERSION "0.2.0")
+
+# The Qt floor this library requires AND advertises in its generated
+# PhosphorScrollEngineConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
+# the two cannot drift, with its own value for a STANDALONE build, where that
+# variable does not exist. The fallback is not optional: the Config template
+# substitutes this, and an undefined variable expands to nothing and ships a config
+# whose find_dependency(Qt6 ...) carries no version floor at all.
+if(DEFINED QT_MIN_VERSION)
+    set(PHOSPHORSCROLLENGINE_QT_MIN ${QT_MIN_VERSION})
+else()
+    set(PHOSPHORSCROLLENGINE_QT_MIN "6.10.0")
+endif()
 
 if(NOT PROJECT_VERSION)
     project(PhosphorScrollEngine VERSION ${PHOSPHORSCROLLENGINE_VERSION} LANGUAGES CXX)
@@ -20,6 +32,36 @@ endif()
 include(GenerateExportHeader)
 
 set(CMAKE_AUTOMOC ON)
+
+# Sibling Phosphor libraries this one links. Each lookup is GUARDED rather than
+# unconditional: in-tree the parent add_subdirectory()s the sibling before this
+# directory, so its ALIAS target already exists and the find_package is skipped.
+# A STANDALONE configure (the project() guard above says this directory supports
+# one) has no such target, and without these it failed at target_link_libraries
+# with "links to X::X but the target was not found".
+
+# the shared placement policy every engine builds on
+if(NOT TARGET PhosphorEngine::PhosphorEngine)
+    find_package(PhosphorEngine CONFIG REQUIRED)
+endif()
+
+# the window-identity types the placement API keys on
+if(NOT TARGET PhosphorIdentity::PhosphorIdentity)
+    find_package(PhosphorIdentity CONFIG REQUIRED)
+endif()
+
+# the D-Bus contract types. Linked as PhosphorProtocol::Types, an alias whose
+# target name differs from the package name, which is why the first sweep
+# over Pkg::Pkg spellings did not catch it.
+if(NOT TARGET PhosphorProtocol::PhosphorProtocol)
+    find_package(PhosphorProtocol CONFIG REQUIRED)
+endif()
+
+# the screen model. Linked as PhosphorScreens::Runtime, an alias whose target
+# name differs from the package name.
+if(NOT TARGET PhosphorScreens::PhosphorScreens)
+    find_package(PhosphorScreens CONFIG REQUIRED)
+endif()
 
 add_library(PhosphorScrollEngine SHARED
     include/PhosphorScrollEngine/StripAxis.h
@@ -40,19 +82,25 @@ add_library(PhosphorScrollEngine SHARED
     src/scrollengine/engine_overrides.cpp
     src/scrollengine/engine_grouping.cpp
     src/scrollengine/engine_context.cpp
+    src/scrollengine/engine_desktopremap.cpp
     src/scrollengine/engine_membership.cpp
+    src/scrollengine/engine_stashleave.cpp
     src/scrollengine/engine_stickypin.cpp
     src/scrollengine/enginelimits.h
     src/scrollengine/engine_apply.cpp
     src/scrollengine/engine_query.cpp
     src/scrollengine/scrollpark_p.h
+    src/scrollengine/engine_evacueepark.cpp
+    src/scrollengine/evacueepark_p.h
     src/scrollengine/engine_park.cpp
     src/scrollengine/engine_snapshot.cpp
     src/scrollengine/drag_autoscroll.cpp
     src/scrollengine/drag_preview.cpp
     src/scrollengine/engine_lifecycle.cpp
+    src/scrollengine/engine_float_open.cpp
     src/scrollengine/engine_focus.cpp
     src/scrollengine/engine_minsize.cpp
+    src/scrollengine/engine_committed.cpp
     src/scrollengine/engine_reopen.cpp
     src/scrollengine/engine_handoff.cpp
     src/scrollengine/engine_float.cpp

@@ -14,6 +14,8 @@
 
 namespace PhosphorEngine {
 
+class DesktopRemap;
+
 /// Outcome of a context mutation on ScreenContextTracker.
 ///
 /// The tracker owns the "was a context ever established" arming subtleties
@@ -234,38 +236,31 @@ public:
     /// Drop entries from both per-screen maps whose SCREEN key matches `pred`
     /// (e.g. an orphaned virtual-screen id that no longer exists).
     void removeScreensIf(const std::function<bool(const QString&)>& pred);
-    /// Drop the sticky PINS naming `removedDesktop` (a virtual desktop was
-    /// destroyed). The per-output desktop entries are deliberately left alone,
-    /// even when they name it — see the implementation for why dropping them
-    /// is the failure currentKeyForScreen's tier-3 contract warns about.
+    /// Drop entries from both per-screen maps whose DESKTOP value equals
+    /// `removedDesktop` (a virtual desktop was destroyed / renumbered).
     void pruneDesktop(int removedDesktop);
-    /// Forget the current activity when it is the one that was removed, so
-    /// currentKeyForScreen stops handing out keys under a dead activity (which
-    /// PerScreenStates::forKey would lazily create fresh state under) in the
-    /// window between the engines' activity prune and the compositor's
-    /// currentActivityChanged. Clearing it also clears the established flag, so
-    /// the next activity push reads as establishing rather than as a switch —
-    /// there is no activity to switch away from once it is gone. No-op when
-    /// `removedActivity` is not the current one.
-    void pruneActivity(const QString& removedActivity);
-    /// Rewrite every tracked desktop int per `oldToNew` (1-based; absent =
-    /// unchanged): the global current, per-screen currents, and sticky pins.
-    /// A mapping carrying any target below 1 is refused WHOLE and nothing
-    /// moves, matching PerScreenStates::renumberDesktops.
-    /// The dynamic-workspaces renumber pass drives this alongside the engines'
-    /// state-map rewrite so pins stay keyed to the desktop they meant.
-    void renumberDesktops(const QHash<int, int>& oldToNew);
 
     /// Shift every stored desktop number ABOVE @p removedDesktop down by one,
-    /// after pruneDesktop has dropped the entries that referenced it.
+    /// the global desktop included, after pruneDesktop has dropped the entries
+    /// that referenced it.
     ///
-    /// The companion to the engines' renumberDesktopsAfterRemoval, and it must
-    /// run with them or not at all. Both maps hold POSITIONAL desktop numbers
-    /// that index the same numbering the state keys use, so renumbering the
-    /// stores while dropping these would leave a pinned or per-output value
-    /// naming a position whose content moved — the desync pruneDesktop's own
-    /// comment warns about, in the other direction.
+    /// The single-removal form of remapDesktops, kept for the installed API: the
+    /// engines renumber through remapDesktops (F787) and no longer call it. Both
+    /// maps hold POSITIONAL desktop numbers that index the same numbering the
+    /// state keys use, so it must run with the stores' own renumber or not at
+    /// all, or a pinned or per-output value names a position whose content moved.
     void renumberDesktopsAfterRemoval(int removedDesktop);
+
+    /// Move every stored desktop number through @p remap, for any change of
+    /// KWin's desktop list (F763, F787): a sticky pin through map(), dropped
+    /// when its desktop was removed, and each per-output desktop and the
+    /// global one through successor(), since KWin moves an output that showed
+    /// a removed desktop onto the one that takes its place. A per-output entry
+    /// is dropped only when no desktop survives, which KWin never reports.
+    void remapDesktops(const DesktopRemap& remap);
+    /// The highest desktop number any of the stored values names (the global
+    /// desktop included), for sizing a removal map that must reach them all.
+    int highestDesktop() const;
 
 private:
     /// Current desktop/activity context. `*ContextEverSet` carry "a context was

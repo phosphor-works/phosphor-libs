@@ -17,7 +17,7 @@ script, and reads the result back. It deliberately knows nothing about what the
 scripts compute.
 
 - **`LuauEngine`.** Owns one `lua_State`. Lifecycle: construct → `init`
-  (open restricted stdlib, wire the interrupt callback, install the capped
+  (open Luau's stdlib, which ships no `io` or `package` library, wire the interrupt callback, install the capped
   allocator) → `runPrelude` (zero or more, to install host globals such as a
   domain standard library) → `sandbox` (freeze globals + stdlib) → `loadModule`
   (per script) → `callModule` / `moduleField`. The public surface is entirely
@@ -64,13 +64,13 @@ if (out.status == LuauEngine::CallStatus::Ok) {
 }
 ```
 
-## Vendored Luau
+## Bundled Luau
 
-Luau is vendored as a committed source tarball (`extern/luau-<ver>.tar.gz`,
-pinned to the version in `PHOSPHORSCRIPTING_LUAU_VERSION` in this library's
-`CMakeLists.txt`), extracted at configure time via `file(ARCHIVE_EXTRACT)` and
-built as part of this library, so source tarballs and offline distro builds are
-self-contained with no network. Pass `-DPLASMAZONES_SYSTEM_LUAU=ON` to link a
+Luau is built from source as part of this library, from the archive
+`cmake/PhosphorDependencies.cmake` pins by version, URL and SHA-256. A normal
+configure downloads it once with CPM into `.cache/cpm`. An offline build (every
+distro package) passes `-DPHOSPHOR_DEPS_ARCHIVES=<dir>` with the archive in it,
+and nothing is downloaded. Pass `-DPLASMAZONES_SYSTEM_LUAU=ON` to link a
 system-provided Luau instead. The Luau libraries are linked **PRIVATE** and the
 VM is built PIC, with `-fexceptions` force-enabled and unity builds disabled on
 the vendored targets only (Luau needs C++ unwinding for `lua_pcall`, and its
@@ -91,9 +91,9 @@ project's global build settings.
 ## Dependencies
 
 - `QtCore`, `Threads`
-- Vendored Luau (`extern/luau-*.tar.gz`), or a system Luau via `-DPLASMAZONES_SYSTEM_LUAU=ON`
+- Luau, the archive `cmake/PhosphorDependencies.cmake` pins, or a system Luau via `-DPLASMAZONES_SYSTEM_LUAU=ON`
 
 ## See also
 
 - [`phosphor-tiles`](../phosphor-tiles/README.md) — the first consumer: `LuauTileAlgorithm` + the `pluau` tiling standard library.
-- [`docs/architecture/adr/0001-luau-shell-scripting-language.md`](../../docs/architecture/adr/0001-luau-shell-scripting-language.md) — why Luau.
+- [`docs/architecture/adr/0001-luau-shell-scripting-language.md`](../../../docs/architecture/adr/0001-luau-shell-scripting-language.md) — why Luau.

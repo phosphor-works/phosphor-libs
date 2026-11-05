@@ -6,7 +6,9 @@
 // surface can `#include <PhosphorIpc/PhosphorIpc.h>`; targeted
 // consumers should include the specific header they need.
 
+#include <PhosphorIpc/IpcCallContext.h>
 #include <PhosphorIpc/IpcEngine.h>
+#include <PhosphorIpc/IpcPendingReply.h>
 #include <PhosphorIpc/IpcProtocol.h>
 #include <PhosphorIpc/IpcRouter.h>
 #include <PhosphorIpc/IpcSchemaGenerator.h>

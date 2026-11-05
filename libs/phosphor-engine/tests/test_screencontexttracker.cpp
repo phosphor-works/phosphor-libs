@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
+#include <PhosphorEngine/DesktopRemap.h>
 #include <PhosphorEngine/ScreenContextTracker.h>
 
 #include <QTest>
 
 using PhosphorEngine::ContextChange;
+using PhosphorEngine::DesktopRemap;
 using PhosphorEngine::PlacementStateKey;
 using PhosphorEngine::ScreenContextTracker;
 
@@ -23,9 +25,12 @@ private Q_SLOTS:
     void releaseScreenOwnership_keepsPerOutputDesktop();
     void removeScreensIf_byPredicate();
     void pruneDesktop_byValue();
-    void renumberDesktops_identityShift();
-    void guards_rejectDesktopsBelowOne();
+    void renumber_shiftsTheGlobalDesktop();
     void virtualScreen_followsItsParentOutput();
+    void remap_movesPinsAndShownDesktops();
+    void remap_lastRemovedMovesOutputsToThePrevious();
+    void remap_followsAReorder();
+    void highestDesktop_namesEveryStoredValue();
 };
 
 void TestScreenContextTracker::currentKeyForScreen_precedence()
@@ -220,124 +225,95 @@ void TestScreenContextTracker::releaseScreenOwnership_keepsPerOutputDesktop()
 void TestScreenContextTracker::pruneDesktop_byValue()
 {
     ScreenContextTracker t;
-    // The global names the desktop about to be pruned, so the deliberate
-    // NON-action below is actually exercised rather than trivially true.
-    t.setCurrentDesktop(5);
     t.setStickyPin(QStringLiteral("S1"), 5);
     t.setStickyPin(QStringLiteral("S2"), 6);
     t.setCurrentDesktopForScreen(QStringLiteral("S3"), 5);
     t.pruneDesktop(5);
     QVERIFY(!t.hasStickyPin(QStringLiteral("S1"))); // pinned to removed desktop 5
     QVERIFY(t.hasStickyPin(QStringLiteral("S2"))); // desktop 6 survives
-    // The per-output entry SURVIVES even though it names the removed desktop.
-    // Dropping it would fall the screen back to the global desktop, which the
-    // daemon writes once at login — the merge-every-output failure
-    // currentKeyForScreen's tier-3 contract warns about. The daemon's clamp
-    // never rewrites this entry (it only touches numbers above the new count),
-    // so nothing would re-establish it.
-    QCOMPARE(t.screenDesktop(QStringLiteral("S3")), 5);
-    QCOMPARE(t.currentKeyForScreen(QStringLiteral("S3")).desktop, 5);
-    // And the global current desktop is deliberately left alone too, even
-    // though it names the removed desktop: this path is count-derived and has
-    // no correct replacement to write. Stub that restraint away and this fails.
-    QCOMPARE(t.currentDesktop(), 5);
+    // Per-output 5 gone: S3 falls back to the global until the daemon re-seeds
+    // it (Daemon::reseedScreenDesktopsAfterRenumber).
+    QCOMPARE(t.screenDesktop(QStringLiteral("S3")), 1);
 }
 
-void TestScreenContextTracker::renumberDesktops_identityShift()
+void TestScreenContextTracker::renumber_shiftsTheGlobalDesktop()
 {
-    ScreenContextTracker t;
-    t.setCurrentDesktop(4);
-    t.setCurrentDesktopForScreen(QStringLiteral("S1"), 3);
-    t.setCurrentDesktopForScreen(QStringLiteral("S2"), 1);
-    t.setStickyPin(QStringLiteral("S1"), 4);
-
-    // Desktop 2 was destroyed: 3→2, 4→3; 1 untouched (absent = unchanged).
-    QHash<int, int> mapping;
-    mapping.insert(3, 2);
-    mapping.insert(4, 3);
-    t.renumberDesktops(mapping);
-
-    QCOMPARE(t.currentDesktop(), 3);
-    QCOMPARE(t.screenDesktop(QStringLiteral("S1")), 2);
-    QCOMPARE(t.screenDesktop(QStringLiteral("S2")), 1);
-    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("S1")), 3);
-
-    // Empty mapping is a no-op.
-    t.renumberDesktops({});
-    QCOMPARE(t.currentDesktop(), 3);
-
-    // SWAP mapping (1→2, 2→1): every value must be read from the ORIGINAL
-    // numbers. An in-place rewrite that consulted already-rewritten values
-    // would carry both onto the same desktop.
-    ScreenContextTracker swap;
-    swap.setCurrentDesktop(1);
-    swap.setCurrentDesktopForScreen(QStringLiteral("A"), 1);
-    swap.setCurrentDesktopForScreen(QStringLiteral("B"), 2);
-    swap.setStickyPin(QStringLiteral("A"), 2);
-    swap.setStickyPin(QStringLiteral("B"), 1);
-
-    QHash<int, int> swapMapping;
-    swapMapping.insert(1, 2);
-    swapMapping.insert(2, 1);
-    swap.renumberDesktops(swapMapping);
-
-    QCOMPARE(swap.currentDesktop(), 2);
-    QCOMPARE(swap.screenDesktop(QStringLiteral("A")), 2);
-    QCOMPARE(swap.screenDesktop(QStringLiteral("B")), 1);
-    QCOMPARE(swap.stickyPinnedDesktop(QStringLiteral("A")), 1);
-    QCOMPARE(swap.stickyPinnedDesktop(QStringLiteral("B")), 2);
-}
-
-void TestScreenContextTracker::guards_rejectDesktopsBelowOne()
-{
-    // KWin desktops are 1-based with no reserved "unset" value, so a 0 or
-    // negative push must leave every tracked value exactly as it was rather
-    // than poisoning the keys derived from it.
+    // The global desktop names a desktop, not a number: removing one below it
+    // moves it down with the per-output entries, so an unpinned screen keeps
+    // resolving the desktop it was on (F799).
     ScreenContextTracker t;
     t.setCurrentDesktop(3);
     t.setCurrentDesktopForScreen(QStringLiteral("S1"), 4);
-    t.setStickyPin(QStringLiteral("S2"), 5);
+    t.renumberDesktopsAfterRemoval(2);
+    QCOMPARE(t.currentDesktop(), 2);
+    QCOMPARE(t.currentKeyForScreen(QStringLiteral("S2")).desktop, 2);
+    QCOMPARE(t.screenDesktop(QStringLiteral("S1")), 3);
 
-    // Global setter: value unchanged, no change reported.
-    ContextChange r = t.setCurrentDesktop(0);
-    QVERIFY(!r.changed);
-    QVERIFY(!r.armSwitch);
+    // A removal above it leaves it alone.
+    t.renumberDesktopsAfterRemoval(5);
+    QCOMPARE(t.currentDesktop(), 2);
+}
+
+void TestScreenContextTracker::remap_movesPinsAndShownDesktops()
+{
+    // Desktop 2 of 4 removed. A pin on it goes (map); an output that showed it
+    // goes where KWin sends it, the desktop that takes its number (successor).
+    ScreenContextTracker t;
+    t.setCurrentDesktop(3);
+    t.setCurrentDesktopForScreen(QStringLiteral("A"), 4);
+    t.setCurrentDesktopForScreen(QStringLiteral("B"), 1);
+    t.setStickyPin(QStringLiteral("C"), 3);
+    t.setStickyPin(QStringLiteral("D"), 2);
+    t.remapDesktops(DesktopRemap::removal(2, 4));
+    QCOMPARE(t.currentDesktop(), 2);
+    QCOMPARE(t.screenDesktop(QStringLiteral("A")), 3);
+    QCOMPARE(t.screenDesktop(QStringLiteral("B")), 1);
+    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("C")), 2);
+    QVERIFY(!t.hasStickyPin(QStringLiteral("D")));
+}
+
+void TestScreenContextTracker::remap_lastRemovedMovesOutputsToThePrevious()
+{
+    // The LAST desktop removed: its successor is the one before it, so an
+    // output showing it lands on 3, not on the global fallback (1). A map()
+    // read would drop the entry.
+    ScreenContextTracker t;
+    t.setCurrentDesktop(1);
+    t.setCurrentDesktopForScreen(QStringLiteral("A"), 4);
+    t.remapDesktops(DesktopRemap::removal(4, 4));
+    QCOMPARE(t.screenDesktop(QStringLiteral("A")), 3);
+    QCOMPARE(t.currentDesktop(), 1);
+
+    ScreenContextTracker global;
+    global.setCurrentDesktop(4);
+    global.remapDesktops(DesktopRemap::removal(4, 4));
+    QCOMPARE(global.currentDesktop(), 3);
+}
+
+void TestScreenContextTracker::remap_followsAReorder()
+{
+    // c moved to the front: old 1 -> 2, old 2 -> 3, old 3 -> 1.
+    ScreenContextTracker t;
+    t.setCurrentDesktop(2);
+    t.setCurrentDesktopForScreen(QStringLiteral("A"), 3);
+    t.setStickyPin(QStringLiteral("B"), 1);
+    t.remapDesktops(DesktopRemap::fromIds({QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")},
+                                          {QStringLiteral("c"), QStringLiteral("a"), QStringLiteral("b")}));
     QCOMPARE(t.currentDesktop(), 3);
-    r = t.setCurrentDesktop(-1);
-    QVERIFY(!r.changed);
-    QCOMPARE(t.currentDesktop(), 3);
+    QCOMPARE(t.screenDesktop(QStringLiteral("A")), 1);
+    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("B")), 2);
+}
 
-    // Per-output setter on an ALREADY ESTABLISHED screen: the existing entry
-    // survives (the empty-map arm is covered in setCurrentDesktopForScreen_perOutput).
-    r = t.setCurrentDesktopForScreen(QStringLiteral("S1"), 0);
-    QVERIFY(!r.changed);
-    QCOMPARE(t.screenDesktop(QStringLiteral("S1")), 4);
-
-    // Sticky pin: rejected outright, so 0 stays unambiguous as "not pinned".
-    t.setStickyPin(QStringLiteral("S3"), 0);
-    QVERIFY(!t.hasStickyPin(QStringLiteral("S3")));
-    t.setStickyPin(QStringLiteral("S2"), -2);
-    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("S2")), 5); // existing pin intact
-
-    // A renumber must not write what those setters refuse, and the refusal is
-    // WHOLE-mapping: honouring 5→2 while 3 and 4 stay put would land the pin on
-    // a number a stranded sibling could still be holding. Every value survives
-    // untouched, including the one whose own target was valid.
-    QHash<int, int> poisoned;
-    poisoned.insert(3, 0);
-    poisoned.insert(4, -1);
-    poisoned.insert(5, 2);
-    t.renumberDesktops(poisoned);
-    QCOMPARE(t.currentDesktop(), 3);
-    QCOMPARE(t.screenDesktop(QStringLiteral("S1")), 4);
-    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("S2")), 5);
-
-    // The same mapping with its poisoned entries dropped applies in full.
-    QHash<int, int> clean;
-    clean.insert(5, 2);
-    t.renumberDesktops(clean);
-    QCOMPARE(t.stickyPinnedDesktop(QStringLiteral("S2")), 2);
-    QCOMPARE(t.currentDesktop(), 3); // absent = unchanged
+void TestScreenContextTracker::highestDesktop_namesEveryStoredValue()
+{
+    ScreenContextTracker t;
+    QCOMPARE(t.highestDesktop(), 1);
+    t.setCurrentDesktopForScreen(QStringLiteral("A"), 5);
+    QCOMPARE(t.highestDesktop(), 5);
+    t.setStickyPin(QStringLiteral("B"), 7);
+    QCOMPARE(t.highestDesktop(), 7);
+    t.setCurrentDesktop(9);
+    QCOMPARE(t.highestDesktop(), 9);
 }
 
 QTEST_MAIN(TestScreenContextTracker)

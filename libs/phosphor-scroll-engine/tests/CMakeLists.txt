@@ -35,7 +35,28 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 # Every sibling tests tree includes this explicitly. Relying on an earlier
 # add_subdirectory having already defined the function would make this tree's
 # configure depend on the order of the libs block.
-include(${CMAKE_SOURCE_DIR}/cmake/PhosphorTestIsolation.cmake)
+# CMAKE_CURRENT_LIST_DIR, not CMAKE_SOURCE_DIR: the latter is the repo root
+# in-tree but this LIBRARY's directory in a standalone configure, so the include
+# looked for <tier>/libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
+# generate time. The relative walk reaches the repo root from either. The EXISTS
+# guard covers the remaining case, a genuine extracted `git subtree split` where
+# the repo-root module is not in the subtree at all.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
+else()
+    # Stand-ins so the call sites below need no guard of their own.
+    # phosphor_append_test_environment is reproduced EXACTLY, because it is
+    # self-contained and because callers use it for things like
+    # QT_QPA_PLATFORM=offscreen that the tests need to pass at all — a no-op
+    # there would break them rather than merely un-isolate them. The isolation
+    # helper degrades to nothing: its private D-Bus session and XDG sandbox need
+    # module-level state that does not exist without the module.
+    function(phosphor_apply_test_isolation _target)
+    endfunction()
+    function(phosphor_append_test_environment _test_name)
+        set_property(TEST ${_test_name} APPEND PROPERTY ENVIRONMENT ${ARGN})
+    endfunction()
+endif()
 
 # One target, one ctest registration, no transposed arm. For a test whose
 # subject takes its axis as a parameter rather than reading it from the
@@ -119,13 +140,13 @@ pse_add_test(test_scrollstrip_core test_scrollstrip_core.cpp)
 pse_add_test(test_scrollstrip_ops test_scrollstrip_ops.cpp)
 # The strip's view ownership (the pan's detach latch and what re-attaches
 # it) and the group-width verbs (equalize, minimize, reset), placed in their
-# own file rather than grown into the over-ceiling ops suite. Same pure
+# own file rather than grown into the ops suite. Same pure
 # model and the same screen constants, but no shared strip fixture: every
 # slot builds its own strip.
 pse_add_test(test_scrollstrip_view test_scrollstrip_view.cpp)
 # The repeatable size verbs' refusal contract (the client-minimum floor, the
-# tabbed refusal, the grow budget), likewise kept out of the over-ceiling ops
-# suite. Every slot builds its own strip and asserts geometry, not just the
+# tabbed refusal, the grow budget), likewise kept out of the ops suite.
+# Every slot builds its own strip and asserts geometry, not just the
 # verb's bool.
 pse_add_test(test_scrollstrip_sizing test_scrollstrip_sizing.cpp)
 pse_add_test(test_scrollstrip_height test_scrollstrip_height.cpp)
@@ -140,6 +161,15 @@ pse_add_test(test_scrollengine_stripcontext test_scrollengine_stripcontext.cpp)
 # window present on several desktops, the per-screen scoping and the float
 # carry.
 pse_add_test(test_scrollengine_membership test_scrollengine_membership.cpp)
+# The evacuee park: a strip parked across an output's disconnect, its save
+# exemption, and the exact-id re-seat on the output's return.
+pse_add_test(test_scrollengine_evacuee test_scrollengine_evacuee.cpp)
+# A window that left the context a mode-round-trip stash remembers (another
+# monitor, desktop or activity) gives up its stashed column there.
+pse_add_test(test_scrollengine_stashleave test_scrollengine_stashleave.cpp)
+# The desktop renumber: strips, stashes and per-context overrides follow a
+# removal, an insert or a reorder of KWin's desktop list.
+pse_add_test(test_scrollengine_desktopremap test_scrollengine_desktopremap.cpp)
 pse_add_test(test_scrollengine_persistence test_scrollengine_persistence.cpp)
 pse_add_test(test_scrollengine_zonenumbers test_scrollengine_zonenumbers.cpp)
 pse_add_test(test_scrollengine_perscreen test_scrollengine_perscreen.cpp scrollstubsettings.h)
@@ -148,30 +178,37 @@ pse_add_test(test_scrollengine_perscreen test_scrollengine_perscreen.cpp scrolls
 # different question: which blueprint ENTRY a column takes, and which events
 # leave an entry spent.
 pse_add_test(test_scrollengine_template test_scrollengine_template.cpp scrollstubsettings.h)
-# The dynamic-workspaces desktop axis (identity reap, renumber, and the
-# release the reap owes its still-alive windows). A NEW sibling for a new
-# concern, not a split off the per-screen suite: nothing moved out of that file,
-# which has no headroom left of its own. Same stub, different question: not
-# which channel wins, but what a dying context destroys and what it announces.
-pse_add_test(test_scrollengine_desktopreap test_scrollengine_desktopreap.cpp scrollstubsettings.h)
 # The behaviour suite is the only one that needs a window-tracking stub: the
 # sticky gate and the client-decides width and height all short-circuit on a
 # null tracker, so their per-screen resolution is unobservable without one.
 pse_add_test(test_scrollengine_behaviour test_scrollengine_behaviour.cpp scrollstubsettings.h scrollstubtracking.h)
+# The #1106 free-size arm, split from the behaviour suite by size.
+pse_add_test(test_scrollengine_freesize test_scrollengine_freesize.cpp scrollstubsettings.h scrollstubtracking.h)
 pse_add_test(test_scrollengine_grouping test_scrollengine_grouping.cpp scrollstubsettings.h scrollstubtracking.h)
 pse_add_test(test_scrollengine_draginsert test_scrollengine_draginsert.cpp scrollstubsettings.h)
 pse_add_test(test_scrollengine_snapshot test_scrollengine_snapshot.cpp)
 pse_add_test(test_scrollengine_boundary test_scrollengine_boundary.cpp scrollstubsettings.h)
+# A client that commits a frame other than its tile (reportCommittedSize): the
+# committed floor, its peek memory, its oversized verdict and every path that
+# keeps or drops it.
+pse_add_test(test_scrollengine_committedfloor test_scrollengine_committedfloor.cpp scrollstubsettings.h
+             scrollstubtracking.h)
 pse_add_test(test_scrollengine_verbs test_scrollengine_verbs.cpp)
 # The compositor focus-report protocol: which self-activation echoes the
 # filter swallows and which it adopts. Its own file rather than more of the
-# verbs suite, which is past the size ceiling.
+# verbs suite.
 pse_add_test(test_scrollengine_focusreport test_scrollengine_focusreport.cpp)
 # Column maximize at the engine layer: what the published maximizedToEdges
 # flag means, which column the window-scoped verbs act on, and what survives
 # the transitions that discard the pre-maximize slot.
 pse_add_test(test_scrollengine_maximize test_scrollengine_maximize.cpp)
+# The compositor's fullscreen hold: a strip tile held out for its own
+# fullscreen with a passive announcement, and what returns it.
+pse_add_test(test_scrollengine_fullscreenfloat test_scrollengine_fullscreenfloat.cpp)
+# Which float transitions announce active and which passive (F557, F578), the
+# oversized verdict included.
+pse_add_test(test_scrollengine_floatannounce test_scrollengine_floatannounce.cpp scrollstubsettings.h)
 # The tile-focus family: cycleTab and focusTab, plus the float refusal and the
 # panned-view hand-back they share with focusWindowTop/Bottom. Its own file
-# rather than more of the smoke suite, which is past the size ceiling.
+# rather than more of the smoke suite.
 pse_add_test(test_scrollengine_tabfocus test_scrollengine_tabfocus.cpp)

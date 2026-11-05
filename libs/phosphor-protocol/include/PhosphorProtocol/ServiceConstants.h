@@ -31,6 +31,14 @@ inline constexpr QLatin1String ObjectPath("/PlasmaZones");
 /// ever changes.
 inline constexpr int QuickLayoutSlotCount = 9;
 
+/// The largest running-windows payload (Settings.provideRunningWindows) the
+/// daemon relays, in UTF-8 bytes. Protocol-level because the daemon refuses a
+/// larger one at the D-Bus boundary while the KWin effect builds it, so the
+/// effect can leave out rows rather than build a payload the daemon drops
+/// whole. Generous next to a real window list: it bounds one call, it is not a
+/// working limit.
+inline constexpr int MaxRunningWindowsPayloadBytes = 1 << 20;
+
 namespace Interface {
 inline constexpr QLatin1String Settings("org.plasmazones.Settings");
 inline constexpr QLatin1String WindowDrag("org.plasmazones.WindowDrag");
@@ -77,6 +85,10 @@ inline constexpr QLatin1String MotionProfileTree("motionProfileTree");
 inline constexpr QLatin1String AnimationShaderSearchPaths("animationShaderSearchPaths");
 inline constexpr QLatin1String DecorationProfileTree("decorationProfileTree");
 inline constexpr QLatin1String OverlayShaderTree("overlayShaderTree");
+/// The user's decoration blur-quality tier. Read by every host that composes a
+/// decoration chain, so that a pack renders at one density whether it decorates a
+/// window, an OSD or a shell surface. The compositor loads it under this same name.
+inline constexpr QLatin1String DecorationBlurScaleMultiplier("decorationBlurScaleMultiplier");
 }
 
 /// Keys for the extended-window-property QVariantMap (the trailing a{sv} argument
@@ -94,6 +106,7 @@ inline constexpr QLatin1String IsDemandingAttention("isDemandingAttention");
 inline constexpr QLatin1String IsFullscreen("isFullscreen");
 inline constexpr QLatin1String IsSticky("isSticky");
 inline constexpr QLatin1String IsMaximized("isMaximized");
+inline constexpr QLatin1String IsAxisMaximized("isAxisMaximized");
 inline constexpr QLatin1String IsFocused("isFocused");
 inline constexpr QLatin1String IsTransient("isTransient");
 inline constexpr QLatin1String IsNotification("isNotification");
@@ -116,6 +129,10 @@ inline constexpr QLatin1String CaptionNormal("captionNormal");
 /// virtual desktops. Sent only when the window spans more than one desktop;
 /// the positional virtualDesktop arg stays the first entry for compatibility.
 inline constexpr QLatin1String VirtualDesktops("virtualDesktops");
+/// Full activity UUID list for a window on SEVERAL (but not all) activities.
+/// Sent only when the window is on more than one; the positional activity arg
+/// stays the first entry for compatibility (F426).
+inline constexpr QLatin1String Activities("activities");
 }
 
 /// Keys of the two scrolling tab-indicator maps that cross the daemon → KWin
@@ -272,8 +289,10 @@ inline constexpr QLatin1String Minimized("minimized");
 /// as a drop proxy lets a real compositor drag that lands on the miniature
 /// resolve to the full-size zone under the cursor. The shell builds the
 /// object, the daemon (src/dbus/windowdragadaptor/dropproxy.cpp) parses it.
-/// Every rect is [x, y, w, h] in the registering screen's own pixels, with
-/// the screen's top-left corner as the origin.
+/// Every rect is [x, y, w, h] in the registering screen's LOGICAL pixels,
+/// the units the compositor lays windows out in (not the output's device
+/// pixels, which differ on a scaled output), with the screen's top-left
+/// corner as the origin.
 namespace DropProxyKey {
 /// The miniature's bounding rect on its screen. A cursor outside it is not
 /// over the proxy at all.
@@ -387,7 +406,10 @@ inline constexpr QLatin1String Interface("org.plasmazones.EditorController");
 //       cannot express. The min sizes exist because a reclaim ADOPTS the window into
 //       a strip or layout and the adopting engine evaluates its oversized /
 //       float verdict exactly once from them, so passing 0,0 left an oversized
-//       window tiled for the session.
+//       window tiled for the session. The reclaim was later removed (a window
+//       is restored only on the output it opens on); restoreReason still gates
+//       the snap restore's same-app record FIFO, placement rules and the
+//       free-size restore, and the min sizes are accepted and ignored.
 //
 //       Why the handshake and not signature matching. Most of the above widens
 //       a signature, and Qt matches signal-hook signatures before demarshalling,
@@ -507,14 +529,12 @@ inline constexpr QLatin1String Interface("org.plasmazones.EditorController");
 //       signal-only addition is not treated as harmlessly additive here.
 //
 //   v9: Scrolling gains leaveNativeFullscreenRequested (s), a screen-scoped
-//       signal the daemon emits from the keyboard shortcut gate immediately
-//       BEFORE dispatching a strip verb, telling the compositor to release the
-//       OWN fullscreen of every scroll-tracked tile on that screen. Such a tile
-//       refuses every geometry commit through the effect's fullscreen bail
-//       while the engine goes on scrolling and PARKING its column, so the two
-//       owners drift apart for the whole hold. The wheel chord already did this
-//       for itself inside the effect, but the keyboard half originates in the
-//       daemon and could not.
+//       signal the daemon emits immediately BEFORE dispatching a keyboard strip
+//       verb (the wheel path does the same on its own), telling the compositor
+//       to release the OWN fullscreen of every scroll-tracked tile on that
+//       screen so the strip and a window covering it could not drift apart.
+//       Such a tile refuses every geometry commit through the effect's
+//       fullscreen bail. v10 retires it.
 //
 //       ANOTHER new REQUIRED signal, so it takes a step of its own for exactly
 //       the reason v8 did: v8 shipped in 3.4.4, and the
@@ -522,9 +542,9 @@ inline constexpr QLatin1String Interface("org.plasmazones.EditorController");
 //       Its failure mode is the silent kind as well. A daemon that emits it to
 //       an effect with no such slot, or an effect waiting on a daemon that
 //       never emits it, matches every other signature on the interface and
-//       errors nowhere. The strip simply goes on scrolling and parking a column
-//       whose window the compositor is refusing to move, which is the bug this
-//       signal exists to close.
+//       errors nowhere. The toggle's relayout is simply built against a window
+//       the compositor is refusing to move, which is the bug this signal
+//       exists to close.
 //
 //       A SIGNAL rather than a field on the geometry batch, which is what the
 //       gap note in the wheel path originally anticipated. The exit has to land
@@ -535,7 +555,7 @@ inline constexpr QLatin1String Interface("org.plasmazones.EditorController");
 //       cannot tell a user verb from an insert-driven reflow, and it dropped
 //       the fullscreen whenever an unrelated window merely opened and slid the
 //       strip.
-
+//
 //       Tiling managedScreensChanged ALSO gains a third argument in this same
 //       step, screenDesktops (a{sv}) — the screenId to virtual-desktop map the
 //       announced set was RESOLVED AGAINST. One bump, not two: both changes
@@ -557,8 +577,205 @@ inline constexpr QLatin1String Interface("org.plasmazones.EditorController");
 //       is indistinguishable from a fresh one, and it would install a managed
 //       set computed for one desktop while filtering windows by another. The
 //       stamp makes the announce self-describing.
-inline constexpr int ApiVersion = 9;
-inline constexpr int MinPeerApiVersion = 9;
+//
+//   v10: Scrolling gains setWindowFullscreenFloat (s s b -> b), the hold the
+//       KWin effect sends when a strip tile enters or leaves its OWN
+//       fullscreen, and LOSES leaveNativeFullscreenRequested. The effect used
+//       to float such a tile through WindowTracking.setWindowFloatingForScreen,
+//       which the daemon treats as a USER float: every F11 raised a "floated"
+//       navigation OSD and restored free geometry over the fullscreen surface.
+//       The new verb floats with the same slot memory but announces on the
+//       engine's passive channel; its boolean answers whether the engine holds,
+//       or has returned, this call's own float (a repeat hold answers true),
+//       not whether the strip changed. With the tile out of the strip for the
+//       whole hold, no strip verb finds a fullscreen tile to release, so the v9
+//       signal had nothing left to do and is removed rather than kept as dead
+//       wire. Both are REQUIRED changes with the silent
+//       failure mode the ledger keeps refusing: an old effect calling a method
+//       the daemon lacks gets a D-Bus error and leaves the tile in the strip,
+//       and an old daemon emitting a signal the effect no longer connects
+//       simply goes unheard.
+//
+//       Also in v10, Tiling gains windowReannounced (s s i i): the same
+//       placement as windowOpened for a window that did not just open (a
+//       desktop-switch catch-scan, a cross-output re-add, an unminimize), so
+//       "Focus new windows" can focus genuine opens only. windowOpened now
+//       means a genuine open, and windowsOpenedBatch entries never take focus.
+//
+//       Also in v10, WindowTracking gains reportOutputSettle
+//       (a(ssssbiiiiiiiiiiibbbbssiiibiiii) -> a(sis)) and the parkDropped
+//       (s s) signal: the effect reports the windows a screen-change settle
+//       moved, with the state they had before their output went away, and the
+//       daemon answers each with a verdict (re-seat a window KWin returned
+//       untouched, float an evacuee in place, re-assert a placement KWin moved,
+//       or treat the crossing as the user's move). parkDropped tells the effect
+//       to forget its record of a window the daemon no longer keeps parked. An
+//       old daemon answers the call with an error and the effect replays every
+//       crossing as a move; an old effect never calls. WindowTracking also
+//       gains seedScreenDesktop (s i): the desktop an output shows as it is
+//       added, taken by the engines without a desktop switch. And
+//       windowCrossedScreens (s s s): the effect's notice that KWin moved a
+//       window across screens where a tiling engine runs, so the daemon drops
+//       what it held of the window on the screen left. An old daemon answers
+//       with an error, which the fire-and-forget call ignores.
+//
+//       Also in v10, WindowTracking.applyGeometryRequested gains a trailing
+//       purpose (siiiissb -> siiiissbi, PlacementPurpose): whether the
+//       placement is a user verb on the window or a re-statement of one it
+//       already has, which decides whether its maximize and fullscreen end. A
+//       receiver whose slot takes the old eight arguments still gets the signal
+//       (QtDBus delivers a longer signal to a shorter slot) and keeps the
+//       user-verb behaviour it always had. WindowTracking also gains
+//       fullscreenHandBackRequested (s): a user verb the daemon places no
+//       geometry for (a float with nothing to restore, a move to a tiling
+//       engine), on which the effect ends the window's own fullscreen. An old
+//       effect never connects it, and the window stays fullscreen as before.
+//
+//       Also in v10, Scrolling.scrollingScreensChanged gains isContextSwitch
+//       (b) and leavingToAutotile (as) (as -> asbas): whether a desktop or
+//       activity switch changed the set, and which screens left it for
+//       autotile, so the effect re-announces windows only on an engine flip
+//       inside the tiling union.
+//
+//       Also in v10, WindowTracking gains activeWindowScreenChanged (s s): the
+//       focused window moved to another screen without a new activation (a
+//       KWin, user or daemon move), so the screen every window shortcut acts
+//       on follows it. An old daemon answers with an error, which the
+//       fire-and-forget call ignores, and its shortcuts keep acting on the
+//       screen the window was last activated on.
+//
+//       Also in v10, WindowTracking.getPreTileGeometries entries gain a
+//       trailing windowId (a(siiiis) -> a(siiiiss)), the window whose record
+//       each one is, so the effect seeds that window only, never a same-app
+//       sibling (F627).
+//
+//       Also in v10, WindowTracking gains the pendingRestoresChanged signal
+//       (no arguments): getPendingRestoreGeometries may answer differently
+//       after a layout assignment, a desktop or activity switch, a context
+//       being disabled or an output change, so the effect fetches its
+//       instant-restore cache again (F625). An old effect never connects it
+//       and keeps the cache it fetched at daemon-ready.
+//
+//       Also in v10, WindowTracking gains the parkReseated (s s) signal: the
+//       daemon put a window back into its parked place on an output that
+//       returned, sent just ahead of the parkDropped for the same window and
+//       output when nothing else stays parked for it there. At an arrival
+//       re-seat (the window's own announce on that output, which carries no
+//       settle verdict) the effect gives the window's minimize-float back on
+//       it, and reads the parkDropped that follows as a seat, keeping the
+//       Monocle claim for the re-seat batch (F1147). An old daemon never
+//       emits it: the effect gives nothing back at an arrival re-seat, and
+//       the parkDropped that follows reads as a seat that put nothing back,
+//       so the effect forgets the window's Monocle claim and minimize-float
+//       for that output. A re-seat inside a settle is unaffected: its Readopt
+//       verdict decides, and the effect ignores a parkReseated there. An old
+//       effect never connects it and reads the parkDropped as it always did.
+//
+//   After v10, WITHOUT a bump: Scrolling gains reportCommittedSize
+//       (s i i i i), through which the effect reports the size a client
+//       settled on when it differs from the rect the strip offered it,
+//       so the engine can hold the column to it. v10 shipped in 3.5.0, so the
+//       method cannot fold into it, and it takes no v11 because it is
+//       ADDITIVE and neither mismatched pairing gives a wrong answer, which is
+//       the failure the bump rule exists to refuse. A new effect on a 3.5.x
+//       daemon gets UnknownMethod, latches the method off once per daemon
+//       session, and lays the strip out as before the method existed. An old
+//       effect never calls it, with the same result. Both degrade to the
+//       pre-method behaviour, a column that does not widen to its window, and
+//       a bump would instead refuse the whole bridge over a missing nicety. A
+//       later change that makes the method REQUIRED, or changes its arguments,
+//       needs v11.
+//
+//   Also after v10, WITHOUT a bump: reportCommittedSize widens in MEANING,
+//       with the same (s i i i i) signature. The engine now reads an answer
+//       longer ACROSS the strip, inside the work area, as a floor on the
+//       tile's share of its stacked column (#1156), where it used to ignore
+//       it. The effect now also reports a parked tile's settled commit when
+//       it equals the offer along the strip, and the engine ends a peek
+//       memory on that matched answer (#1154). Both pairings degrade safely.
+//       A new effect on a daemon from before this change sends matched
+//       answers the old engine reads as steady state and drops, and cross
+//       answers it was already sending, so a straddle-only column keeps
+//       parking and a tall stacked window keeps overlapping, as before. An
+//       old effect on a new daemon never sends a matched answer, so the
+//       memory ends only the old way, and the cross answers it already sends
+//       start holding their tiles. Neither gives a wrong answer, so neither
+//       needs v11.
+//
+//   Also after v10, WITHOUT a bump: reportCommittedSize carries X11 clients'
+//       answers too (#1157), with the same signature. The effect used to
+//       record the strip's offer, and so report an answer to it, for Wayland
+//       clients only, and an X11 window that widened itself past its column
+//       was never reported. The engine never asked which kind of client
+//       answered. A new effect on a daemon that has the method sends X11
+//       answers the engine holds its columns to exactly as it holds a Wayland
+//       one, which is the fix, and on a daemon without it the method is
+//       latched off as above. An old effect on a new daemon never sends an
+//       X11 answer, so an X11 window that outgrows its column keeps the next
+//       column starting under it, as before. Neither gives a wrong answer.
+//
+//   Also after v10, WITHOUT a bump: the methods through which the compositor
+//       reports what it saw (window metadata and frames, opens and closes,
+//       screen crossings and output settles, drags, committed sizes,
+//       fullscreen holds, the work area and primary screen, Snap Assist
+//       candidates, and the other reports the daemon's
+//       DbusHelpers::admitCompositorReport gate covers) answer AccessDenied
+//       to every bus caller but the one that registered the bridge, and
+//       registerBridge answers a REJECTED session to a second peer while the
+//       registered one is still on the bus (#1155). registerBridge also
+//       answers REJECTED to any caller outside the compositor's own process
+//       (the far end of the daemon's Wayland connection, or a direct child
+//       of kwin_wayland_wrapper), so a bridge must run inside the compositor.
+//       No signature changes. A compositor that waits for its registration
+//       to answer before it reports sees no difference against either
+//       daemon, and an old daemon admits every caller as it always did. The
+//       change is for a client that reports before it has registered, or
+//       without registering, or registers from another process: its
+//       registration or its calls are refused, and a fire-and-forget report
+//       is dropped with no answer the client sees. That is a client defect
+//       the gate exists to expose, not a pairing the version can sort out, so
+//       it takes no v11.
+//       PhosphorCompositor::DaemonClient documents the ordering it needs.
+//
+//   Also after v10, WITHOUT a bump: Screen gains setPixelSizeFromKWin
+//       (s i i), through which the effect reports each output's exact size
+//       in device pixels (its current mode, rotated) beside the work area it
+//       already reports, and 0x0 when the output goes away. A Wayland client
+//       cannot read an output's mode, so before this the daemon could only
+//       estimate the size as the logical size times the scale, which misses
+//       the mode by a pixel on a fractional scale. It is ADDITIVE, and it sits
+//       behind the same compositor-report gate as its siblings. A new effect
+//       on a daemon without the method gets UnknownMethod on a
+//       fire-and-forget call and is otherwise unaffected. An old effect on a
+//       new daemon never reports. The daemon's rules then read a size only
+//       where one was seeded from an earlier session's report, and otherwise
+//       leave the screen width, height and aspect ratio fields unknown: a
+//       positive condition on them is false and a negated one is refused,
+//       while orientation falls back to the logical geometry. Only
+//       getScreenInfo keeps answering with the estimate. An unanswered
+//       condition is no wrong answer the handshake must refuse, so it takes
+//       no v11. getScreenInfo gains pixelSizeSource beside pixelSize in the
+//       same change, which a reader that does not know the key never looks
+//       at.
+
+inline constexpr int ApiVersion = 10;
+inline constexpr int MinPeerApiVersion = 10;
+
+// Scrolling.reportCommittedSize tolerance, in logical pixels, on each axis:
+// a size a client committed within this many pixels of the rect the strip
+// offered it COUNTS AS THE OFFER. It is not an answer, and nothing about it
+// teaches the engine anything. Fractional scaling, and a server-side
+// decoration with fractional borders, round the frame of a client that took
+// its tile exactly to a pixel either side of it, and reading that pixel as an
+// answer would plant (or give back) a one-pixel floor and relayout the strip
+// for it.
+//
+// Both ends of the wire apply it, and they must agree, which is why it lives
+// here. The compositor reports only answers beyond it, and the engine reads
+// any answer within it as the offer. A wider value on the compositor side
+// would withhold answers the engine would act on. A narrower one would send
+// answers the engine discards as the offer.
+inline constexpr int CommittedSizeTolerancePx = 1;
 
 // Hard cap on blocking synchronous D-Bus calls from the editor/settings
 // apps to the daemon. Qt's default is 25 seconds, long enough to freeze

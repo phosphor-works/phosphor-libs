@@ -3,7 +3,9 @@
 
 #include <PhosphorSnapEngine/SnapState.h>
 
-#include <PhosphorEngine/PerScreenStates.h>
+#include <PhosphorEngine/DesktopRemap.h>
+
+#include <algorithm>
 
 namespace PhosphorSnapEngine {
 
@@ -31,11 +33,8 @@ SnapState::~SnapState() = default;
 // SnapState only ever LOOKS UP (never seeds): the daemon seeds the canonical
 // mapping once per window in WindowTrackingAdaptor::setWindowMetadata (the
 // universal window-open choke point), so by the time any snap accessor runs the
-// window already has a canonical entry. Looking up (rather than seeding) here is
-// also what keeps the appId-alias writes safe — the pre-float session-restore
-// fallback passes a BARE appId (no instance id) to addPreFloat*/clearPreFloatZone,
-// and a no-seed lookup returns it verbatim instead of polluting the registry's
-// instance map with an appId-keyed entry that would never be released.
+// window already has a canonical entry. A lookup also never mints a registry
+// entry for an id that is not a window's, which a seeding call would.
 
 QString SnapState::canonicalizeForLookup(const QString& rawWindowId) const
 {
@@ -236,6 +235,40 @@ void SnapState::recordResidence(const QString& rawWindowId, const QString& scree
     }
 }
 
+void SnapState::renumberDesktopsAfterRemoval(int removedDesktop)
+{
+    if (removedDesktop < 1) {
+        return;
+    }
+    // The removal map has to reach every number this store holds, or one
+    // above its old count would read as outside the list and keep its number.
+    int highest = std::max(removedDesktop, m_lastUsedDesktop);
+    for (const int desktop : std::as_const(m_windowDesktopAssignments)) {
+        highest = std::max(highest, desktop);
+    }
+    remapDesktops(PhosphorEngine::DesktopRemap::removal(removedDesktop, highest));
+}
+
+void SnapState::remapDesktops(const PhosphorEngine::DesktopRemap& remap)
+{
+    // In place: each value is one window's desktop, so no write can land on
+    // an entry not yet visited.
+    bool changed = false;
+    for (auto it = m_windowDesktopAssignments.begin(); it != m_windowDesktopAssignments.end(); ++it) {
+        if (const int next = remap.map(it.value()); next != it.value()) {
+            it.value() = next;
+            changed = true;
+        }
+    }
+    if (const int next = remap.map(m_lastUsedDesktop); next != m_lastUsedDesktop) {
+        m_lastUsedDesktop = next;
+        changed = true;
+    }
+    if (changed) {
+        Q_EMIT stateChanged();
+    }
+}
+
 int SnapState::desktopForWindow(const QString& rawWindowId) const
 {
     const QString windowId = canonicalizeForLookup(rawWindowId);
@@ -256,88 +289,6 @@ bool SnapState::reassignDesktop(const QString& rawWindowId, int virtualDesktop)
     m_windowDesktopAssignments[windowId] = virtualDesktop;
     Q_EMIT stateChanged();
     return true;
-}
-
-QStringList SnapState::windowsTaggedWithDesktop(int desktop) const
-{
-    QStringList result;
-    if (desktop <= 0) {
-        return result;
-    }
-    for (auto it = m_windowDesktopAssignments.constBegin(); it != m_windowDesktopAssignments.constEnd(); ++it) {
-        if (it.value() == desktop) {
-            result.append(it.key());
-        }
-    }
-    result.sort();
-    return result;
-}
-
-void SnapState::reapDesktopValues(int desktop)
-{
-    if (desktop <= 0) {
-        return; // 0 is the all-desktops sentinel; there is no desktop to reap
-    }
-    bool changed = false;
-    // Drop the window's WHOLE placement record, not just its desktop tag. The
-    // tag alone cannot be erased and left at that: the zone and screen entries
-    // outlive it, and a zone-assigned window with no tag reads as occupying its
-    // zone on EVERY desktop (buildOccupiedZoneSet passes an absent tag through
-    // its value(key, 0) sentinel branch) while dropping out of
-    // windowsOnScreenAndDesktop entirely, so cross-desktop directional focus
-    // can no longer reach it. Nothing re-stamps the tag either: the registry's
-    // virtualDesktop is positional and is documented as NOT re-pushed across a
-    // renumber, and the only production recordResidence caller is the
-    // cross-screen unfloat. The window is alive but its desktop is gone, so the
-    // honest state is the one the dying stores land in — no placement at all.
-    // SnapEngine::reapDesktopState announces the drops before calling this.
-    for (const QString& windowId : windowsTaggedWithDesktop(desktop)) {
-        changed |= removeWindowData(windowId);
-    }
-    if (m_lastUsedDesktop == desktop) {
-        m_lastUsedDesktop = 0;
-        changed = true;
-    }
-    if (changed) {
-        Q_EMIT stateChanged();
-    }
-}
-
-void SnapState::renumberDesktopValues(const QHash<int, int>& oldToNew)
-{
-    // A mapping to a non-positive target is malformed (see the declaration):
-    // applying it would stamp the all-desktops sentinel onto real windows.
-    // Refused WHOLE, through the shared gate, because the two arms that run
-    // beside this one in SnapEngine::renumberDesktopState — the state-map
-    // rewrite and the context tracker's — refuse the same mapping whole. A
-    // per-entry refusal here would shift the per-window tags while the keys
-    // and the pins they belong to stayed on their old numbers.
-    if (oldToNew.isEmpty() || !PhosphorEngine::desktopRenumberMappingIsValid(oldToNew)) {
-        return;
-    }
-    const auto mapDesktop = [&oldToNew](int desktop) {
-        return oldToNew.value(desktop, desktop);
-    };
-    bool changed = false;
-    for (auto it = m_windowDesktopAssignments.begin(); it != m_windowDesktopAssignments.end(); ++it) {
-        if (it.value() != 0) {
-            const int mapped = mapDesktop(it.value());
-            if (mapped != it.value()) {
-                it.value() = mapped;
-                changed = true;
-            }
-        }
-    }
-    if (m_lastUsedDesktop != 0) {
-        const int mapped = mapDesktop(m_lastUsedDesktop);
-        if (mapped != m_lastUsedDesktop) {
-            m_lastUsedDesktop = mapped;
-            changed = true;
-        }
-    }
-    if (changed) {
-        Q_EMIT stateChanged();
-    }
 }
 
 QStringList SnapState::windowsOnScreenAndDesktop(const QString& screenId, int virtualDesktop) const
@@ -614,8 +565,8 @@ void SnapState::migrateWindowTo(SnapState* target, const QString& rawWindowId, c
         target->m_floatingWindows.insert(windowId);
         moved = true;
     }
-    // Pre-float zone/screen carry over UNCHANGED (they name the source monitor's
-    // home zone — behaviour A).
+    // Pre-float zone/screen carry over UNCHANGED: a move to another monitor
+    // has already dropped them, and a re-key on the same one keeps them.
     if (const auto it = m_preFloatZoneAssignments.constFind(windowId); it != m_preFloatZoneAssignments.constEnd()) {
         target->m_preFloatZoneAssignments[windowId] = it.value();
         m_preFloatZoneAssignments.remove(windowId);

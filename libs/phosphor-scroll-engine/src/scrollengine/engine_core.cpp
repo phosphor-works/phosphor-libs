@@ -10,11 +10,11 @@
 #include <PhosphorScrollEngine/IScrollSettings.h>
 
 #include "enginelimits.h"
+#include "evacueepark_p.h"
 #include "scrollenginelogging.h"
 
-#include <algorithm>
-
 #include <QMetaObject>
+#include <algorithm>
 
 namespace PhosphorScrollEngine {
 
@@ -251,7 +251,7 @@ void ScrollEngine::setActiveScreens(const QSet<QString>& screens)
                 // tabbed flags) instead of a default one-window-per-column
                 // strip. Captured BEFORE the release strips the state.
                 stashStripStructure(key, state, fallbackAxis);
-                releaseScreenState(state, releasedWindows);
+                releaseScreenState(key, state, releasedWindows);
                 // Inside the callback so the payload names only screens that
                 // had a MATCHING STATE — the daemon's release handler uses
                 // it as a skip filter, and a leaving screen that never built
@@ -259,9 +259,8 @@ void ScrollEngine::setActiveScreens(const QSet<QString>& screens)
                 // (the sibling prune's payload keeps the same contract).
                 releasedScreens.insert(screenId);
             });
-        // Ownership only — the per-output desktop STAYS. This screen is
-        // leaving scrolling, not disappearing, and its desktop is compositor
-        // truth this engine cannot re-derive (see releaseScreenOwnership).
+        // Ownership only — the per-output desktop STAYS: the screen is leaving
+        // scrolling, not disappearing (see releaseScreenOwnership).
         m_context.releaseScreenOwnership(screenId);
         // Even a STATELESS leaving screen (seed pushed before any window
         // arrived) must drop its per-screen bookkeeping — the state-driven
@@ -287,13 +286,20 @@ void ScrollEngine::setActiveScreens(const QSet<QString>& screens)
         // prune above tore down the current-context state only, and
         // removeWindowsIf drops every membership, which would leave those
         // strips holding a tile nothing reaps.
+        // Its per-window memories go with the last of them: releaseScreenState
+        // keeps them for a window another live context still holds, and that
+        // context has just let it go. No snapshot is owed first, because the
+        // released context is the current one, which is the window's primary,
+        // so releaseScreenState has already recorded it.
         for (const QString& windowId : std::as_const(releasedWindows)) {
             dropFromOtherContexts(windowId, PhosphorEngine::PlacementStateKey{});
+            forgetReleasedWindowMemories(windowId);
         }
         const QSet<QString> releasedSet(releasedWindows.cbegin(), releasedWindows.cend());
         m_states.removeWindowsIf([&releasedSet](const QString& windowId, const PhosphorEngine::PlacementStateKey&) {
             return releasedSet.contains(windowId);
         });
+        announceReleasedFullscreenHolds();
         Q_EMIT windowsReleased(releasedWindows, releasedScreens);
     }
 
@@ -499,6 +505,47 @@ void ScrollEngine::stashStripStructure(const PhosphorEngine::PlacementStateKey& 
     if (stash.isEmpty() && stash.blueprintCursor <= 0) {
         return;
     }
+    // An entry already at this key can still hold tiles whose windows never
+    // came back: the strip was stashed, some of its windows re-announced and
+    // rebuilt a live strip here, and that strip is now leaving again before
+    // the rest returned. Replacing the entry destroyed those pending tiles,
+    // so they are folded in behind the fresh capture instead, on
+    // serializeStripState's terms for a stash beside a live strip: the live
+    // columns first, then the stashed tiles that are neither in the capture
+    // nor already claimed, with the larger of the two cursors.
+    if (const auto existing = m_stripStash.constFind(key); existing != m_stripStash.cend()) {
+        QSet<QString> captured;
+        for (const StashedColumn& col : std::as_const(stash.columns)) {
+            for (const StashedTile& tile : col.tiles) {
+                captured.insert(tile.windowId);
+            }
+        }
+        const QSet<QString> consumed = m_stripStashConsumed.value(key);
+        for (StashedColumn col : existing->columns) {
+            col.tiles.removeIf([&captured, &consumed](const StashedTile& tile) {
+                return captured.contains(tile.windowId) || consumed.contains(tile.windowId);
+            });
+            if (!col.tiles.isEmpty()) {
+                stash.columns.append(col);
+            }
+        }
+        // Absorbed only when both cursors count against the same blueprint,
+        // migrateStateKey's rule for the same pairing: a cursor is meaningful
+        // only beside the identity it was counted against.
+        const bool sameBlueprint = !stash.blueprintIdentity.isValid() || !existing->blueprintIdentity.isValid()
+            || stash.blueprintIdentity == existing->blueprintIdentity;
+        if (sameBlueprint) {
+            stash.blueprintCursor = qMax(stash.blueprintCursor, existing->blueprintCursor);
+        }
+        if (!stash.blueprintIdentity.isValid() && existing->blueprintIdentity.isValid()) {
+            stash.blueprintIdentity = existing->blueprintIdentity;
+        }
+        // A fuzzy-claim window the pending tiles were staged under keeps
+        // running for them; the fresh capture never starts one of its own.
+        if (!stash.fuzzyClaimWindow.isValid()) {
+            stash.fuzzyClaimWindow = existing->fuzzyClaimWindow;
+        }
+    }
     // Recency stamp: serializeStripState resolves a window listed under two
     // different keys in favour of the newer entry, and keys do not collide so
     // write order cannot decide it.
@@ -615,16 +662,12 @@ bool ScrollEngine::restoreFromStripStash(ScrollState* state, const PhosphorEngin
         // without focus — seen live as new firefox/ghostty windows landing at
         // the park row for the whole session. Exact-id claims above are
         // untouched: the id match is its own evidence.
-        // Half-open [0, grace): elapsed() < grace, deliberately NOT
-        // hasExpired(grace). hasExpired compares STRICTLY GREATER, so it
-        // holds a zero-length window OPEN for its whole first millisecond.
-        // At the shipped 60 s grace that difference is unobservable, but it
-        // makes a grace of 0 read as "still open" rather than "already
-        // closed" — and 0 is the one value that lets a test reach the refusal
-        // arm at all, since a test elapses well under a millisecond.
-        //
-        // isValid() still gates: an unstarted timer's elapsed() is
-        // meaningless, and an entry whose grace was never opened is closed.
+        // Half-open [0, grace): elapsed() < grace reads a grace of 0 as
+        // "already closed", the one value that lets a test reach the refusal
+        // arm. Deliberately NOT hasExpired(grace), which compares STRICTLY
+        // GREATER and so would hold a zero-length window OPEN for its first
+        // millisecond. isValid() still gates: an unstarted timer's elapsed()
+        // is meaningless, and a grace never opened is closed.
         const bool fuzzyGraceOpen =
             stashStrip.fuzzyClaimWindow.isValid() && stashStrip.fuzzyClaimWindow.elapsed() < m_fuzzyClaimGraceMs;
         if (!appPrefix.isEmpty() && !fuzzyGraceOpen) {
@@ -647,8 +690,12 @@ bool ScrollEngine::restoreFromStripStash(ScrollState* state, const PhosphorEngin
                     // through an alias of the overwritten field silently
                     // broke the focus hand-over.
                     const QString candidate = stash.at(i).tiles.at(t).windowId;
+                    // A candidate the registry still holds is a window open
+                    // elsewhere, not a dead sibling: its column is its own (F648).
                     if (!candidate.startsWith(appPrefix) || consumed.contains(candidate)
-                        || state->strip().containsWindow(candidate)) {
+                        || state->strip().containsWindow(candidate)
+                        || (m_windowRegistry
+                            && m_windowRegistry->contains(PhosphorIdentity::WindowId::extractInstanceId(candidate)))) {
                         continue;
                     }
                     // STAGE the claim; do not commit it until the insert below
@@ -1269,7 +1316,19 @@ void ScrollEngine::refreshConfigFromSettings()
                               && sticky <= static_cast<int>(PhosphorEngine::StickyWindowHandling::IgnoreAll))
         ? static_cast<PhosphorEngine::StickyWindowHandling>(sticky)
         : PhosphorEngine::StickyWindowHandling::TreatAsNormal;
+    // Minimum sizes coming back on is the one moment a client's answer to its
+    // tile can be learned that nothing else would re-offer: nothing is learned
+    // while they are off (reportCommittedSize), the compositor reports an
+    // answer once per offer, and a strip whose rects did not move would emit
+    // no batch and so make no offer. Forcing every screen's next batch makes
+    // that offer, and the client's answer to it is learned.
+    const bool respectTurnedOn = !m_respectMinimumSize && settings->scrollingRespectMinimumSize();
     m_respectMinimumSize = settings->scrollingRespectMinimumSize();
+    if (respectTurnedOn) {
+        for (const QString& screenId : std::as_const(m_scrollingScreens)) {
+            m_forceEmitScreens.insert(screenId);
+        }
+    }
     m_centerShortColumns = settings->scrollingCenterShortColumns();
     m_smartGaps = settings->scrollingSmartGaps();
 
@@ -1325,6 +1384,12 @@ void ScrollEngine::applyPerScreenConfig(const QString& screenId, const QVariantM
         return;
     }
     m_perScreenOverrides.insert(key, overrides);
+    // A rule turning minimum sizes back on for this context forces the next
+    // batch, for refreshConfigFromSettings' reason: the offer it makes is how
+    // a client's answer gets learned after a stretch of nothing being learned.
+    if (!effectiveRespectMinimumSize(previous) && effectiveRespectMinimumSize(overrides)) {
+        m_forceEmitScreens.insert(screenId);
+    }
     // Deliberately no cursor reset here. A blueprint SWAP is noticed at the
     // consumption site by comparing ScrollState::blueprintIdentity against
     // the blueprint actually in force, which is the only place that can tell
@@ -1337,17 +1402,26 @@ void ScrollEngine::applyPerScreenConfig(const QString& screenId, const QVariantM
 
 void ScrollEngine::clearPerScreenConfig(const QString& screenId)
 {
-    // Every context on the screen, not just the current one: this is the
-    // whole-SCREEN door, and the caller is telling us the screen has left
-    // scrolling entirely, so no context's overrides survive it. A caller that
-    // means "this CONTEXT resolved no overrides" must not come here — it
-    // pushes an empty map through applyPerScreenConfig instead, which reads
-    // identically at every effective* reader without touching the sibling
-    // contexts. The in-tree caller is updateScrollingScreens' departing-screen
-    // loop, which runs after setActiveScreens has already dropped the screen.
+    // The whole-SCREEN door: the caller is telling us the screen has left
+    // scrolling, which setActiveScreens has already acted on by tearing down
+    // the screen's CURRENT context. The screen's other contexts keep their
+    // strips through that trip (a desktop in another mode leaves the scrolling
+    // desktops beside it standing), and those strips are still laid out in the
+    // background: a close, a min-size report or a membership change there
+    // resolves its params through layoutParamsForKey, which reads this map.
+    // Wiping their overrides handed those passes the global vocabulary and
+    // axis, so only a context with no live state left loses its entry. A
+    // caller that means "this CONTEXT resolved no overrides" must not come
+    // here — it pushes an empty map through applyPerScreenConfig instead,
+    // which reads identically at every effective* reader without touching the
+    // sibling contexts. The in-tree caller is updateScrollingScreens'
+    // departing-screen loop, which runs after setActiveScreens has already
+    // dropped the screen. A surviving context's entry is refreshed by the
+    // producer's push when that context is next current, and purged by the
+    // desktop, activity and output prunes like every other entry.
     bool removed = false;
     for (auto it = m_perScreenOverrides.begin(); it != m_perScreenOverrides.end();) {
-        if (it.key().screenId == screenId) {
+        if (it.key().screenId == screenId && !m_states.stateForKey(it.key())) {
             it = m_perScreenOverrides.erase(it);
             removed = true;
         } else {

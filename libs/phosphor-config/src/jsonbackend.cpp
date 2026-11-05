@@ -7,6 +7,7 @@
 #include <PhosphorConfig/Schema.h>
 
 #include <QColor>
+#include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -121,6 +122,53 @@ QString jsonValueToString(const QJsonValue& val, const QString& defaultValue)
     return val.toString(defaultValue);
 }
 
+/// @p over laid onto @p base: objects merge key by key at every depth, and
+/// any other value in @p over replaces whatever @p base holds there. This is
+/// the one definition of what an overlay means; the group-level lookup below
+/// and the enumeration in @c groupList both reduce to it.
+QJsonObject mergedOver(QJsonObject base, const QJsonObject& over)
+{
+    for (auto it = over.constBegin(); it != over.constEnd(); ++it) {
+        const QJsonValue existing = base.value(it.key());
+        if (it.value().isObject() && existing.isObject()) {
+            base.insert(it.key(), mergedOver(existing.toObject(), it.value().toObject()));
+        } else {
+            base.insert(it.key(), it.value());
+        }
+    }
+    return base;
+}
+
+/// The object at @p segments in `mergedOver(root, overlay)`, computed without
+/// merging the whole document on every read. Walks both trees in step: while
+/// the overlay has objects along the path the two merge at the leaf; where the
+/// overlay has nothing the file's object is returned untouched; and a non-object
+/// overlay value along the path replaces the group, exactly as the full merge
+/// would, so the group reads as empty.
+QJsonObject overlaidGroupObject(const QJsonObject& root, const QJsonObject& overlay, const QStringList& segments)
+{
+    if (segments.isEmpty()) {
+        return {};
+    }
+    if (overlay.isEmpty()) {
+        return navigatePath(root, segments);
+    }
+    QJsonObject file = root;
+    QJsonObject over = overlay;
+    for (qsizetype i = 0; i < segments.size(); ++i) {
+        const QJsonValue overValue = over.value(segments[i]);
+        if (overValue.isUndefined()) {
+            return navigatePath(file, segments.mid(i));
+        }
+        if (!overValue.isObject()) {
+            return {};
+        }
+        over = overValue.toObject();
+        file = file.value(segments[i]).toObject();
+    }
+    return mergedOver(file, over);
+}
+
 void removeAtPath(QJsonObject& root, const QStringList& segments)
 {
     if (segments.isEmpty()) {
@@ -153,13 +201,99 @@ void removeAtPath(QJsonObject& root, const QStringList& segments)
 
 } // namespace
 
+// ─── Reading the backing file ──────────────────────────────────────────────
+
+namespace {
+
+/// What a read of the backing file found. Missing is a first run (or a
+/// deliberate delete) and is not a failure; Unreadable covers an open
+/// failure, a parse error and a non-object root alike.
+enum class DiskRead {
+    Missing,
+    Ok,
+    Unreadable,
+};
+
+/// Read and parse @p path into @p out. Logs the reason for Unreadable, naming
+/// what @p consequence then happens.
+DiskRead readDocument(const QString& path, QJsonObject& out, const char* consequence)
+{
+    QFile f(path);
+    if (!f.exists()) {
+        return DiskRead::Missing;
+    }
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning("PhosphorConfig::JsonBackend: failed to open %s for reading — %s", qPrintable(path), consequence);
+        return DiskRead::Unreadable;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+    if (err.error != QJsonParseError::NoError) {
+        qWarning("PhosphorConfig::JsonBackend: JSON parse error in %s at offset %d: %s — %s", qPrintable(path),
+                 err.offset, qPrintable(err.errorString()), consequence);
+        return DiskRead::Unreadable;
+    }
+    if (!doc.isObject()) {
+        // Well-formed JSON that isn't an object (a bare array / literal at the
+        // root). doc.object() would silently hand back {}, which must not be
+        // mistaken for a first run.
+        qWarning("PhosphorConfig::JsonBackend: %s does not hold a JSON object at its root — %s", qPrintable(path),
+                 consequence);
+        return DiskRead::Unreadable;
+    }
+    out = doc.object();
+    return DiskRead::Ok;
+}
+
+/// Size and modification time of the backing file, to notice cheaply that
+/// someone else rewrote it since this backend last read or wrote it.
+struct DiskStamp
+{
+    bool exists = false;
+    qint64 size = -1;
+    QDateTime modified;
+    bool operator==(const DiskStamp&) const = default;
+};
+
+DiskStamp stampOf(const QString& path)
+{
+    const QFileInfo info(path);
+    if (!info.exists()) {
+        return {};
+    }
+    return {true, info.size(), info.lastModified()};
+}
+
+} // namespace
+
 // ─── JsonBackend::Data ──────────────────────────────────────────────────────
 
 struct JsonBackend::Data
 {
     QString filePath;
     QJsonObject root;
+    /// The document this backend last read or wrote successfully: refreshed
+    /// by every successful load, flush and migration commit (another
+    /// process's write is not seen until the next load). A reparse that finds
+    /// the file unreadable falls back to it rather than to {}, so a
+    /// hand-broken file reads as "unchanged" instead of "every key reset".
+    /// The overlay is not part of it, being kept apart from root.
+    QJsonObject lastGoodRoot;
+    /// Read-only layer over @c root (see @c setOverlay). Kept apart from it so
+    /// nothing that writes, syncs or snapshots @c root can ever carry it.
+    QJsonObject overlay;
     bool dirty = false;
+    /// The most recent load, or the check a flush makes when the file has
+    /// changed since, found a file it could not read (open failure, parse
+    /// error, non-object root). Writes are refused while it is set, because
+    /// d->root is then a stand-in rather than what disk holds, and a
+    /// whole-document flush would overwrite the user's file with it.
+    bool loadFailed = false;
+    /// setOverwriteUnreadable: a failed load does not block writes.
+    bool overwriteUnreadable = false;
+    /// The backing file as this backend last read or wrote it, so a flush can
+    /// tell whether someone else has rewritten it since.
+    DiskStamp stamp;
     int activeGroupCount = 0;
     std::shared_ptr<IGroupPathResolver> resolver;
     QString rootGroupName = QStringLiteral("General");
@@ -214,10 +348,11 @@ QStringList resolvePath(const std::shared_ptr<IGroupPathResolver>& resolver, con
 
 // ─── JsonGroup ──────────────────────────────────────────────────────────────
 
-JsonGroup::JsonGroup(QJsonObject& root, QString groupName, JsonBackend* backend)
+JsonGroup::JsonGroup(QJsonObject& root, QString groupName, JsonBackend* backend, View view)
     : m_root(root)
     , m_groupName(std::move(groupName))
     , m_backend(backend)
+    , m_view(view)
 {
     const int count = m_backend->activeGroupCount();
     if (count != 0) {
@@ -263,7 +398,18 @@ bool JsonGroup::refuseWrite(const char* op) const
 
 QJsonObject JsonGroup::groupObject() const
 {
+    if (m_view == View::Persisted) {
+        return storedGroupObject();
+    }
+    // Resolved against the backend's CURRENT overlay on every read, never
+    // cached, so a setOverlay() while this view is alive is seen at once.
     const auto segments = resolvePath(m_backend->d->resolver, m_groupName, "JsonGroup::groupObject");
+    return overlaidGroupObject(m_root, m_backend->d->overlay, segments);
+}
+
+QJsonObject JsonGroup::storedGroupObject() const
+{
+    const auto segments = resolvePath(m_backend->d->resolver, m_groupName, "JsonGroup::storedGroupObject");
     return navigatePath(m_root, segments);
 }
 
@@ -428,7 +574,7 @@ void JsonGroup::writeString(const QString& key, const QString& value)
     if (refuseWrite("writeString")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value;
     setGroupObject(obj);
 }
@@ -442,7 +588,7 @@ void JsonGroup::writeJson(const QString& key, const QJsonValue& value)
     // structure-preserving storage (e.g. @c Store::write for QVariantList /
     // QVariantMap, trigger lists, per-algorithm settings) reach through here
     // instead of relying on data-dependent shape inference in writeString.
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value;
     setGroupObject(obj);
 }
@@ -462,7 +608,7 @@ void JsonGroup::writeInt(const QString& key, int value)
     if (refuseWrite("writeInt")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value;
     setGroupObject(obj);
 }
@@ -472,7 +618,7 @@ void JsonGroup::writeBool(const QString& key, bool value)
     if (refuseWrite("writeBool")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value;
     setGroupObject(obj);
 }
@@ -482,7 +628,7 @@ void JsonGroup::writeDouble(const QString& key, double value)
     if (refuseWrite("writeDouble")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value;
     setGroupObject(obj);
 }
@@ -492,7 +638,7 @@ void JsonGroup::writeColor(const QString& key, const QColor& value)
     if (refuseWrite("writeColor")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     obj[key] = value.name(QColor::HexArgb);
     setGroupObject(obj);
 }
@@ -516,7 +662,7 @@ void JsonGroup::deleteKey(const QString& key)
     if (refuseWrite("deleteKey")) {
         return;
     }
-    QJsonObject obj = groupObject();
+    QJsonObject obj = storedGroupObject();
     if (!obj.contains(key)) {
         return;
     }
@@ -564,6 +710,17 @@ JsonBackend::~JsonBackend()
 {
     Q_ASSERT_X(d->activeGroupCount == 0, "PhosphorConfig::JsonBackend::~JsonBackend",
                "JsonGroup still alive when backend is being destroyed");
+    // Release-build pair. reparseConfiguration, deleteGroup and replaceRoot all
+    // refuse when a group is live; a destructor cannot refuse, and the
+    // consequence is concrete rather than theoretical — JsonGroup::~JsonGroup
+    // calls decActiveGroupCount() on m_backend, which is about to dangle. So at
+    // least make the use-after-free diagnosable instead of silent.
+    if (d->activeGroupCount != 0) {
+        qCritical(
+            "PhosphorConfig::JsonBackend: destroyed with %d live JsonGroup view(s) — "
+            "each now holds a dangling backend pointer",
+            d->activeGroupCount);
+    }
     // Flush any dirty in-memory state to disk before destruction. Covers
     // both Deferred mode (pending debounce timer) and Synchronous mode where
     // a consumer has written without calling sync() — matching QSettings'
@@ -577,37 +734,38 @@ JsonBackend::~JsonBackend()
 
 void JsonBackend::loadFromDisk()
 {
-    QFile f(d->filePath);
-    if (!f.exists()) {
+    // An unreadable file falls back to the last readable document and flags
+    // the load as failed; see Data::loadFailed for why writes are then
+    // refused. A missing file is NOT a failure: it is a first run (or a
+    // deliberate delete), and starting empty with writes allowed is correct.
+    d->stamp = stampOf(d->filePath);
+    QJsonObject doc;
+    switch (readDocument(d->filePath, doc, "keeping the last readable state")) {
+    case DiskRead::Missing:
         d->root = QJsonObject();
+        d->lastGoodRoot = QJsonObject();
+        d->loadFailed = false;
+        return;
+    case DiskRead::Unreadable:
+        d->root = d->lastGoodRoot;
+        d->loadFailed = true;
+        return;
+    case DiskRead::Ok:
+        d->root = std::move(doc);
+        d->lastGoodRoot = d->root;
+        d->loadFailed = false;
         return;
     }
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning("PhosphorConfig::JsonBackend: failed to open %s for reading", qPrintable(d->filePath));
-        d->root = QJsonObject();
-        return;
-    }
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning("PhosphorConfig::JsonBackend: JSON parse error in %s at offset %d: %s", qPrintable(d->filePath),
-                 err.offset, qPrintable(err.errorString()));
-        d->root = QJsonObject();
-        return;
-    }
-    if (!doc.isObject()) {
-        // Well-formed JSON that isn't an object (a bare array / literal at the
-        // root). doc.object() would silently hand back {} — same outcome as the
-        // missing-file and parse-error paths above, so it gets the same
-        // breadcrumb rather than looking like a first run.
-        qWarning(
-            "PhosphorConfig::JsonBackend: %s does not hold a JSON object at its root — starting from an empty "
-            "configuration",
-            qPrintable(d->filePath));
-        d->root = QJsonObject();
-        return;
-    }
-    d->root = doc.object();
+}
+
+void JsonBackend::setOverwriteUnreadable(bool overwrite)
+{
+    d->overwriteUnreadable = overwrite;
+}
+
+bool JsonBackend::loadFailed() const
+{
+    return d->loadFailed;
 }
 
 void JsonBackend::markDirty()
@@ -647,6 +805,21 @@ std::unique_ptr<IGroup> JsonBackend::group(const QString& name)
     return std::make_unique<JsonGroup>(d->root, name, this);
 }
 
+std::unique_ptr<IGroup> JsonBackend::persistedGroup(const QString& name)
+{
+    return std::make_unique<JsonGroup>(d->root, name, this, JsonGroup::View::Persisted);
+}
+
+void JsonBackend::setOverlay(const QJsonObject& overlay)
+{
+    d->overlay = overlay;
+}
+
+QJsonObject JsonBackend::overlay() const
+{
+    return d->overlay;
+}
+
 void JsonBackend::reparseConfiguration()
 {
     Q_ASSERT_X(d->activeGroupCount == 0, "PhosphorConfig::JsonBackend::reparseConfiguration",
@@ -662,6 +835,9 @@ void JsonBackend::reparseConfiguration()
             d->activeGroupCount);
         return;
     }
+    // Replaces the backend's own document (the last good one if the file no
+    // longer parses). The overlay is not file state, so it is kept and laid
+    // over the reloaded values.
     loadFromDisk();
     d->dirty = false;
 }
@@ -688,6 +864,32 @@ bool JsonBackend::flushNow()
     if (!d->dirty) {
         return true;
     }
+    if (!d->overwriteUnreadable) {
+        // A file broken since the last load is caught here, not only by a
+        // reparse: most writers flush without reparsing first, and a hand
+        // edit with a typo would otherwise be overwritten by the first save
+        // after it. Checked only when the file changed since this backend
+        // last read or wrote it, so a normal flush costs one stat.
+        if (!d->loadFailed && stampOf(d->filePath) != d->stamp) {
+            QJsonObject ignored;
+            if (readDocument(d->filePath, ignored, "not overwriting it") == DiskRead::Unreadable) {
+                d->loadFailed = true;
+            }
+        }
+        if (d->loadFailed) {
+            // The file holds something this backend could not read, so a
+            // whole-document write would replace it with this process's
+            // state. The backend stays dirty, which keeps the edit in memory
+            // and keeps a clean-backend refresh from reparsing over it; the
+            // reparse that clears the refusal once the file is repaired
+            // replaces the in-memory document, edits included, so a caller
+            // that wants to keep them re-applies them after (Settings does,
+            // through reloadPreservingLocalEdits).
+            qWarning("PhosphorConfig::JsonBackend: refusing to write %s — it could not be read",
+                     qPrintable(d->filePath));
+            return false;
+        }
+    }
 
     applyVersionStamp(d->root);
 
@@ -698,6 +900,8 @@ bool JsonBackend::flushNow()
         return false;
     }
 
+    d->lastGoodRoot = d->root;
+    d->stamp = stampOf(d->filePath);
     d->dirty = false;
     return true;
 }
@@ -852,7 +1056,7 @@ void JsonBackend::deleteGroup(const QString& name)
 
 QString JsonBackend::readRootString(const QString& key, const QString& defaultValue) const
 {
-    const QJsonObject general = d->root.value(d->rootGroupName).toObject();
+    const QJsonObject general = overlaidGroupObject(d->root, d->overlay, QStringList{d->rootGroupName});
     if (!general.contains(key)) {
         return defaultValue;
     }
@@ -960,11 +1164,14 @@ QStringList JsonBackend::groupList() const
         }
     }
 
-    enumerateDotPathGroups(d->root, QString(), 0, skipRoots, groups);
+    // A group the overlay alone supplies is as readable as one on disk, so it
+    // is enumerated too, merged in exactly as every read sees it.
+    const QJsonObject root = d->overlay.isEmpty() ? d->root : mergedOver(d->root, d->overlay);
+    enumerateDotPathGroups(root, QString(), 0, skipRoots, groups);
 
     // Resolver-owned group names.
     if (d->resolver) {
-        groups.append(d->resolver->enumerate(d->root));
+        groups.append(d->resolver->enumerate(root));
     }
 
     return groups;
@@ -1064,6 +1271,15 @@ bool JsonBackend::applyMigration(const Schema& schema)
     if (schema.migrations.isEmpty()) {
         return true;
     }
+    if (d->loadFailed && !d->overwriteUnreadable) {
+        // Same refusal as flushNow: the root is a stand-in for a file that
+        // could not be read, so committing a migrated copy of it would
+        // overwrite that file.
+        qWarning(
+            "PhosphorConfig::JsonBackend::applyMigration: refusing to migrate %s — the last load could not read it",
+            qPrintable(d->filePath));
+        return false;
+    }
     // Work against an in-memory snapshot so a partial migration (step 3 of 5
     // fails) never leaves the backend's live root half-transformed. On
     // success we swap the whole thing into place; on failure the live state
@@ -1093,6 +1309,8 @@ bool JsonBackend::applyMigration(const Schema& schema)
     // the "in-memory matches disk" invariant without paying a re-read.
     replaceRoot(std::move(snapshot));
     clearDirty();
+    d->lastGoodRoot = d->root;
+    d->stamp = stampOf(d->filePath);
     return true;
 }
 

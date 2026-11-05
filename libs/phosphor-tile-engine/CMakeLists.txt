@@ -9,7 +9,19 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-set(PHOSPHORTILEENGINE_VERSION "0.1.0")
+set(PHOSPHORTILEENGINE_VERSION "0.2.0")
+
+# The Qt floor this library requires AND advertises in its generated
+# PhosphorTileEngineConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
+# the two cannot drift, with its own value for a STANDALONE build, where that
+# variable does not exist. The fallback is not optional: the Config template
+# substitutes this, and an undefined variable expands to nothing and ships a config
+# whose find_dependency(Qt6 ...) carries no version floor at all.
+if(DEFINED QT_MIN_VERSION)
+    set(PHOSPHORTILEENGINE_QT_MIN ${QT_MIN_VERSION})
+else()
+    set(PHOSPHORTILEENGINE_QT_MIN "6.10.0")
+endif()
 
 if(NOT PROJECT_VERSION)
     project(PhosphorTileEngine VERSION ${PHOSPHORTILEENGINE_VERSION} LANGUAGES CXX)
@@ -20,6 +32,49 @@ endif()
 include(GenerateExportHeader)
 
 set(CMAKE_AUTOMOC ON)
+
+# Sibling Phosphor libraries this one links. Each lookup is GUARDED rather than
+# unconditional: in-tree the parent add_subdirectory()s the sibling before this
+# directory, so its ALIAS target already exists and the find_package is skipped.
+# A STANDALONE configure (the project() guard above says this directory supports
+# one) has no such target, and without these it failed at target_link_libraries
+# with "links to X::X but the target was not found".
+
+# the shared placement policy every engine builds on
+if(NOT TARGET PhosphorEngine::PhosphorEngine)
+    find_package(PhosphorEngine CONFIG REQUIRED)
+endif()
+
+# the geometry primitives the placement types are expressed in
+if(NOT TARGET PhosphorGeometry::PhosphorGeometry)
+    find_package(PhosphorGeometry CONFIG REQUIRED)
+endif()
+
+# the window-identity types the placement API keys on
+if(NOT TARGET PhosphorIdentity::PhosphorIdentity)
+    find_package(PhosphorIdentity CONFIG REQUIRED)
+endif()
+
+# the layout-provider interface
+if(NOT TARGET PhosphorLayoutApi::PhosphorLayoutApi)
+    find_package(PhosphorLayoutApi CONFIG REQUIRED)
+endif()
+
+# the Luau tiling-algorithm host
+if(NOT TARGET PhosphorTiles::PhosphorTiles)
+    find_package(PhosphorTiles CONFIG REQUIRED)
+endif()
+
+# the zone and layout model
+if(NOT TARGET PhosphorZones::PhosphorZones)
+    find_package(PhosphorZones CONFIG REQUIRED)
+endif()
+
+# the screen model. Linked as PhosphorScreens::Runtime, an alias whose target
+# name differs from the package name.
+if(NOT TARGET PhosphorScreens::PhosphorScreens)
+    find_package(PhosphorScreens CONFIG REQUIRED)
+endif()
 
 add_library(PhosphorTileEngine SHARED
     include/PhosphorTileEngine/AutotileEngine.h
@@ -33,6 +88,7 @@ add_library(PhosphorTileEngine SHARED
     src/autotileengine/engine_internal.h
     src/autotileengine/core.cpp
     src/autotileengine/context.cpp
+    src/autotileengine/desktopremap.cpp
     src/autotileengine/membership.cpp
     src/autotileengine/algorithm_state.cpp
     src/autotileengine/config.cpp
@@ -43,6 +99,8 @@ add_library(PhosphorTileEngine SHARED
     src/autotileengine/insert.cpp
     src/autotileengine/layout_apply.cpp
     src/autotileengine/drag_preview.cpp
+    src/autotileengine/evacueepark.cpp
+    src/autotileengine/evacueepark_p.h
     src/autotileengine/facade.cpp
     src/AutotileConfig.cpp
     src/NavigationController.cpp

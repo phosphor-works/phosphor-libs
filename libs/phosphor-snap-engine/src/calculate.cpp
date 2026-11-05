@@ -10,6 +10,7 @@
 #include <PhosphorZones/Layout.h>
 #include <PhosphorZones/Zone.h>
 #include <PhosphorZones/LayoutRegistry.h>
+#include <PhosphorZones/LayoutUtils.h>
 #include <PhosphorScreens/Manager.h>
 #include <PhosphorScreens/VirtualScreen.h>
 #include <PhosphorSnapEngine/ISnapSettings.h>
@@ -18,7 +19,6 @@
 
 namespace PhosphorSnapEngine {
 
-using PhosphorEngine::PendingRestore;
 using PhosphorEngine::SnapResult;
 using PhosphorEngine::StickyWindowHandling;
 
@@ -26,8 +26,32 @@ using PhosphorEngine::StickyWindowHandling;
 // Auto-Snap Logic
 // ═══════════════════════════════════════════════════════════════════════════════
 
-SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, const QString& windowScreenName,
+SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, const QString& screenId,
                                                     bool isSticky) const
+{
+    // The placement resolver is the daemon's SnapToZone window-rule evaluation —
+    // the engine never reads the rule store directly (LGPL boundary). It returns
+    // the 1-based zone ordinals and/or zone names to snap into, or two empty
+    // lists when no SnapToZone rule matched this window. Unset resolver (unit
+    // tests) ⇒ no rule snapping. The resolver reads the daemon's per-window
+    // evaluator cache, so resolving here ahead of the sticky and layout
+    // guards below costs a cache hit.
+    if (!m_placementZonesResolver) {
+        return SnapResult::noSnap();
+    }
+    return calculateSnapToPlacementRule(windowId, screenId, isSticky, m_placementZonesResolver(windowId, screenId));
+}
+
+int SnapEngine::routedOpenDesktop(const QString& windowId, const QString& screenId) const
+{
+    if (!m_placementZonesResolver) {
+        return 0;
+    }
+    return qMax(0, m_placementZonesResolver(windowId, screenId).targetDesktop);
+}
+
+SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, const QString& screenId, bool isSticky,
+                                                    const PlacementDirective& directive) const
 {
     // NOTE: deliberately NO isWindowFloating() guard here. A SnapToZone rule is an
     // explicit "this app belongs in these zones" directive that outranks float
@@ -48,15 +72,6 @@ SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, con
         return SnapResult::noSnap();
     }
 
-    // The placement resolver is the daemon's SnapToZone window-rule evaluation —
-    // the engine never reads the rule store directly (LGPL boundary). It returns
-    // the 1-based zone ordinals and/or zone names to snap into, or two empty
-    // lists when no SnapToZone rule matched this window. Unset resolver (unit
-    // tests) ⇒ no rule snapping.
-    if (!m_placementZonesResolver) {
-        return SnapResult::noSnap();
-    }
-    const PlacementDirective directive = m_placementZonesResolver(windowId, windowScreenName);
     if (directive.zoneOrdinals.isEmpty() && directive.zoneNames.isEmpty()) {
         return SnapResult::noSnap();
     }
@@ -70,7 +85,7 @@ SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, con
     // a cross-screen snapped-record restore uses). Empty target ⇒ the window's
     // opening screen, the historical behaviour (a ScreenId match leaf only SCOPES
     // such a rule; RouteToScreen is what ROUTES it).
-    const QString placementScreen = directive.targetScreenId.isEmpty() ? windowScreenName : directive.targetScreenId;
+    const QString placementScreen = directive.targetScreenId.isEmpty() ? screenId : directive.targetScreenId;
 
     // A RouteToDesktop action snaps the window into its zone on the DESTINATION
     // desktop's layout, not the one it momentarily opened on: resolve the layout and
@@ -162,7 +177,7 @@ SnapResult SnapEngine::calculateSnapToPlacementRule(const QString& windowId, con
 
     qCInfo(PhosphorSnapEngine::lcSnapEngine)
         << "calculateSnapToPlacementRule: snapping" << windowId << "to zones" << ordinals << "names" << names
-        << "on screen" << placementScreen << (placementScreen != windowScreenName ? "(routed)" : "(opening screen)");
+        << "on screen" << placementScreen << (placementScreen != screenId ? "(routed)" : "(opening screen)");
 
     SnapResult result;
     result.shouldSnap = true;
@@ -239,6 +254,15 @@ SnapResult SnapEngine::calculateSnapToLastZone(const QString& windowId, const QS
     // Calculate geometry
     QRect geo = m_windowTracker->zoneGeometry(lastUsedZoneId, effectiveScreenId);
     if (!geo.isValid()) {
+        return SnapResult::noSnap();
+    }
+    // Only a zone the layout this screen runs now holds: zoneGeometry resolves
+    // an id from any registered layout, so a last-used zone left over from a
+    // layout the screen switched away from still has a rect (F983). The unfloat
+    // fallback's last-used tier has the same guard.
+    if (!PhosphorZones::LayoutUtils::contextLayoutHoldsZones(m_layoutManager, effectiveScreenId,
+                                                             currentVirtualDesktopForScreen(effectiveScreenId),
+                                                             currentActivity(), {lastUsedZoneId})) {
         return SnapResult::noSnap();
     }
 

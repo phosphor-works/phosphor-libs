@@ -3,19 +3,18 @@
 
 #pragma once
 
+#include <PhosphorEngine/DesktopRemap.h>
 #include <PhosphorEngine/IVirtualDesktopManager.h>
 #include <phosphorworkspaces_export.h>
 #include <QHash>
 #include <QObject>
 #include <QString>
 #include <QStringList>
-#include <QTimer>
 
 QT_BEGIN_NAMESPACE
 class QDBusArgument;
 class QDBusInterface;
 class QDBusMessage;
-class QDBusServiceWatcher;
 QT_END_NAMESPACE
 
 namespace PhosphorWorkspaces {
@@ -28,29 +27,12 @@ public:
     explicit VirtualDesktopManager(QObject* parent = nullptr);
     ~VirtualDesktopManager() override;
 
-    /// Bind to KWin's D-Bus VirtualDesktopManager and seed the desktop cache.
-    /// Returns true when the interface answered; false when KWin is absent.
-    ///
-    /// The return is ADVISORY and deliberately not [[nodiscard]]: a false is
-    /// never a permanent verdict, because a service watcher binds as soon as
-    /// KWin appears and start() picks it up from there. Callers that only want
-    /// the manager running (the daemon's startup path) correctly ignore it;
-    /// the value exists for a caller that wants to log or report whether the
-    /// compositor was there at that instant.
     bool init();
-    /// Subscribe to KWin's signals and refresh. Idempotent while running.
     void start();
-    /// Drop KWin's signal subscriptions and any pending refresh retry. A
-    /// stopped manager takes no further KWin events; start() re-subscribes.
     void stop();
 
     int currentDesktop() const override;
     int currentDesktopForScreen(const QString& screenId) const override;
-    /// Whether a REAL per-output report exists for this screen (exact key, or
-    /// the parent output of a virtual id). currentDesktopForScreen falls back
-    /// to the global current when this is false — callers that must not act
-    /// on the fallback (first-run adoption) gate on this instead.
-    bool hasScreenDesktopReport(const QString& screenId) const;
     bool perScreenModeActive() const override;
 
     /// Record a screen's current virtual desktop (1-based). This is fed by the
@@ -65,20 +47,23 @@ public:
     /// keep counting a gone screen) across monitor hot-plug. Driven by the
     /// daemon's screenRemoved handler.
     void removeScreenDesktop(const QString& screenId);
-
-    /// Re-key a screen's recorded per-output desktop when the SCREEN ID
-    /// changes without an unplug/replug pair. A same-model hotplug flips an
-    /// output's id between its bare and "/CONNECTOR"-qualified spellings and
-    /// ScreenManager reports that as screenIdentifierChanged, with no
-    /// screenRemoved/screenAdded; without this the row stays under the dead id
-    /// and every hasScreenDesktopReport / currentDesktopForScreen ask under the
-    /// live id falls back to the GLOBAL desktop.
+    /// True when a per-output report exists for @p screenId (or, for a virtual
+    /// screen id, for its parent output). currentDesktopForScreen falls back
+    /// to the global current when this is false, so callers that must not act
+    /// on the fallback (first-run adoption) gate on this instead.
+    bool hasScreenDesktopReport(const QString& screenId) const;
+    /// Carry a recorded per-output desktop across a screen-id rename. KWin can
+    /// flip an output's id between its bare and "/CONNECTOR"-qualified
+    /// spellings and ScreenManager reports that as screenIdentifierChanged,
+    /// with no screenRemoved/screenAdded; without this the row stays under the
+    /// dead id and every hasScreenDesktopReport / currentDesktopForScreen ask
+    /// under the live id falls back to the GLOBAL desktop.
     ///
     /// A row already present under @p newId wins and @p oldId is merely
     /// dropped: that row is a report the effect already made under the live id,
     /// so it is newer than the one carried over. Nothing is emitted in that
     /// case, and nothing is emitted when @p oldId is unknown or the two ids are
-    /// equal — screenDesktopChanged rides an actual value change only.
+    /// equal; screenDesktopChanged rides an actual value change only.
     void renameScreen(const QString& oldId, const QString& newId);
 
     void setCurrentDesktop(int desktop);
@@ -87,47 +72,36 @@ public:
     /// holds a desktop across such an event (a pager's pills, a rule) must
     /// key on the id. Unknown ids are ignored.
     void setCurrentDesktopById(const QString& desktopId);
-
     /// Ask KWin to create a desktop at the given 0-based global position (KWin's
     /// D-Bus signature; the caller computes the position, this wrapper only
-    /// forwards). Fire-and-forget: the result arrives as a desktopCreated signal
+    /// forwards). Fire-and-forget: the result arrives as kwinDesktopCreated
     /// followed by a settled desktopListChanged.
     void createDesktop(uint position, const QString& name);
     /// Ask KWin to remove the desktop with the given UUID string. Result arrives
-    /// as desktopRemoved + desktopListChanged.
+    /// as kwinDesktopRemoved + desktopListChanged.
     void removeDesktop(const QString& desktopId);
     /// Ask KWin to rename the desktop with the given UUID string.
     void setDesktopName(const QString& desktopId, const QString& name);
-
-    /// Ordered KWin desktop UUID strings (global order, refreshed from the
-    /// `desktops` property), index-aligned with desktopNames(). The stable
-    /// identity of a desktop: names are user-editable and positions renumber,
-    /// ids do neither. Empty until the first refresh or without KWin.
+    int desktopCount() const;
+    /// Number of rows in KWin's virtual-desktop grid (>= 1). With the count,
+    /// this gives the grid shape that cross-desktop directional navigation
+    /// walks. Defaults to 1 until the first KWin refresh.
+    int desktopRows() const;
+    QStringList desktopNames() const;
+    /// KWin's desktop UUIDs, in position order and index-aligned with
+    /// desktopNames(). The stable identity of a desktop: names are
+    /// user-editable and positions renumber, ids do neither.
     QStringList desktopIds() const;
     /// UUID at 1-based global index, or empty when out of range.
     QString desktopIdAt(int desktop) const;
     /// 1-based global index of the UUID, or 0 when unknown.
     int desktopIndexOf(const QString& desktopId) const;
-
-    int desktopCount() const;
-    /// Number of rows in KWin's virtual-desktop grid (>= 1). With the count,
-    /// this gives the grid shape that cross-desktop directional navigation
-    /// walks. Defaults to 1 until the first KWin refresh. Re-read only on
-    /// KWin's rowsChanged (and at bind time) — a grid reshape is the only
-    /// thing that moves it, and it is off the desktop-event hot path.
-    int desktopRows() const;
     /// KWin's names EXACTLY as KWin reports them, aligned 1:1 with
     /// desktopIds(). An entry is empty when that desktop carries no KWin name.
     /// This is the identity-comparison form: named-workspace claiming must use
-    /// it, because a placeholder would let a workspace literally named
-    /// "Desktop 3" claim an unnamed desktop.
+    /// it, because desktopNames()' placeholder would let a workspace literally
+    /// named "Desktop 3" claim an unnamed desktop. Empty without KWin.
     QStringList rawDesktopNames() const;
-    /// Display form of rawDesktopNames(): unnamed desktops are filled with a
-    /// positional placeholder. The placeholder is NOT localized — this library
-    /// is LGPL and deliberately links no i18n. Callers rendering these to a
-    /// user should read rawDesktopNames() and substitute their own translated
-    /// fallback for the empty entries.
-    QStringList desktopNames() const;
     /// True once KWin's VirtualDesktopManager interface answered on the
     /// session bus. False on a non-KWin compositor or before init(), where
     /// every getter degrades to a single synthetic desktop — a UI should
@@ -135,14 +109,27 @@ public:
     /// init() returns true unconditionally and so cannot be used for this.
     bool isAvailable() const;
 
+    /// Record the desktop an output shows as it is connected or comes back.
+    /// KWin picks it without a desktop change, so it is a seed, not a switch:
+    /// it emits screenDesktopSeeded, never screenDesktopChanged, and always,
+    /// because the engines dropped the output's desktop when it went away.
+    void seedScreenDesktop(const QString& screenId, int desktop);
+
+    /// The desktop ids a previous session saw, in position order, so a change
+    /// KWin made while nothing was listening (desktops added, removed or moved
+    /// while the daemon was down) still renumbers the stores keyed on the old
+    /// positions. Compared against the first committed snapshot, or against
+    /// the current one at once when it has already landed; a difference goes
+    /// out as desktopsRenumbered and nothing else (the per-screen desktops and
+    /// desktopRemovedAt are about live changes only). An empty list is ignored.
+    void setBaselineDesktopIds(const QStringList& desktopIds);
+
 Q_SIGNALS:
     void currentDesktopChanged(int desktop);
-    /// The desktop count changed — and, once per failed episode, a re-announce
-    /// of the UNCHANGED count when a desktop-list refresh exhausts its retries,
-    /// so consumers re-diff instead of sitting on state the lost refresh was
-    /// meant to correct. Handlers that do more than re-diff (the daemon also
-    /// cancels drag-insert previews here) run on that re-announce too; see
-    /// applyDesktopListReply for why that is accepted.
+    /// A GROWING count goes out as KWin reports it, ahead of the snapshot that
+    /// carries the new desktop (F1022), so desktopIds() and desktopNames() still
+    /// hold the old list here. desktopsChanged follows once that snapshot
+    /// commits, and is the signal a consumer of the names listens to (F1101).
     void desktopCountChanged(int count);
     /// The desktop LIST changed — a desktop was added, removed, reordered,
     /// or renamed. Distinct from desktopCountChanged, which a rename does
@@ -164,22 +151,54 @@ Q_SIGNALS:
     ///
     /// Only for the unambiguous case: exactly one id gone and none added. A
     /// reorder, a simultaneous add and remove, or a multi-desktop change
-    /// leaves this silent and the count handler's out-of-range sweep is all a
-    /// consumer gets.
+    /// leaves this silent.
+    ///
+    /// Superseded by desktopsRenumbered, which goes out just before it and
+    /// covers every shape of change. Kept for existing consumers: connect one
+    /// of the two, never both, or a store is shifted twice.
     void desktopRemovedAt(int removedPosition);
     /// A single screen's current virtual desktop changed (per-output virtual
     /// desktops). The primary trigger the daemon's per-screen desktop handler
     /// subscribes to; in single-desktop mode it is driven the same for every
     /// screen so downstream has one code path.
     void screenDesktopChanged(const QString& screenId, int desktop);
+    /// A screen's desktop was recorded as the output (re)connected
+    /// (seedScreenDesktop). Not a switch.
+    void screenDesktopSeeded(const QString& screenId, int desktop);
+    /// The desktop positions moved: a removal, an insert, a reorder, or any
+    /// mix of them, as one old-to-new map (F787). Every store keyed on a
+    /// desktop NUMBER applies @p remap once. By the time it goes out the
+    /// manager's own state is renumbered: the ids, the count, the current
+    /// desktop, and each screen's desktop (moved through
+    /// DesktopRemap::successor, silently, for the reason desktopRemovedAt's
+    /// shift is silent). Ahead of desktopCountChanged, like desktopRemovedAt,
+    /// except for a GROWING count, which goes out as KWin reports it so a
+    /// desktop the compositor already uses is in range: an insert before the
+    /// last desktop sends the count first and this after. Never sent for a
+    /// change that moves no number (a rename, a desktop appended after the
+    /// last one).
+    void desktopsRenumbered(const PhosphorEngine::DesktopRemap& remap);
+    /// KWin reported a change to its desktop list, and the snapshot that says
+    /// what changed is on its way. Sent once per change, on the first of the
+    /// several signals KWin sends for it, and again only after a snapshot has
+    /// committed (F1023). Not sent before the first snapshot, whose map
+    /// compares against a previous session. A change that moves no number is
+    /// never followed by desktopsRenumbered. A store whose entries the
+    /// compositor re-reports in the new numbering on its own (the window
+    /// registry) marks here which entries predate the change.
+    void desktopListChanging();
     /// A KWin desktopCreated arrived carrying this UUID. Emitted BEFORE the
-    /// async list refresh settles — id-only, positions still stale. The
-    /// reconciler matches its ledger on this, then acts on desktopListChanged.
+    /// async list refresh settles: id-only, positions still stale. The
+    /// dynamic-workspaces reconciler matches its ledger on this, then acts on
+    /// desktopListChanged.
     void kwinDesktopCreated(const QString& desktopId);
     /// A KWin desktopRemoved arrived carrying this UUID (same timing contract).
     void kwinDesktopRemoved(const QString& desktopId);
-    /// The ordered global id list settled after a refresh (create/remove/rename
-    /// /reorder). Emitted only when the ordered id list actually changed.
+    /// The ordered global id list settled after a refresh (create, remove,
+    /// reorder). Emitted only when the ordered id list actually changed, and
+    /// BEFORE any screenDesktopChanged or desktopCountChanged the same snapshot
+    /// drives, so a consumer resolving those numbers against the id list it
+    /// last settled reads them against the new list.
     void desktopListChanged(const QStringList& desktopIds);
 
 private Q_SLOTS:
@@ -197,62 +216,45 @@ private Q_SLOTS:
     void onKWinDesktopDataChanged();
 
 private:
-    /// Bind (or re-bind after a KWin restart) the D-Bus proxy and re-read the
-    /// grid rows. Binding ONLY: it neither subscribes nor refreshes the list,
-    /// so it is safe on a stopped manager. init() seeds, start() subscribes.
     void initKWinDBus();
-    /// Connect (or disconnect) KWin's VirtualDesktopManager signals.
-    void subscribeKWinSignals(bool subscribe);
-    void applyDesktopListReply(const QDBusMessage& reply);
-    /// Re-read KWin's grid row count (blocking, but only on rowsChanged / bind).
-    void refreshRowsFromKWin();
-    /// The single writer of m_desktopCount: change-gated, and it clamps the
-    /// global current desktop plus every per-screen entry BEFORE announcing the
-    /// new count (the daemon's desktopCountChanged handler documents that
-    /// ordering — its per-screen arm must have re-diffed by the time it runs).
-    void setDesktopCount(int count);
+    /// Install the six session-bus signal subscriptions. Idempotent via
+    /// m_kwinSubscribed, so a stop()/start() cycle re-subscribes without
+    /// ever doubling the hooks.
+    void subscribeToKWin();
+    void applyDesktopListReply(const QDBusMessage& reply, const QString& currentId, int rows);
+    /// Parse the a(uss) desktop array and commit the snapshot; the shared
+    /// core behind both the blocking Get reply and the async GetAll path.
+    void applyDesktopListArg(const QDBusArgument& arg, const QString& currentId, int rows);
     /// Clamp any per-screen desktop entry above the live desktop count back down
     /// to the count (KWin renumbers on removal; the effect re-reports the true
     /// value shortly after, this just keeps the map valid in the interim).
     void clampScreenDesktopsToCount();
-    /// Re-resolve m_currentDesktop from m_currentDesktopId against the settled
-    /// id list, emitting currentDesktopChanged when the INDEX moved. A renumber
-    /// shifts the index while the id stays put, and KWin sends no currentChanged
-    /// for that, so this is the only place the shift is observed.
-    void resolveCurrentFromId();
+    /// Emit desktopListChanging unless this change already did, then refresh.
+    void announceDesktopListChange();
 
     QDBusInterface* m_kwinVDInterface = nullptr;
-    /// Watches for org.kde.KWin appearing so a daemon that started before the
-    /// compositor (or outlived a KWin restart) binds instead of latching off.
-    QDBusServiceWatcher* m_kwinWatcher = nullptr;
     bool m_running = false;
-    bool m_subscribed = false;
+    /// True while the six session-bus subscriptions are installed; guards
+    /// subscribeToKWin against doubling them.
+    bool m_kwinSubscribed = false;
     bool m_useKWinDBus = false;
     int m_currentDesktop = 1;
-    /// The current desktop's KWin UUID — the identity m_currentDesktop is an
-    /// index into. Kept so a settled list can re-resolve the index after a
-    /// renumber without a blocking property read.
-    QString m_currentDesktopId;
-    /// Per-screen current virtual desktop (screenId → 1-based), fed by the
-    /// effect's per-output report. Empty until the first report arrives, and
-    /// currentDesktopForScreen() falls back to the global m_currentDesktop for
-    /// screens with no entry (which is every screen in single-desktop mode).
+    /// Per-screen current virtual desktop (screenId → 1-based), populated only
+    /// in per-output mode via updateScreenDesktop. Empty otherwise, so every
+    /// currentDesktopForScreen() falls back to the global m_currentDesktop.
     QHash<QString, int> m_screenDesktops;
     int m_desktopCount = 1;
     int m_desktopRows = 1;
-    /// KWin's names, raw and aligned with m_desktopIds; entries may be empty.
     QStringList m_desktopNames;
+    /// KWin's names as reported, empty entries included (rawDesktopNames).
+    QStringList m_rawDesktopNames;
     QStringList m_desktopIds;
     uint m_refreshGeneration = 0;
-    /// Re-ask after a refresh whose reply carried no desktops while we knew of
-    /// some — a failed refresh, never a compositor with zero desktops.
-    QTimer m_refreshRetryTimer;
-    int m_refreshRetries = 0;
-    /// A count KWin announced that is waiting on the settled desktop list
-    /// before it is published (0 = none). See onNumberOfDesktopsChanged.
-    int m_pendingKWinCount = 0;
-    static constexpr int MaxRefreshRetries = 5;
-    static constexpr int RefreshRetryMs = 400;
+    /// setBaselineDesktopIds' list, held until the first snapshot commits.
+    QStringList m_baselineDesktopIds;
+    /// desktopListChanging went out and no snapshot has committed since
+    /// (announceDesktopListChange). Appended last: installed class.
+    bool m_desktopListChangePending = false;
 };
 
 } // namespace PhosphorWorkspaces
