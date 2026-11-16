@@ -14,8 +14,9 @@ using PhosphorAnimationShaders::AnimationShaderRegistry;
 
 namespace {
 
-/// Point @p registry at the bundled pack tree. Returns false when the source
-/// tree is not present, which is the caller's cue to QSKIP.
+/// Point @p registry at the bundled pack tree. Returns false when the build
+/// names no pack tree (a build of phosphor-libs alone) or the tree is not
+/// there, which is the caller's cue to QSKIP.
 ///
 /// QSKIP cannot live in here: it expands to a return, so it would abandon
 /// this helper and let the slot carry on against an empty registry. Hence the
@@ -25,8 +26,12 @@ namespace {
 /// WatchedDirectorySet, so no separate refresh() is needed.
 bool openBundledPacks(AnimationShaderRegistry& registry)
 {
-    const QString dataDir = QStringLiteral(PLASMAZONES_SOURCE_DIR "/data/animations");
-    if (!QDir(dataDir).exists()) {
+#ifdef PHOSPHOR_BUNDLED_PACKS_DIR
+    const QString dataDir = QStringLiteral(PHOSPHOR_BUNDLED_PACKS_DIR "/animations");
+#else
+    const QString dataDir;
+#endif
+    if (dataDir.isEmpty() || !QDir(dataDir).exists()) {
         return false;
     }
     registry.addSearchPath(dataDir, PhosphorFsLoader::LiveReload::Off);
@@ -101,7 +106,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         const QStringList expected = {
             QStringLiteral("dissolve"),  QStringLiteral("glitch"), QStringLiteral("morph"),
@@ -119,7 +124,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         const auto effects = registry.availableEffects();
         // Guard the loop: every assertion below lives inside it, so an empty
@@ -155,7 +160,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         verifyClassContract(registry, QStringLiteral("desktop"),
                             {
@@ -186,7 +191,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         verifyClassContract(registry, QStringLiteral("move"),
                             {
@@ -201,7 +206,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         verifyClassContract(registry, QStringLiteral("strip"),
                             {
@@ -217,7 +222,7 @@ private Q_SLOTS:
     {
         AnimationShaderRegistry registry;
         if (!openBundledPacks(registry))
-            QSKIP("data/animations not found — running outside source tree");
+            QSKIP("no bundled animations/ packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset or missing");
 
         const AnimationShaderEffect e = registry.effect(QStringLiteral("dissolve"));
         QCOMPARE(e.parameters.size(), 2);

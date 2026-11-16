@@ -7,12 +7,12 @@ find_package(Qt6 REQUIRED COMPONENTS Test Quick)
 
 # CMAKE_CURRENT_LIST_DIR, not CMAKE_SOURCE_DIR: the latter is the repo root
 # in-tree but this LIBRARY's directory in a standalone configure, so the include
-# looked for <tier>/libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
+# looked for libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
 # generate time. The relative walk reaches the repo root from either. The EXISTS
 # guard covers the remaining case, a genuine extracted `git subtree split` where
 # the repo-root module is not in the subtree at all.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
 else()
     # Stand-ins so the call sites below need no guard of their own.
     # phosphor_append_test_environment is reproduced EXACTLY, because it is
@@ -163,11 +163,15 @@ pa_add_test(pa_test_shaderparamtranslation test_shaderparamtranslation.cpp)
 set_tests_properties(pa_test_shaderparamtranslation PROPERTIES
     LABELS "phosphoranimation;phosphoranimationshaders")
 
-# Integration test against the actual plasmazones/data/animations/ packs.
+# Integration test against an app's bundled animations/ packs. The packs ship
+# with the app (PlasmaZones), so the test runs in its build, which sets
+# PHOSPHOR_LIBS_BUNDLED_PACKS_DIR, and skips in a build of this tree alone.
 pas_add_test(pas_test_builtin_effects test_builtin_effects.cpp)
-target_compile_definitions(pas_test_builtin_effects PRIVATE
-    "PLASMAZONES_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\""
-)
+if(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR)
+    target_compile_definitions(pas_test_builtin_effects PRIVATE
+        "PHOSPHOR_BUNDLED_PACKS_DIR=\"${PHOSPHOR_LIBS_BUNDLED_PACKS_DIR}\""
+    )
+endif()
 
 # ---- Layer animator tests (ex phosphor-animation-layer) ----
 
@@ -178,7 +182,7 @@ function(pal_add_test _name)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             # Reuse the in-tree phosphor-layer test mocks.
-            ${CMAKE_SOURCE_DIR}/phosphor-libs/libs/phosphor-layer/tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../phosphor-layer/tests
     )
     set_target_properties(${_name} PROPERTIES AUTOMOC ON)
     target_link_libraries(${_name}

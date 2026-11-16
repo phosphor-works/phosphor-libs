@@ -273,7 +273,10 @@ void TestPointerCurve::testCurveConstantsMatchTheShippedShader()
     // it against the GLSL the compositor actually runs. Retune the curve in
     // the shader and every guard here would stay green while measuring the old
     // one, so pin the handful of facts the mirror depends on to the file.
-    QFile file(QStringLiteral(P_SOURCE_DIR "/data/pointer/shared/pointer_lib.glsl"));
+#ifndef PHOSPHOR_BUNDLED_PACKS_DIR
+    QSKIP("the shared pointer helper ships with the app's packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset");
+#else
+    QFile file(QStringLiteral(PHOSPHOR_BUNDLED_PACKS_DIR "/pointer/shared/pointer_lib.glsl"));
     QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
     const QString source = QString::fromUtf8(file.readAll());
 
@@ -299,6 +302,7 @@ void TestPointerCurve::testCurveConstantsMatchTheShippedShader()
     // message that blames the smoothing kernel.
     QVERIFY2(source.contains(QLatin1String("max(here.z - prev.z, 0.0) + 1e-4")), "the backward gap lost its floor");
     QVERIFY2(source.contains(QLatin1String("max(next.z - here.z, 0.0) + 1e-4")), "the forward gap lost its floor");
+#endif
 }
 
 QTEST_MAIN(TestPointerCurve)

@@ -25,7 +25,7 @@
 #     resolution, the chain-wide silhouette votes, padding requests, and the
 #     stage map a QML host consumes.
 #
-# Mirrors phosphor-libs/libs/phosphor-animation's shader-pack subsystem; trimmed to the
+# Mirrors libs/phosphor-animation's shader-pack subsystem; trimmed to the
 # parts a surface shader needs (no QML, no rendering, no surface lifecycle).
 # Multipass IS modelled here as pack metadata (SurfaceShaderEffect's
 # bufferShaderPaths / bufferScale / bufferWrap, used by the glow pack); the

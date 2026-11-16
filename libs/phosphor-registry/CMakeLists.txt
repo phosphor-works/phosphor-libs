@@ -219,7 +219,7 @@ install(FILES
 # up cmake/ dir in the repo checkout). EXISTS-guarded so a tarball
 # missing the helper still builds the library itself (just without the
 # tests gate).
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorLibTesting.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorLibTesting.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorLibTesting.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorLibTesting.cmake)
     phosphor_lib_enable_tests(PhosphorRegistry)
 endif()

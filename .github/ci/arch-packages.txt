@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-License-Identifier: LGPL-2.1-or-later
+#
+# The Arch packages CI installs to configure, build and test every library.
+# One package per line. A comment after `#` is ignored.
+base-devel
+git
+ccache
+cmake
+ninja
+extra-cmake-modules
+qt6-base
+qt6-declarative
+qt6-shadertools
+qt6-svg
+qt6-wayland
+wayland
+wayland-protocols
+# Optional lookups, installed so CI builds the code they switch on:
+# KGlobalAccel (phosphor-shortcuts), Kirigami (phosphor-control's tests) and
+# PlasmaActivities (phosphor-workspaces).
+kglobalaccel
+kirigami
+plasma-activities
+# The offscreen and Wayland tests' runtime.
+mesa

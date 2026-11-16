@@ -84,7 +84,7 @@ else()
     # scope, which is where it has to be (it explains why). A standalone
     # configure of this library reaches it by path.
     if(NOT COMMAND phosphor_fetch_dependency)
-        include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/PhosphorDependencies.cmake")
+        include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/PhosphorDependencies.cmake")
     endif()
     phosphor_fetch_dependency(valijson)
     set(_pz_valijson_root "${valijson_SOURCE_DIR}")

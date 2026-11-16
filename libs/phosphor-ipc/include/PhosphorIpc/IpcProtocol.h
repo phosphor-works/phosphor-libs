@@ -14,10 +14,10 @@
 #include <optional>
 
 // Wire-format definitions for the JSON-over-Unix-socket protocol the
-// IpcRouter speaks. Shared between phosphor-libs/libs/phosphor-ipc
+// IpcRouter speaks. Shared between libs/phosphor-ipc
 // (server) and phosphor-shell/cli/phosphorctl (client); both link this
 // library so the constants and parsers stay in lockstep. Mirrors the
-// split of phosphor-libs/libs/phosphor-protocol (PhosphorProtocol/
+// split of libs/phosphor-protocol (PhosphorProtocol/
 // WindowTypes.h and WindowMarshalling.h); JSON is self-describing so we
 // ship the type constants only, no Qt-marshalling boilerplate.
 //

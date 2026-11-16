@@ -58,7 +58,7 @@ import QtQuick.Window
  * ## Hide-source idiom — mirrors SurfaceAnimator verbatim
  *
  * `PhosphorAnimationLayer::detail::attachShaderToAnchor` (surfaceanimator_shaderattach.cpp in
- * phosphor-libs/libs/phosphor-animation) snapshots
+ * libs/phosphor-animation) snapshots
  * the anchor via a `QQuickShaderEffectSource` with `hideSource: true`, parked
  * far off-screen and `live: true`, then feeds THAT source to the shader's
  * `setSourceItem`. `hideSource: true` is what suppresses the anchor's own direct

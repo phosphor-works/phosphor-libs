@@ -5,12 +5,12 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Test)
 
 # CMAKE_CURRENT_LIST_DIR, not CMAKE_SOURCE_DIR: the latter is the repo root
 # in-tree but this LIBRARY's directory in a standalone configure, so the include
-# looked for <tier>/libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
+# looked for libs/<lib>/cmake/PhosphorTestIsolation.cmake and hard-failed at
 # generate time. The relative walk reaches the repo root from either. The EXISTS
 # guard covers the remaining case, a genuine extracted `git subtree split` where
 # the repo-root module is not in the subtree at all.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
 else()
     # Stand-ins so the call sites below need no guard of their own.
     # phosphor_append_test_environment is reproduced EXACTLY, because it is
@@ -51,9 +51,14 @@ phosphorpointer_add_test(test_pointerhistory)
 phosphorpointer_add_test(test_pointercurve)
 
 # The registry test checks the entry prologue against the shared helper it
-# includes, which lives in the top-level data tree rather than in this lib.
-target_compile_definitions(test_pointershaderregistry PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\"")
-
-# The curve test pins its mirror of the smoothing kernel and the Catmull-Rom
-# tension against the shared helper those live in, for the same reason.
-target_compile_definitions(test_pointercurve PRIVATE "P_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/plasmazones\"")
+# includes, and the curve test pins its mirror of the smoothing kernel and the
+# Catmull-Rom tension against the same helper. The helper ships with the app's
+# packs (PlasmaZones' data/pointer/shared), not with this library, so both
+# cases run in the app's build, which sets PHOSPHOR_LIBS_BUNDLED_PACKS_DIR, and
+# skip in a build of this tree alone.
+if(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR)
+    foreach(_p_test test_pointershaderregistry test_pointercurve)
+        target_compile_definitions(${_p_test} PRIVATE
+            "PHOSPHOR_BUNDLED_PACKS_DIR=\"${PHOSPHOR_LIBS_BUNDLED_PACKS_DIR}\"")
+    endforeach()
+endif()

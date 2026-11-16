@@ -38,7 +38,7 @@ find_program(_phosphor_dbus_run_session dbus-run-session)
 # HOW CALLERS REACH IT, which is not uniform and must not be assumed to be.
 #
 # The library test trees walk up relatively, behind an EXISTS guard:
-# `${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake`. That
+# `${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake`. That
 # resolves from the repo root in-tree AND from a standalone configure of the
 # library, and the guard covers a genuine extracted subtree where the repo-root
 # module is not present at all. Each falls back to a stand-in that no-ops the
@@ -46,15 +46,16 @@ find_program(_phosphor_dbus_run_session dbus-run-session)
 # UN-ISOLATES rather than breaks: the real function sets only TEST_LAUNCHER and the
 # per-target XDG environment.
 #
-# FOUR dot-dots, one per level of <tier>/libs/<lib>/tests. The tier reorg added the
-# <tier> level and left 46 of these walks at three, so they resolved to
-# <tier>/cmake/, the guard failed, and those suites silently ran un-isolated while
-# CI stayed green — which is exactly how a stand-in that keeps the tests passing
-# hides itself. Count the levels against the caller before adding another.
+# THREE dot-dots, one per level of libs/<lib>/tests. When these libraries lived
+# in PlasmaZones under a <tier>/ directory the walk had four, and a tier reorg
+# once left 46 of them at three, so they resolved to the wrong cmake/, the guard
+# failed, and those suites silently ran un-isolated while CI stayed green —
+# which is exactly how a stand-in that keeps the tests passing hides itself.
+# Count the levels against the caller before adding another.
 #
-# `plasmazones/tests/unit` and `plasmazones/tools/shader-render` use
-# `${CMAKE_SOURCE_DIR}/cmake/...` unguarded, which is correct for them: neither is
-# ever configured standalone, so CMAKE_SOURCE_DIR is always the repo root there.
+# An app that builds this tree as a subproject (PlasmaZones) reaches the module
+# through PHOSPHOR_LIBS_CMAKE_DIR, which the top-level CMakeLists.txt sets, and
+# includes it unguarded from its own test trees.
 # CACHE INTERNAL so the global functions below read a well-defined value from
 # any directory scope, not whatever directory happened to include the module.
 set(_phosphor_test_session_bus_conf "${CMAKE_CURRENT_LIST_DIR}/test-session-bus.conf" CACHE INTERNAL "")

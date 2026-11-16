@@ -10,8 +10,8 @@ find_package(Qt6 REQUIRED COMPONENTS Test DBus)
 # root in-tree but this LIBRARY's directory in a standalone configure. The
 # relative walk reaches the repo root from either, and the EXISTS guard covers a
 # genuine extracted `git subtree split` where the module is not in the subtree.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
 else()
     # Stand-ins so the call sites below need no guard of their own.
     function(phosphor_apply_test_isolation _target)

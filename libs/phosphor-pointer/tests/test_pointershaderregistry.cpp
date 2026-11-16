@@ -599,11 +599,21 @@ void TestPointerShaderRegistry::testEntryPointScaffoldMatchesTheSharedContract()
     QVERIFY(prologue.contains(QStringLiteral("in vec2 vTexCoord")));
     QVERIFY(prologue.contains(QStringLiteral("out vec4 fragColor")));
 
+    const auto candidates = PointerShaderRegistry::pointerEntryCandidates();
+    QCOMPARE(candidates.size(), 1);
+    QCOMPARE(candidates.at(0).functionName, QStringLiteral("pPointer"));
+    QVERIFY(candidates.at(0).generatedMain.contains(QStringLiteral("void main()")));
+    QVERIFY(
+        candidates.at(0).generatedMain.contains(QStringLiteral("fragColor = PZ_FINALIZE_COLOR(pPointer(vTexCoord))")));
+
     // The include directive resolves against the shipped shared dir.
     static const QRegularExpression includeRe(QStringLiteral("#include <([^>]+)>"));
     const QRegularExpressionMatch include = includeRe.match(prologue);
     QVERIFY2(include.hasMatch(), "the prologue no longer includes the shared helper");
-    const QString sharedDir = QStringLiteral(P_SOURCE_DIR "/data/pointer/shared");
+#ifndef PHOSPHOR_BUNDLED_PACKS_DIR
+    QSKIP("the shared pointer helper ships with the app's packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset");
+#else
+    const QString sharedDir = QStringLiteral(PHOSPHOR_BUNDLED_PACKS_DIR "/pointer/shared");
     const QString included = sharedDir + QLatin1Char('/') + include.captured(1);
     QVERIFY2(QFile::exists(included),
              qPrintable(QStringLiteral("prologue includes %1 which does not ship").arg(included)));
@@ -621,13 +631,7 @@ void TestPointerShaderRegistry::testEntryPointScaffoldMatchesTheSharedContract()
     QFile uniforms(sharedDir + QStringLiteral("/pointer_uniforms.glsl"));
     QVERIFY(uniforms.open(QIODevice::ReadOnly));
     QVERIFY(QString::fromUtf8(uniforms.readAll()).contains(QStringLiteral("PZ_FINALIZE_COLOR")));
-
-    const auto candidates = PointerShaderRegistry::pointerEntryCandidates();
-    QCOMPARE(candidates.size(), 1);
-    QCOMPARE(candidates.at(0).functionName, QStringLiteral("pPointer"));
-    QVERIFY(candidates.at(0).generatedMain.contains(QStringLiteral("void main()")));
-    QVERIFY(
-        candidates.at(0).generatedMain.contains(QStringLiteral("fragColor = PZ_FINALIZE_COLOR(pPointer(vTexCoord))")));
+#endif
 }
 
 void TestPointerShaderRegistry::testIncludePathsResolveTheSharedDirectory()

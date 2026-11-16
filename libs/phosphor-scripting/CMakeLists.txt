@@ -13,7 +13,7 @@
 # Luau is built from source as part of this project by default, from the archive
 # cmake/PhosphorDependencies.cmake pins (version, URL and SHA-256). It comes
 # from the PHOSPHOR_DEPS_ARCHIVES directory in an offline packaging build and
-# is downloaded with CPM otherwise. Pass -DPLASMAZONES_SYSTEM_LUAU=ON to link a
+# is downloaded with CPM otherwise. Pass -DPHOSPHOR_SYSTEM_LUAU=ON to link a
 # system-provided Luau instead.
 
 # 3.18 floor: the Luau acquisition (cmake/PhosphorDependencies.cmake) uses
@@ -50,16 +50,16 @@ find_package(Threads REQUIRED)
 # Luau acquisition — the pinned source archive (default) or system (opt-in)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-option(PLASMAZONES_SYSTEM_LUAU
+option(PHOSPHOR_SYSTEM_LUAU
     "Link a system-provided Luau instead of building the archive cmake/PhosphorDependencies.cmake pins" OFF)
 
-if(PLASMAZONES_SYSTEM_LUAU)
+if(PHOSPHOR_SYSTEM_LUAU)
     find_path(LUAU_INCLUDE_DIR NAMES lua.h PATH_SUFFIXES luau Luau)
     find_library(LUAU_VM_LIBRARY NAMES Luau.VM luauvm luau_vm)
     find_library(LUAU_COMPILER_LIBRARY NAMES Luau.Compiler luaucompiler luau_compiler)
     if(NOT LUAU_INCLUDE_DIR OR NOT LUAU_VM_LIBRARY OR NOT LUAU_COMPILER_LIBRARY)
         message(FATAL_ERROR
-            "PLASMAZONES_SYSTEM_LUAU=ON but a system Luau (lua.h + Luau.VM + Luau.Compiler) "
+            "PHOSPHOR_SYSTEM_LUAU=ON but a system Luau (lua.h + Luau.VM + Luau.Compiler) "
             "was not found. Install Luau dev files or unset the option to build the pinned archive.")
     endif()
     add_library(Luau.VM UNKNOWN IMPORTED)
@@ -75,7 +75,7 @@ else()
     # scope, which is where it has to be (it explains why). A standalone
     # configure of this library reaches it by path.
     if(NOT COMMAND phosphor_fetch_dependency)
-        include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/PhosphorDependencies.cmake")
+        include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/PhosphorDependencies.cmake")
     endif()
     if(NOT TARGET Luau.VM)
         phosphor_fetch_dependency(luau)
@@ -213,7 +213,7 @@ endif()
 # accompany the distribution. Ship it alongside the app's own licences. The
 # system-Luau build links a separately-installed Luau that carries its own
 # licence, so skip it there.
-if(NOT PLASMAZONES_SYSTEM_LUAU)
+if(NOT PHOSPHOR_SYSTEM_LUAU)
     # _p_luau_src is the unpacked archive (set in the acquisition
     # block). Guarded on the file actually existing: a superbuild/parent
     # scope that pre-defines Luau.VM skips the extraction entirely, and an

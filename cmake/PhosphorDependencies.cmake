@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 fuddlesworth
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-# The third-party sources the tree builds from, each pinned to one archive by
-# version, URL and SHA-256. This file is the only place a pin lives. The
-# packaging recipes repeat the URL and hash of each archive they fetch, and
-# scripts/check-conventions.py (the dep-pins rule) fails when one of them no
-# longer matches the pin here.
+# The third-party sources the libraries build from, each pinned to one archive
+# by version, URL and SHA-256. This file is the only place these pins live. An
+# app that builds this tree from source (PlasmaZones) repeats the URL and hash
+# of each archive in its packaging recipes, and its dep-pins conventions rule
+# reads them from here, at the commit the app pins.
 #
 # How an archive is obtained, in order:
 #
@@ -17,12 +17,13 @@
 #      sources.
 #   2. Otherwise CPM.cmake (https://github.com/cpm-cmake/CPM.cmake, itself
 #      pinned by hash) downloads the archive once into CPM_SOURCE_CACHE, which
-#      is .cache/cpm at the repository root unless the cache variable or the
-#      environment variable says otherwise. Every build directory shares it, and
+#      is .cache/cpm at this repository's root unless the cache variable or
+#      the environment variable says otherwise. An app that adds this tree
+#      has set CPM_SOURCE_CACHE already, and its cache is used. Every build directory shares it, and
 #      a configure works offline once it is filled. CPM's own overrides apply,
 #      so -DCPM_luau_SOURCE=<dir> builds a local Luau checkout instead.
 #
-# A library that offers a system copy (PLASMAZONES_SYSTEM_LUAU,
+# A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU,
 # PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON) checks that option before calling in
 # here, so a system build reaches neither path.
 #
@@ -44,7 +45,7 @@ include_guard(GLOBAL)
 # ─── Pins ────────────────────────────────────────────────────────────────────
 # Source archives: built into the tree. PHOSPHOR_DEPS lists them for the fetch
 # script and for the dep-pins rule.
-set(PHOSPHOR_DEPS luau valijson branding)
+set(PHOSPHOR_DEPS luau valijson)
 
 # Luau (MIT, Roblox), the tiling algorithms' runtime (phosphor-scripting).
 set(PHOSPHOR_DEP_luau_VERSION "0.745")
@@ -59,24 +60,10 @@ set(PHOSPHOR_DEP_valijson_URL "https://github.com/tristanpenman/valijson/archive
 set(PHOSPHOR_DEP_valijson_FILE "valijson-1.1.3.tar.gz")
 set(PHOSPHOR_DEP_valijson_SHA256 "887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029")
 
-# The suite's branding release (CC-BY-SA-4.0, phosphor-works/branding): the app
-# icons, installed from it with its cmake/PhosphorBranding.cmake. No app keeps
-# icon files of its own. This is the app's pin, not the libraries': it moves
-# to PlasmaZones' own pin module when phosphor-libs leaves this tree.
-set(PHOSPHOR_DEP_branding_VERSION "0.1.0")
-set(PHOSPHOR_DEP_branding_URL "https://github.com/phosphor-works/branding/releases/download/v0.1.0/phosphor-branding-0.1.0.tar.gz")
-set(PHOSPHOR_DEP_branding_FILE "phosphor-branding-0.1.0.tar.gz")
-set(PHOSPHOR_DEP_branding_SHA256 "53c7247e7e2c304a4d2e75a7bdd1a87164c63c1defa4159f3cef8da23d8244b3")
 
-# glslang's prebuilt tools, a test-time program and not a source dependency, so
-# not in PHOSPHOR_DEPS: no packaging build runs the tests. Khronos publishes a
-# Linux build for x86-64 only. See phosphor_put_glslang_on_test_path().
-set(PHOSPHOR_GLSLANG_VERSION "16.6.0")
-set(PHOSPHOR_GLSLANG_URL
-    "https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-linux-x86_64-release.tar.gz")
-set(PHOSPHOR_GLSLANG_SHA256 "2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce")
 
-# CPM.cmake itself.
+# CPM.cmake itself. An app that adds this tree loads its own pinned CPM first,
+# and that copy is used.
 set(PHOSPHOR_CPM_VERSION "0.43.2")
 set(PHOSPHOR_CPM_SHA256 "49a3bef91ceb65bb66d57255e12d1ffd22abc2f6408fa9fe4534c544a2f232aa")
 
@@ -214,39 +201,4 @@ function(phosphor_fetch_dependency name)
                   URL_HASH SHA256=${_sha}
                   DOWNLOAD_ONLY YES)
     set(${name}_SOURCE_DIR "${${name}_SOURCE_DIR}" PARENT_SCOPE)
-endfunction()
-
-# phosphor_put_glslang_on_test_path(<test>...)
-#
-# Puts a directory holding glslangValidator at the front of PATH for each named
-# test, for the shader tests that shell out to it (plasmazones-shader-validate
-# looks it up on PATH). The directory is PHOSPHOR_GLSLANG_DIR when that is set.
-# Otherwise, on an x86-64 Linux host and outside an offline build (which must
-# not download), it is Khronos's release build pinned above, fetched with CPM.
-# Anywhere else PATH is left alone: the system's glslang package then has to be
-# installed, and the tests that need it fail and say so when it is not.
-function(phosphor_put_glslang_on_test_path)
-    set(PHOSPHOR_GLSLANG_DIR "" CACHE PATH
-        "Directory with glslangValidator for the shader tests. Empty: the pinned release, or PATH")
-    get_property(_dir GLOBAL PROPERTY _phosphor_glslang_dir)
-    get_property(_resolved GLOBAL PROPERTY _phosphor_glslang_resolved)
-    if(NOT _resolved)
-        set(_dir "${PHOSPHOR_GLSLANG_DIR}")
-        if(NOT _dir AND NOT PHOSPHOR_DEPS_ARCHIVES AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux"
-           AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
-            CPMAddPackage(NAME glslang-tools VERSION ${PHOSPHOR_GLSLANG_VERSION}
-                          URL "${PHOSPHOR_GLSLANG_URL}"
-                          URL_HASH SHA256=${PHOSPHOR_GLSLANG_SHA256}
-                          DOWNLOAD_ONLY YES)
-            set(_dir "${glslang-tools_SOURCE_DIR}/bin")
-        endif()
-        set_property(GLOBAL PROPERTY _phosphor_glslang_dir "${_dir}")
-        set_property(GLOBAL PROPERTY _phosphor_glslang_resolved TRUE)
-    endif()
-    if(NOT _dir)
-        return()
-    endif()
-    foreach(_test IN LISTS ARGN)
-        set_property(TEST ${_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_dir}")
-    endforeach()
 endfunction()

@@ -9,8 +9,8 @@ find_package(Qt6 REQUIRED COMPONENTS Test)
 # The shared test isolation, as in phosphor-geometry: the relative walk
 # reaches the repo root in-tree and in a standalone configure, and the EXISTS
 # guard covers an extracted subtree without the module.
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/PhosphorTestIsolation.cmake)
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
 else()
     function(phosphor_apply_test_isolation _target)
     endfunction()

@@ -3,7 +3,7 @@
 
 find_package(Qt6 6.10 REQUIRED COMPONENTS Test Qml Quick)
 
-include(${CMAKE_SOURCE_DIR}/cmake/PhosphorTestIsolation.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
 
 function(phosphorsurfacequick_add_test name)
     add_executable(${name} ${name}.cpp)
