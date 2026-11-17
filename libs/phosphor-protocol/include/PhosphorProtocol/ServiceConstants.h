@@ -122,10 +122,11 @@ inline constexpr QLatin1String OverlayShaderTree("overlayShaderTree");
 inline constexpr QLatin1String DecorationBlurScaleMultiplier("decorationBlurScaleMultiplier");
 
 /// @name Global window gaps
-/// The resolved global gaps as the Settings interface serves them. The daemon
-/// registers them read-only (the settings app writes the stored values through
-/// the config, under ConfigDefaults' own Gaps keys), and the editor reads them
-/// to draw its gap overlay. The per-side spellings coincide with
+/// The resolved global gaps as the Settings interface serves them (the Gaps
+/// group). The daemon registers them read-write: the Phosphor shell's desktop
+/// style writes them here, so the geometry cascade sees the change through the
+/// setters' signals, and the editor reads them to draw its gap overlay. The
+/// per-side spellings coincide with
 /// PhosphorLayout::GapKeys, the layout-file field names, but the two are
 /// independent contracts and neither follows the other.
 ///@{
@@ -392,6 +393,8 @@ inline constexpr QLatin1String Interface("org.phosphor_works.PlasmaZones.Editor"
 /// Both callers treat a failed call as the object being absent: the placement
 /// map keeps the cells it parsed from the placement daemon, and the desktop
 /// stage stays inactive and shows its static fallback.
+/// ShellOverview's Q_CLASSINFO repeats Interface as a literal, because moc needs
+/// one there; a static_assert beside it holds the two together.
 namespace ShellOverview {
 inline constexpr QLatin1String ServiceName("org.kde.KWin");
 inline constexpr QLatin1String ObjectPath("/org/phosphor_works/PlasmaZones/ShellOverview");
