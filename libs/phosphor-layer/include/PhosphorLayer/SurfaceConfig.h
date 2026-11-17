@@ -48,7 +48,7 @@ struct PHOSPHORLAYER_EXPORT SurfaceConfig
     /// Protocol-level defaults. Required.
     Role role;
 
-    /// QML root component URL (`qrc:/…` or `file://…`). Mutually exclusive
+    /// QML root component URL, a `qrc:` or `file:` URL. Mutually exclusive
     /// with @ref contentItem.
     QUrl contentUrl;
 
