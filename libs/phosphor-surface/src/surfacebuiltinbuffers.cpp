@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-#include <PhosphorSurface/DecorationSupportedPaths.h>
+#include <PhosphorSurface/SurfacePackLocation.h>
 #include <PhosphorSurface/SurfaceShaderRegistry.h>
 
 #include <QDir>
@@ -52,10 +52,12 @@ QString SurfaceShaderRegistry::resolveBuiltinBufferShader(const QString& token, 
         }
     }
     // No sibling shared dir, which is the usual case for a user pack under
-    // ~/.local/share/plasmazones/surface/<pack>. Fall back to the data dirs,
-    // mirroring how SurfaceShaderItem::surfaceIncludePaths() locates the
-    // shared includes. Canonicalize like the sibling branch so both paths
-    // return the same form (symlinks resolved).
+    // ~/.local/share/<subdir>/<pack>, where <subdir> is what the app passed to
+    // setSurfacePackDataSubdir(). Fall back to the data dirs, mirroring how
+    // SurfaceShaderItem::surfaceIncludePaths() locates the shared includes.
+    // An app that never set the subdir has no installed packs to fall back
+    // to, so nothing is searched. Canonicalize like the sibling branch so both
+    // paths return the same form (symlinks resolved).
     //
     // Neither step is a guarantee about WHICH copy wins, and the sibling probe
     // above decides it for nearly everything. It is a plain existence check
@@ -67,13 +69,17 @@ QString SurfaceShaderRegistry::resolveBuiltinBufferShader(const QString& token, 
     // This branch is for a pack whose own tree ships no shared/ sibling, which
     // is the usual shape for a hand-installed user pack. There,
     // QStandardPaths searches the user data dir before the system ones, so a
-    // file dropped in ~/.local/share/plasmazones/surface/shared/ is what such
-    // a pack resolves to. That is ordinary search-path precedence for
-    // user-installed content, not a hole — the builtin NAMES are a closed
-    // whitelist, it is only the file each resolves to that follows the search
-    // path, and it does not reach a pack that has a sibling of its own.
-    const QString located = QStandardPaths::locate(QStandardPaths::GenericDataLocation,
-                                                   surfacePackDataSubdir() + QLatin1String("/shared/") + fileName);
+    // file dropped in ~/.local/share/<subdir>/shared/ is what such a pack
+    // resolves to. That is ordinary search-path precedence for user-installed
+    // content, not a hole — the builtin NAMES are a closed whitelist, it is
+    // only the file each resolves to that follows the search path, and it does
+    // not reach a pack that has a sibling of its own.
+    const QString subdir = surfacePackDataSubdir();
+    if (subdir.isEmpty()) {
+        return QString();
+    }
+    const QString located =
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation, subdir + QLatin1String("/shared/") + fileName);
     return located.isEmpty() ? QString() : QFileInfo(located).canonicalFilePath();
 }
 

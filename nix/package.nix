@@ -25,29 +25,42 @@
 
 let
   # Luau and valijson, pinned (version, URL, SHA-256) in
-  # cmake/PhosphorDependencies.cmake. The sandbox has no network, so they are
-  # fetched here as fixed-output derivations and handed to CMake as one
+  # cmake/PhosphorDependencies.cmake, and with the tests the surface packs the
+  # tests load (PHOSPHOR_TEST_DEPS there). The sandbox has no network, so they
+  # are fetched here as fixed-output derivations and handed to CMake as one
   # directory (PHOSPHOR_DEPS_ARCHIVES), each under the FILE name its pin gives
   # it. CMake checks each against the pin's hash again before unpacking it.
   # fetchurl, not fetchFromGitHub: the pin hashes the archive file itself.
-  depsArchives = linkFarm "phosphor-libs-deps-archives" [
-    {
-      name = "luau-0.745.tar.gz";
-      path = fetchurl {
-        url = "https://github.com/luau-lang/luau/archive/refs/tags/0.745.tar.gz";
-        # sha256 53c22773bace6cabbabaead576fbc08d11a0317fce11a3dbf9d027dda6849248
-        hash = "sha256-U8Inc7rObKu6uurVdvvAjRGgMX/OEaPb+dAn3aaEkkg=";
-      };
-    }
-    {
-      name = "valijson-1.1.3.tar.gz";
-      path = fetchurl {
-        url = "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz";
-        # sha256 887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029
-        hash = "sha256-iHtTsakk9v4LNfo7vJu75a6Mcgl7fw98F7RfTPpkYCk=";
-      };
-    }
-  ];
+  depsArchives = linkFarm "phosphor-libs-deps-archives" (
+    [
+      {
+        name = "luau-0.745.tar.gz";
+        path = fetchurl {
+          url = "https://github.com/luau-lang/luau/archive/refs/tags/0.745.tar.gz";
+          # sha256 53c22773bace6cabbabaead576fbc08d11a0317fce11a3dbf9d027dda6849248
+          hash = "sha256-U8Inc7rObKu6uurVdvvAjRGgMX/OEaPb+dAn3aaEkkg=";
+        };
+      }
+      {
+        name = "valijson-1.1.3.tar.gz";
+        path = fetchurl {
+          url = "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz";
+          # sha256 887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029
+          hash = "sha256-iHtTsakk9v4LNfo7vJu75a6Mcgl7fw98F7RfTPpkYCk=";
+        };
+      }
+    ]
+    ++ lib.optionals withTests [
+      {
+        name = "phosphor-surface-packs-e89d9f7bb6320eab8b6a0b3325858d2ca5356ce3.tar.gz";
+        path = fetchurl {
+          url = "https://github.com/phosphor-works/phosphor-surface-packs/archive/e89d9f7bb6320eab8b6a0b3325858d2ca5356ce3.tar.gz";
+          # sha256 fbbf0b9849d83396029bc4e310c3dcac49c08758e73d560538888e685f0a5e30
+          hash = "sha256-+78LmEnYM5YCm8TjEMPcrEnAh1jnPVYFOIiOaF8KXjA=";
+        };
+      }
+    ]
+  );
 in
 stdenv.mkDerivation {
   pname = if withTests then "phosphor-libs-tests" else "phosphor-libs";

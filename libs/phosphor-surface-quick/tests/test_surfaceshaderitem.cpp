@@ -4,9 +4,11 @@
 #include <PhosphorSurfaceQuick/SurfaceShaderItem.h>
 
 #include <PhosphorRendering/ShaderEffect.h>
+#include <PhosphorSurface/SurfacePackLocation.h>
 
 #include <QColor>
 #include <QDebug>
+#include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
@@ -18,7 +20,9 @@
 #include <QQmlEngine>
 #include <QSignalSpy>
 #include <QSizeF>
+#include <QStandardPaths>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
 #include <QVariantMap>
@@ -196,6 +200,41 @@ private Q_SLOTS:
             QVERIFY(ShaderPathProbe::localShaderPath(QUrl(QStringLiteral("//host"))).isEmpty());
             QCOMPARE(capture.messages(), QStringList());
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Include paths: the app's surface pack subdir
+    // ═══════════════════════════════════════════════════════════════════════
+
+    void testSurfaceIncludePaths_emptyUntilTheAppSetsASubdir()
+    {
+        // The library names no app's pack directory. With none set, the item
+        // searches nothing, rather than every data dir's root.
+        QVERIFY(PhosphorSurfaceShaders::surfacePackDataSubdir().isEmpty());
+        QCOMPARE(SurfaceShaderItem::surfaceIncludePaths(), QStringList());
+    }
+
+    void testSurfaceIncludePaths_followTheSubdirTheAppSets()
+    {
+        // A pack tree under the sandboxed user data dir, at the subdir an app
+        // names, contributes its shared/ dir and then itself.
+        const QString subdir = QStringLiteral("phosphor-test/surface");
+        const QString root =
+            QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QLatin1Char('/') + subdir;
+        QVERIFY(QDir().mkpath(root + QStringLiteral("/shared")));
+
+        PhosphorSurfaceShaders::setSurfacePackDataSubdir(subdir);
+        const QStringList paths = SurfaceShaderItem::surfaceIncludePaths();
+        SurfaceShaderItem item;
+        const QStringList itemPaths = item.shaderIncludePaths();
+        PhosphorSurfaceShaders::setSurfacePackDataSubdir(QString());
+        QDir(QFileInfo(root).absolutePath()).removeRecursively();
+
+        QVERIFY(paths.size() >= 2);
+        QCOMPARE(paths.at(0), root + QStringLiteral("/shared"));
+        QCOMPARE(paths.at(1), root);
+        // An item built while the subdir is set takes the same list.
+        QCOMPARE(itemPaths, paths);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

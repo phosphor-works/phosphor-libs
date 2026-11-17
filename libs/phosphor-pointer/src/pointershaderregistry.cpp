@@ -427,7 +427,7 @@ QList<PhosphorShaders::EntryCandidate> PointerShaderRegistry::pointerEntryCandid
     return {PhosphorShaders::EntryCandidate{QStringLiteral("pPointer"), pointerMain}};
 }
 
-QStringList PointerShaderRegistry::includePathsFor(const QString& packDir)
+QStringList PointerShaderRegistry::includePathsFor(const QString& packDir, const QString& packDataSubdir)
 {
     if (packDir.isEmpty()) {
         return {};
@@ -449,17 +449,22 @@ QStringList PointerShaderRegistry::includePathsFor(const QString& packDir)
     // Then the installed shared helpers, because a pack outside the bundled
     // tree has no sibling shared/ to find them in. The entry prologue always
     // emits `#include <pointer_lib.glsl>`, so without this EVERY user pack
-    // under ~/.local/share/plasmazones/pointer fails include expansion — it
+    // under ~/.local/share/<packDataSubdir> fails include expansion — it
     // renders in the compositor, which builds its search list from the
     // registry's roots, and then shows a blank preview and fails the
-    // validator, both of which come through here.
+    // validator, both of which come through here. Where the packs install is
+    // the app's to say, so an app that names no subdir gets no installed
+    // directory rather than a guess.
     //
     // Appending roots does not reintroduce the walk the note above rules out:
     // no file is probed, and the pack's own directories still come first, so a
     // pack shipping its own shared/ is still served from it.
+    if (packDataSubdir.isEmpty()) {
+        return paths;
+    }
     const QStringList dataDirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
     for (const QString& dir : dataDirs) {
-        const QString shared = dir + QStringLiteral("/plasmazones/pointer/shared");
+        const QString shared = dir + QLatin1Char('/') + packDataSubdir + QStringLiteral("/shared");
         if (!paths.contains(shared)) {
             paths.append(shared);
         }

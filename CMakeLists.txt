@@ -130,18 +130,27 @@ foreach(_phosphor_private GuiPrivate ShaderToolsPrivate QuickPrivate WaylandClie
     endif()
 endforeach()
 
-# The pinned third-party archives (Luau, valijson) and the CPM.cmake that
-# downloads them. Included here, at this tree's top scope, and not from the
-# libraries that use them: the pins and CPM's state are ordinary variables, and
-# a module first included in one library's directory would leave them out of
-# its siblings.
+# The pinned archives (Luau, valijson, the test suite's surface packs) and the
+# CPM.cmake that downloads them. Included here, at this tree's top scope, and
+# not from the libraries that use them: the pins and CPM's state are ordinary
+# variables, and a module first included in one library's directory would leave
+# them out of its siblings.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PhosphorDependencies.cmake")
 
-# Where the app's bundled shader packs live, for the library tests that check
-# a library constant against the shipped packs (phosphor-animation's built-in
-# effects, phosphor-pointer's shared helper). Empty when this tree is built on
-# its own: those tests then skip and say why. PlasmaZones sets it to its data/
-# tree, so they run in its build.
+# The surface decoration packs, for phosphor-surface's tests that load them.
+# Test data only, so fetched only when the tests are built. An app that has
+# already fetched the packs and included their PhosphorSurfacePacks.cmake has
+# set PHOSPHOR_SURFACE_PACKS_DIR, and its copy is the one tested.
+if(BUILD_TESTING AND NOT PHOSPHOR_SURFACE_PACKS_DIR)
+    phosphor_fetch_dependency(phosphor-surface-packs)
+    include("${phosphor-surface-packs_SOURCE_DIR}/cmake/PhosphorSurfacePacks.cmake")
+endif()
+
+# Where the app's bundled animation and pointer packs live, for the library
+# tests that check a library constant against them (phosphor-animation's
+# built-in effects, phosphor-pointer's shared helper). Empty when this tree is
+# built on its own: those tests then skip and say why. PlasmaZones sets it to
+# its data/ tree, so they run in its build.
 set(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR "" CACHE PATH
     "Directory holding bundled animations/ and pointer/ packs, for the tests that check them. Empty: those tests skip")
 

@@ -29,11 +29,13 @@
 #
 # Script mode, for packagers and CI:
 #
-#   cmake -DPHOSPHOR_DEPS_FETCH=<dir> -P cmake/PhosphorDependencies.cmake
+#   cmake -DPHOSPHOR_DEPS_FETCH=<dir> [-DPHOSPHOR_DEPS_FETCH_TESTS=ON] -P cmake/PhosphorDependencies.cmake
 #
 # downloads every source archive into <dir> under its FILE name and checks it,
-# so <dir> can be handed to PHOSPHOR_DEPS_ARCHIVES. An archive already there
-# with the right hash is kept.
+# so <dir> can be handed to PHOSPHOR_DEPS_ARCHIVES. With PHOSPHOR_DEPS_FETCH_TESTS
+# it also downloads the archives only the test suite reads (PHOSPHOR_TEST_DEPS),
+# for an offline build that runs the tests. An archive already there with the
+# right hash is kept.
 #
 # Bumping a pin: change its VERSION, URL, FILE and SHA256 together, with the
 # hash taken from a download you checked, never from whatever the next
@@ -60,7 +62,19 @@ set(PHOSPHOR_DEP_valijson_URL "https://github.com/tristanpenman/valijson/archive
 set(PHOSPHOR_DEP_valijson_FILE "valijson-1.1.3.tar.gz")
 set(PHOSPHOR_DEP_valijson_SHA256 "887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029")
 
+# Test data: read by the test suite and by nothing that is built or installed,
+# so fetched only when BUILD_TESTING is on, and not part of PHOSPHOR_DEPS. A
+# packaging build that skips the tests never needs these.
+set(PHOSPHOR_TEST_DEPS phosphor-surface-packs)
 
+# The surface decoration packs (LGPL-2.1-or-later with some GPL-3.0-or-later
+# shaders, phosphor-works/phosphor-surface-packs), which phosphor-surface's
+# tests load to check the library against the packs the apps ship. A commit,
+# not a release, so VERSION is the commit hash.
+set(PHOSPHOR_DEP_phosphor-surface-packs_VERSION "e89d9f7bb6320eab8b6a0b3325858d2ca5356ce3")
+set(PHOSPHOR_DEP_phosphor-surface-packs_URL "https://github.com/phosphor-works/phosphor-surface-packs/archive/e89d9f7bb6320eab8b6a0b3325858d2ca5356ce3.tar.gz")
+set(PHOSPHOR_DEP_phosphor-surface-packs_FILE "phosphor-surface-packs-e89d9f7bb6320eab8b6a0b3325858d2ca5356ce3.tar.gz")
+set(PHOSPHOR_DEP_phosphor-surface-packs_SHA256 "fbbf0b9849d83396029bc4e310c3dcac49c08758e73d560538888e685f0a5e30")
 
 # CPM.cmake itself. An app that adds this tree loads its own pinned CPM first,
 # and that copy is used.
@@ -79,7 +93,11 @@ if(CMAKE_SCRIPT_MODE_FILE)
     endif()
     get_filename_component(_dir "${PHOSPHOR_DEPS_FETCH}" ABSOLUTE)
     file(MAKE_DIRECTORY "${_dir}")
-    foreach(_name IN LISTS PHOSPHOR_DEPS)
+    set(_names ${PHOSPHOR_DEPS})
+    if(PHOSPHOR_DEPS_FETCH_TESTS)
+        list(APPEND _names ${PHOSPHOR_TEST_DEPS})
+    endif()
+    foreach(_name IN LISTS _names)
         set(_file "${_dir}/${PHOSPHOR_DEP_${_name}_FILE}")
         set(_have "")
         if(EXISTS "${_file}")
@@ -147,12 +165,12 @@ endif()
 
 # phosphor_fetch_dependency(<name>)
 #
-# Makes the pinned source archive <name> (one of PHOSPHOR_DEPS) available and
-# sets <name>_SOURCE_DIR in the caller's scope to its unpacked tree: the
-# archive's contents, with its single top-level directory removed. Only fetches
-# the source. What to build from it is the caller's business.
+# Makes the pinned archive <name> (one of PHOSPHOR_DEPS or PHOSPHOR_TEST_DEPS)
+# available and sets <name>_SOURCE_DIR in the caller's scope to its unpacked
+# tree: the archive's contents, with its single top-level directory removed.
+# Only fetches the source. What to build from it is the caller's business.
 function(phosphor_fetch_dependency name)
-    if(NOT name IN_LIST PHOSPHOR_DEPS)
+    if(NOT name IN_LIST PHOSPHOR_DEPS AND NOT name IN_LIST PHOSPHOR_TEST_DEPS)
         message(FATAL_ERROR "phosphor_fetch_dependency: '${name}' is not pinned in ${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
     endif()
     set(_version "${PHOSPHOR_DEP_${name}_VERSION}")

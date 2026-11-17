@@ -194,8 +194,8 @@ endif()
 
 # valijson is BSD-2-Clause (Tristan Penman) and, in the default vendored build,
 # its headers are compiled into this library — so its licence notice must
-# accompany the distribution. Ship it alongside the app's own licences, next to
-# the vendored Luau notice phosphor-scripting installs. The system-valijson
+# accompany the distribution. Ship it in this tree's own licence directory, next
+# to the vendored Luau notice phosphor-scripting installs. The system-valijson
 # build uses separately-installed headers that carry their own licence, so skip
 # it there. Guarded on the file existing for the same reason as the Luau rule:
 # a scope that skips the extraction must not leave an install rule pointing at
@@ -204,7 +204,7 @@ if(NOT PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
     set(_pz_valijson_license "${_pz_valijson_root}/LICENSE")
     if(EXISTS "${_pz_valijson_license}")
         install(FILES ${_pz_valijson_license}
-            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/plasmazones
+            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
             RENAME LICENSE.valijson)
     endif()
 endif()

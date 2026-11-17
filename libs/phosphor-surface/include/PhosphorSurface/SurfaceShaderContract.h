@@ -26,7 +26,7 @@ namespace PhosphorSurfaceShaders {
 ///      which it stopped being when the compositor grew the surface fold.
 ///
 ///   3. **Surface shaders** — `SurfaceShaderRegistry` (this contract),
-///      sourced from `plasmazones/data/surface/*/`. Persistent per-window surface
+///      sourced from the phosphor-surface-packs repository. Persistent per-window surface
 ///      layers composited OVER (or as part of) the live window content:
 ///      the decoration band / border, rounded corners, focus tint, and
 ///      similar window-chrome effects. Unlike an animation shader these

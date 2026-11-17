@@ -208,8 +208,9 @@ public:
     /// to the absolute path of the standard pass shipped in the surface
     /// `shared/` directory, probing @p effectDir's sibling `shared/` dir
     /// first (both are children of the same search root) and falling back
-    /// to the installed `plasmazones/surface/shared` data dirs
-    /// (so user packs outside the system tree can still opt in). The token
+    /// to `<subdir>/shared` under the XDG data dirs, where <subdir> is what
+    /// the app passed to setSurfacePackDataSubdir() (so user packs outside the
+    /// system tree can still opt in; no fallback while it is unset). The token
     /// vocabulary is a fixed whitelist — authors cannot smuggle arbitrary
     /// paths through it, which keeps the pack-dir traversal guard intact.
     /// Returns an empty string for an unknown token or when the shared file

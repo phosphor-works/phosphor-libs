@@ -358,8 +358,9 @@ public:
     /**
      * @brief Whether this scripted algorithm was loaded from a user directory
      *
-     * System-installed scripts (shipped with Phosphor) return false.
-     * User-created scripts in ~/.local/share/plasmazones/algorithms/ return true.
+     * System-installed scripts (shipped with the app) return false.
+     * User-created scripts under the loader's subdirectory of the user data
+     * dir (~/.local/share/<subdirectory>/) return true.
      * Non-scripted algorithms always return false.
      *
      * @return true if loaded from user's writable data directory (default: false)

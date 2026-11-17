@@ -19,8 +19,9 @@ namespace PhosphorZones {
  * @brief Load/save store for scrolling templates
  *
  * The persistence peer of LayoutRegistry's layout loading, for the
- * ScrollingTemplate object: JSON files in "plasmazones/scrolling-templates"
- * under every GenericDataLocation. System directories load first and the
+ * ScrollingTemplate object: JSON files in the app's template subdirectory
+ * (PlasmaZones uses "plasmazones/scrolling-templates") under every
+ * GenericDataLocation. System directories load first and the
  * user directory last, so a user file sharing a bundled template's id
  * SHADOWS it (edit-a-bundled-template writes a user copy; deleting that
  * copy resurfaces the original). Templates get their own directory rather
@@ -38,18 +39,25 @@ class PHOSPHORZONES_EXPORT ScrollingTemplateStore : public QObject
     Q_OBJECT
 
 public:
-    explicit ScrollingTemplateStore(QObject* parent = nullptr);
+    /// @p templateSubdirectory is where the app keeps its templates, relative
+    /// to every QStandardPaths::GenericDataLocation directory, no leading
+    /// slash, the way LayoutRegistry takes its layout subdirectory. Empty
+    /// disables the store: it loads nothing and refuses every save.
+    explicit ScrollingTemplateStore(QString templateSubdirectory, QObject* parent = nullptr);
 
     /// The data-location subdirectory templates live in, relative to
-    /// GenericDataLocation. The single authority for the spelling; UI code
-    /// that opens the folder must use this rather than inlining the path.
-    static QString templateSubdirectory();
+    /// GenericDataLocation, as the constructor received it. UI code that opens
+    /// the folder must use this rather than inlining the path.
+    QString templateSubdirectory() const
+    {
+        return m_templateSubdirectory;
+    }
 
     /// Absolute path of the USER template directory (GenericDataLocation +
-    /// templateSubdirectory()). Static because it reads nothing off the store:
-    /// UI code that has to open or create the folder can call it without an
-    /// instance, and must, rather than re-joining the two parts itself.
-    static QString userTemplateDirectory();
+    /// templateSubdirectory()). UI code that has to open or create the folder
+    /// must use this rather than re-joining the two parts itself. Empty when
+    /// the store has no subdirectory.
+    QString userTemplateDirectory() const;
 
     /// Rescan every data location (system first, user last). Emits
     /// templatesChanged when the loaded set differs.
@@ -105,6 +113,7 @@ private:
     QString userTemplateFilePath(const QUuid& id) const;
     bool writeTemplateFile(const ScrollingTemplate& templ);
 
+    QString m_templateSubdirectory;
     QHash<QUuid, ScrollingTemplate> m_templates;
 };
 

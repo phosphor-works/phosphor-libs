@@ -797,7 +797,7 @@ void WatchedDirectorySet::attachWatcherForDir(const QString& directory)
         //
         // Crucially: refuse to climb onto `$HOME`, root, or
         // GenericData/ConfigLocation roots. A pristine install where
-        // `~/.local/share/plasmazones` does not exist would otherwise
+        // `~/.local/share/<app>` does not exist would otherwise
         // end up watching `$HOME`, making every file operation in the
         // user's home trigger a full rescan. If the immediate
         // parent(s) don't exist, we silently skip the watch until the

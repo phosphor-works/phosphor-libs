@@ -259,6 +259,17 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# The library's own tests. Most of its behaviour is tested in PlasmaZones'
+# suite, which drives it through the daemon's composition.
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorZones" OR BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 install(TARGETS PhosphorZones
     EXPORT PhosphorZonesTargets
     LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}

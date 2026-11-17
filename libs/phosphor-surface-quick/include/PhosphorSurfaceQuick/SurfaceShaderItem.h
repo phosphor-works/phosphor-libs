@@ -21,8 +21,8 @@ namespace PhosphorSurfaceQuick {
  * @brief QQuickItem for rendering a per-window surface-decoration layer with a
  *        custom shader (border / rounded corners / focus tint / glow).
  *
- * The Qt Quick consumer for the `plasmazones/surface` shader-pack category, one
- * of four beside overlays, animations and pointer, and sibling to the plasmazones
+ * The Qt Quick consumer for the surface shader-pack category, one of four
+ * beside overlays, animations and pointer, and sibling to PlasmaZones'
  * ZoneShaderItem (overlay zone backgrounds). Like ZoneShaderItem it inherits from
  * PhosphorRendering::ShaderEffect, which provides all base shader rendering:
  * Shadertoy uniforms, custom params/colors, user textures, multipass, status,
@@ -98,9 +98,11 @@ public:
     ~SurfaceShaderItem() override;
 
     /// The canonical surface-shader include-path list, highest priority first:
-    /// every XDG `plasmazones/surface` dir (user first, system descending, via
-    /// locateAll), each contributing its `shared` subdir then itself. Shared
-    /// by this item's constructor AND the plasmazones daemon's warm-bake so
+    /// every XDG data dir's copy of the subdir the app set with
+    /// PhosphorSurfaceShaders::setSurfacePackDataSubdir() (user first, system
+    /// descending, via locateAll), each contributing its `shared` subdir then
+    /// itself. Empty while the app has set no subdir. Shared by this item's
+    /// constructor AND an app's warm-bake (PlasmaZones' daemon) so
     /// the bake-cache key the warm compile writes is guaranteed to be the one
     /// the first live paint looks up — the two paths cannot silently diverge.
     ///
