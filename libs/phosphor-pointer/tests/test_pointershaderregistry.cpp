@@ -102,6 +102,7 @@ private Q_SLOTS:
     void testInvalidParameterIdConsumesNoLane();
     void testEntryPointScaffoldMatchesTheSharedContract();
     void testIncludePathsResolveTheSharedDirectory();
+    void testIncludePathsAddNoInstalledDirectoryWithoutASubdir();
 };
 
 void TestPointerShaderRegistry::testParsesPointerSpecificFields()
@@ -639,28 +640,34 @@ void TestPointerShaderRegistry::testIncludePathsResolveTheSharedDirectory()
     // `#include <pointer_uniforms.glsl>` resolves against the pack root's
     // shared/ dir, one level above the pack itself, and that pair comes FIRST
     // so a pack shipping its own shared/ is served from it.
-    const QStringList paths = PointerShaderRegistry::includePathsFor(QStringLiteral("/data/pointer/halo"));
+    const QString subdir = QStringLiteral("phosphor-test/pointer");
+    const QStringList paths = PointerShaderRegistry::includePathsFor(QStringLiteral("/data/pointer/halo"), subdir);
     QVERIFY(paths.size() >= 2);
     QCOMPARE(paths.at(0), QStringLiteral("/data/pointer/shared"));
     QCOMPARE(paths.at(1), QStringLiteral("/data/pointer"));
 
-    // The installed shared dir is appended too, which is the only way a pack
-    // outside the bundled tree can resolve the helpers the entry prologue
-    // includes unconditionally. Without it every user pack fails include
-    // expansion in the preview and the validator while rendering fine in the
-    // compositor, which builds its list from the registry's roots instead.
+    // The installed shared dir under the subdir the app names is appended too,
+    // which is the only way a pack outside the bundled tree can resolve the
+    // helpers the entry prologue includes unconditionally. Without it every
+    // user pack fails include expansion in the preview and the validator while
+    // rendering fine in the compositor, which builds its list from the
+    // registry's roots instead.
     const QStringList dataDirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
     QVERIFY(!dataDirs.isEmpty());
-    bool sawInstalledShared = false;
     for (const QString& dir : dataDirs) {
-        if (paths.contains(dir + QStringLiteral("/plasmazones/pointer/shared"))) {
-            sawInstalledShared = true;
-            break;
-        }
+        QVERIFY2(paths.contains(dir + QLatin1Char('/') + subdir + QStringLiteral("/shared")),
+                 qPrintable(QStringLiteral("includePathsFor drops the installed shared dir under %1").arg(dir)));
     }
-    QVERIFY2(sawInstalledShared, "includePathsFor drops the installed shared dir, so no user pack can be previewed");
 
-    QVERIFY(PointerShaderRegistry::includePathsFor(QString()).isEmpty());
+    QVERIFY(PointerShaderRegistry::includePathsFor(QString(), subdir).isEmpty());
+}
+
+void TestPointerShaderRegistry::testIncludePathsAddNoInstalledDirectoryWithoutASubdir()
+{
+    // The library names no app's pack directory: with no subdir, only the
+    // pack's own neighbourhood is searched.
+    const QStringList paths = PointerShaderRegistry::includePathsFor(QStringLiteral("/data/pointer/halo"), QString());
+    QCOMPARE(paths, (QStringList{QStringLiteral("/data/pointer/shared"), QStringLiteral("/data/pointer")}));
 }
 
 void TestPointerShaderRegistry::testTrailWindowFollowsTheParameterThatBoundsTheRead()
