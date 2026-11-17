@@ -11,9 +11,11 @@ include(CMakeFindDependencyMacro)
 # a clean find_package rejection at configure time.
 find_dependency(Qt6 @PHOSPHORLAYER_QT_MIN@ COMPONENTS Core Gui Qml Quick)
 
-# PhosphorWayland dependency is baked at library-build time via the
-# PHOSPHORLAYER_WITH_PHOSPHORWAYLAND option. When OFF the .so has no
-# PhosphorWayland symbols and consumers must NOT be forced to install it.
+# PhosphorLayer::Wayland (PhosphorWaylandTransport) exists only when the
+# libraries were built with PHOSPHORLAYER_WITH_PHOSPHORWAYLAND. It links
+# PhosphorWayland privately, which a shared library still names in its link
+# interface, so the dependency is found here. The core PhosphorLayer target
+# never links it. When OFF, consumers must NOT be forced to install it.
 set(PhosphorLayer_WITH_PHOSPHORWAYLAND @PHOSPHORLAYER_WITH_PHOSPHORWAYLAND@)
 if(PhosphorLayer_WITH_PHOSPHORWAYLAND)
     # PhosphorWayland and PhosphorLayer ship together in this tree, so a

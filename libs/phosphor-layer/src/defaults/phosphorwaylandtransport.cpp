@@ -8,11 +8,16 @@
 #include <PhosphorWayland/CompositorLost.h>
 #include <PhosphorWayland/LayerSurface.h>
 
+#include <QLoggingCategory>
 #include <QQuickWindow>
 
 #include <atomic>
 
 namespace PhosphorLayer {
+
+// Its own category: lcPhosphorLayer lives in the core library with hidden
+// visibility, and this transport is a separate library.
+Q_LOGGING_CATEGORY(lcPhosphorLayerWayland, "phosphorlayer.wayland")
 
 namespace {
 
@@ -219,11 +224,11 @@ bool PhosphorWaylandTransport::isSupported() const
 std::unique_ptr<ITransportHandle> PhosphorWaylandTransport::attach(QQuickWindow* win, const TransportAttachArgs& args)
 {
     if (!win) {
-        qCWarning(lcPhosphorLayer) << "PhosphorWaylandTransport::attach: window is nullptr";
+        qCWarning(lcPhosphorLayerWayland) << "PhosphorWaylandTransport::attach: window is nullptr";
         return nullptr;
     }
     if (!isSupported()) {
-        qCWarning(lcPhosphorLayer) << "PhosphorWaylandTransport::attach: compositor lacks wlr-layer-shell";
+        qCWarning(lcPhosphorLayerWayland) << "PhosphorWaylandTransport::attach: compositor lacks wlr-layer-shell";
         return nullptr;
     }
     // Pre-show-immutable properties (scope, layer, anchors, kbd interactivity)
@@ -233,14 +238,14 @@ std::unique_ptr<ITransportHandle> PhosphorWaylandTransport::attach(QQuickWindow*
     // that yields a handle that reports "configured" but never honoured
     // its initial config. Refuse loudly so the caller fixes their ordering.
     if (win->isVisible()) {
-        qCWarning(lcPhosphorLayer)
+        qCWarning(lcPhosphorLayerWayland)
             << "PhosphorWaylandTransport::attach: window is already visible — attach must run before show()"
             << "(pre-show-immutable properties would be silently discarded)";
         return nullptr;
     }
     auto* surface = PhosphorWayland::LayerSurface::get(win);
     if (!surface) {
-        qCWarning(lcPhosphorLayer) << "PhosphorWaylandTransport::attach: LayerSurface::get returned nullptr";
+        qCWarning(lcPhosphorLayerWayland) << "PhosphorWaylandTransport::attach: LayerSurface::get returned nullptr";
         return nullptr;
     }
 

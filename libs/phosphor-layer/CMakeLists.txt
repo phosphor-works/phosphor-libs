@@ -7,9 +7,15 @@
 # (overlays, panels, docks, backgrounds, modals, OSDs) with dependency
 # injection, testable abstractions, and consumer-defined presets.
 #
-# Depends on Qt6 Core/Gui/Quick only. The default layer-shell transport
-# (PhosphorWaylandTransport) is added in a later phase; step 1 ships only
-# the abstract API + interfaces so consumers can start integrating now.
+# Two libraries:
+#   * PhosphorLayer (PhosphorLayer::PhosphorLayer): the surface lifecycle, the
+#     transport and screen interfaces and the xdg_toplevel fallback. Qt
+#     Core/Gui/Qml/Quick only, with no Wayland client code, so a host that
+#     presents surfaces some other way (a compositor drawing them as scene
+#     nodes) links it without a Wayland connection.
+#   * PhosphorLayerWayland (PhosphorLayer::Wayland): PhosphorWaylandTransport,
+#     the wlr-layer-shell transport over PhosphorWayland. Only a Wayland client
+#     that wants real layer-shell surfaces links it.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -58,9 +64,8 @@ option(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND "Build PhosphorWaylandTransport (requi
 # that silently misbehave on older versions rather than failing to compile.
 find_package(Qt6 ${PHOSPHORLAYER_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
 if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
-    # PhosphorWayland provides the default ILayerShellTransport implementation.
-    # Listed as PUBLIC dep so downstream consumers using PhosphorWaylandTransport
-    # get PhosphorWayland headers on their include path transitively.
+    # PhosphorWayland backs PhosphorWaylandTransport, which is its own library
+    # (PhosphorLayer::Wayland, below) so the core library never links it.
     find_package(PhosphorWayland CONFIG QUIET)
     if(NOT PhosphorWayland_FOUND)
         # In-tree build: PhosphorWayland was added via add_subdirectory() before us.
@@ -102,11 +107,6 @@ set(phosphorlayer_public_HDRS
     include/PhosphorLayer/defaults/JsonSurfaceStore.h
     include/PhosphorLayer/defaults/NoOpSurfaceAnimator.h
 )
-
-if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
-    list(APPEND phosphorlayer_SRCS src/defaults/phosphorwaylandtransport.cpp)
-    list(APPEND phosphorlayer_public_HDRS include/PhosphorLayer/defaults/PhosphorWaylandTransport.h)
-endif()
 
 add_library(PhosphorLayer SHARED
     ${phosphorlayer_public_HDRS}
@@ -158,16 +158,6 @@ target_link_libraries(PhosphorLayer
         Qt6::Quick
 )
 
-if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
-    # PUBLIC so consumers using PhosphorWaylandTransport transitively get the
-    # PhosphorWayland include path + link. The transport's implementation file
-    # is the only TU that needs PhosphorWayland; the public header forward-
-    # declares PhosphorWayland::LayerSurface so consumers that don't construct
-    # a PhosphorWaylandTransport don't pay the include cost.
-    target_link_libraries(PhosphorLayer PUBLIC PhosphorWayland::PhosphorWayland)
-    target_compile_definitions(PhosphorLayer PUBLIC PHOSPHORLAYER_WITH_PHOSPHORWAYLAND=1)
-endif()
-
 set_target_properties(PhosphorLayer PROPERTIES
     VERSION ${PHOSPHORLAYER_VERSION}
     SOVERSION 0
@@ -179,6 +169,52 @@ set_target_properties(PhosphorLayer PROPERTIES
     # units are small enough that unity buys us nothing here.
     UNITY_BUILD OFF
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PhosphorLayerWayland Library (PhosphorLayer::Wayland)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
+    add_library(PhosphorLayerWayland SHARED
+        include/PhosphorLayer/defaults/PhosphorWaylandTransport.h
+        src/defaults/phosphorwaylandtransport.cpp
+    )
+    add_library(PhosphorLayer::Wayland ALIAS PhosphorLayerWayland)
+
+    generate_export_header(PhosphorLayerWayland
+        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayerwayland_export.h
+        EXPORT_MACRO_NAME PHOSPHORLAYERWAYLAND_EXPORT
+    )
+
+    target_include_directories(PhosphorLayerWayland
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+            $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}>
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_compile_features(PhosphorLayerWayland PUBLIC cxx_std_20)
+
+    # The public header forward-declares PhosphorWayland's types, so
+    # PhosphorWayland stays PRIVATE: a consumer of the transport gets no
+    # Wayland include path it did not ask for.
+    target_link_libraries(PhosphorLayerWayland
+        PUBLIC
+            PhosphorLayer::PhosphorLayer
+        PRIVATE
+            Qt6::Quick
+            PhosphorWayland::PhosphorWayland
+    )
+
+    set_target_properties(PhosphorLayerWayland PROPERTIES
+        VERSION ${PHOSPHORLAYER_VERSION}
+        SOVERSION 0
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        EXPORT_NAME Wayland
+    )
+endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Install
@@ -194,7 +230,12 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorLayer
+set(_phosphorlayer_install_targets PhosphorLayer)
+if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
+    list(APPEND _phosphorlayer_install_targets PhosphorLayerWayland)
+endif()
+
+install(TARGETS ${_phosphorlayer_install_targets}
     EXPORT PhosphorLayerTargets
     LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
@@ -244,6 +285,11 @@ endif()
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayer_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
 )
+if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayerwayland_export.h
+        DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
+    )
+endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CMake Package Config (for find_package(PhosphorLayer))
