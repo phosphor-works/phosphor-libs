@@ -96,4 +96,4 @@ project's global build settings.
 ## See also
 
 - [`phosphor-tiles`](../phosphor-tiles/README.md) — the first consumer: `LuauTileAlgorithm` + the `pluau` tiling standard library.
-- [`docs/architecture/adr/0001-luau-shell-scripting-language.md`](../../../docs/architecture/adr/0001-luau-shell-scripting-language.md) — why Luau.
+- [PlasmaZones ADR 0001: Luau as the shell scripting language](https://github.com/phosphor-works/PlasmaZones/blob/main/docs/architecture/adr/0001-luau-shell-scripting-language.md) — why Luau.
