@@ -21,7 +21,9 @@
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -93,6 +95,8 @@ private Q_SLOTS:
     void migrationLeavesForeignFilesAlone();
     void migrationFallsBackToFilenameForName();
     void migrationOnAbsentRootIsNoOp();
+    void standardUserPresetRootIsTheAppSubdirUnderTheUserDataDir();
+    void standardUserPresetRootIsEmptyWithoutASubdir();
 
     // ─────── store ───────
 
@@ -309,7 +313,29 @@ void TestShaderPresetStore::migrationFallsBackToFilenameForName()
 
 void TestShaderPresetStore::migrationOnAbsentRootIsNoOp()
 {
-    QCOMPARE(migrateLegacyOverlayPresets(QStringLiteral("/nonexistent/plasmazones/shader-presets")), 0);
+    QCOMPARE(migrateLegacyOverlayPresets(QStringLiteral("/nonexistent/shader-presets")), 0);
+}
+
+void TestShaderPresetStore::standardUserPresetRootIsTheAppSubdirUnderTheUserDataDir()
+{
+    QCOMPARE(standardUserPresetRoot(QStringLiteral("phosphor-test/shader-presets")),
+             QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+                 + QStringLiteral("/phosphor-test/shader-presets"));
+}
+
+void TestShaderPresetStore::standardUserPresetRootIsEmptyWithoutASubdir()
+{
+    // The library names no app's directory. With none named the root is empty,
+    // and the store refuses it rather than loading from the data dir's root.
+    const QString root = standardUserPresetRoot(QString());
+    QVERIFY(root.isEmpty());
+
+    ShaderPresetStore store;
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("Refusing to load presets")));
+    store.load(root);
+    for (std::size_t i = 0; i < ShaderFamilyCount; ++i) {
+        QVERIFY(!store.publishes(static_cast<ShaderFamily>(i)));
+    }
 }
 
 void TestShaderPresetStore::watcherSeesAPlainRewrite()

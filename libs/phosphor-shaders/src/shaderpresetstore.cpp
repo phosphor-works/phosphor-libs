@@ -44,10 +44,12 @@ static_assert(kAllFamilies.back() == static_cast<ShaderFamily>(ShaderFamilyCount
               "kAllFamilies must list every ShaderFamily, in enum order");
 } // namespace
 
-QString standardUserPresetRoot()
+QString standardUserPresetRoot(const QString& subdirectory)
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-        + QStringLiteral("/plasmazones/shader-presets");
+    if (subdirectory.isEmpty()) {
+        return QString();
+    }
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QLatin1Char('/') + subdirectory;
 }
 
 QString userPresetDirectory(const QString& root, ShaderFamily family)

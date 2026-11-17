@@ -21,14 +21,18 @@ namespace PhosphorShaders {
 using LiveReload = PhosphorFsLoader::LiveReload;
 
 /// The standard root for user-saved shader presets:
-/// `<XDG_DATA_HOME>/plasmazones/shader-presets`. One subdirectory per family,
-/// named by `shaderFamilyToken`.
+/// `<XDG_DATA_HOME>/<subdirectory>`, where @p subdirectory is the app's preset
+/// directory relative to the user data dir, no leading slash (PlasmaZones
+/// passes `plasmazones/shader-presets`). One subdirectory per family, named by
+/// `shaderFamilyToken`. Empty @p subdirectory answers an empty string, which
+/// `ShaderPresetStore::load()` refuses, so an app that names no directory
+/// loads and saves no presets rather than writing into the data dir's root.
 ///
 /// Does NOT create the directory. `WatchedDirectorySet` promotes its watch to
 /// the parent when the target does not exist yet, so a preset saved into a
 /// fresh install is picked up without a restart and without every reader having
 /// to mkdir a directory it only wants to read.
-PHOSPHORSHADERS_EXPORT QString standardUserPresetRoot();
+PHOSPHORSHADERS_EXPORT QString standardUserPresetRoot(const QString& subdirectory);
 
 /// The directory holding @p family's user presets under @p root.
 PHOSPHORSHADERS_EXPORT QString userPresetDirectory(const QString& root, ShaderFamily family);
@@ -131,8 +135,9 @@ public:
      * cannot produce two publishers for one family — and now cannot even be
      * asked to, because the publisher IS the slot.
      *
-     * @param root  The preset root, defaulting to `standardUserPresetRoot()`.
-     *              Tests pass a temporary directory. Must be an absolute path —
+     * @param root  The preset root, normally `standardUserPresetRoot()` of the
+     *              app's preset subdirectory. Tests pass a temporary directory.
+     *              Must be an absolute path —
      *              an empty or relative root would resolve against the process
      *              working directory, and is refused with a warning.
      * @param families  Which families to publish. Empty (the default) means all
@@ -143,7 +148,7 @@ public:
      *              that on its own thread for the overlay family it cannot
      *              consult at all.
      */
-    void load(const QString& root = standardUserPresetRoot(), const QList<ShaderFamily>& families = {});
+    void load(const QString& root, const QList<ShaderFamily>& families = {});
 
     /// The registry every consumer resolves through.
     ShaderPresetRegistry& registry();
