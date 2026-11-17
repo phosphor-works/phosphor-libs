@@ -49,6 +49,19 @@ has one of these well-known roles."
   this library and the Wayland binding. Default impl is
   `PhosphorWaylandTransport`, and tests use a mock.
 
+## Targets
+
+| Target | Holds | Links |
+|--------|-------|-------|
+| `PhosphorLayer::PhosphorLayer` | Everything below except `PhosphorWaylandTransport` | Qt Core/Gui/Qml/Quick. No Wayland client code |
+| `PhosphorLayer::Wayland` | `PhosphorWaylandTransport` | `PhosphorLayer::PhosphorLayer`, and `phosphor-wayland` privately |
+
+Link `PhosphorLayer::Wayland` only where you construct a
+`PhosphorWaylandTransport`. A host that presents surfaces without a Wayland
+client connection, such as a compositor drawing them as scene nodes through its
+own `ILayerShellTransport`, links the core target alone. The Wayland target is
+built when `PHOSPHORLAYER_WITH_PHOSPHORWAYLAND` is ON (the default).
+
 ## Key types
 
 | Type | Purpose |
@@ -67,7 +80,7 @@ has one of these well-known roles."
 | `PhosphorLayer::JsonSurfaceStore`           | Bundled file-backed `ISurfaceStore` (`QSaveFile`-atomic) |
 | `PhosphorLayer::DefaultScreenProvider`      | Bundled `IScreenProvider` over `QGuiApplication::screens()` |
 | `PhosphorLayer::NoOpSurfaceAnimator`        | Animator that shows / hides instantly (default) |
-| `PhosphorLayer::PhosphorWaylandTransport`   | Default `ILayerShellTransport` over `phosphor-wayland`'s `LayerSurface` |
+| `PhosphorLayer::PhosphorWaylandTransport`   | Default `ILayerShellTransport` over `phosphor-wayland`'s `LayerSurface` (in `PhosphorLayer::Wayland`) |
 | `PhosphorLayer::XdgToplevelTransport`       | Fallback transport using `xdg_toplevel` (no layer-shell) |
 
 ## Typical use

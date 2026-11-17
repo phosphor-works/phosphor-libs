@@ -4,7 +4,7 @@
 #pragma once
 
 #include <PhosphorLayer/ILayerShellTransport.h>
-#include <PhosphorLayer/phosphorlayer_export.h>
+#include <PhosphorLayer/phosphorlayerwayland_export.h>
 
 #include <memory>
 
@@ -35,7 +35,7 @@ namespace PhosphorLayer {
  * QGuiApplication setup) and are invoked outside the internal mutex, so
  * callbacks may freely re-enter the transport without deadlocking.
  */
-class PHOSPHORLAYER_EXPORT PhosphorWaylandTransport : public ILayerShellTransport
+class PHOSPHORLAYERWAYLAND_EXPORT PhosphorWaylandTransport : public ILayerShellTransport
 {
 public:
     PhosphorWaylandTransport();
