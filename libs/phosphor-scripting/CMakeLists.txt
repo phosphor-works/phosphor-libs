@@ -210,9 +210,10 @@ endif()
 
 # Luau is MIT-licensed (Roblox Corporation) and, in the default vendored
 # build, is statically linked into this library — so its licence notice must
-# accompany the distribution. Ship it alongside the app's own licences. The
-# system-Luau build links a separately-installed Luau that carries its own
-# licence, so skip it there.
+# accompany the distribution. Ship it in this tree's own licence directory,
+# beside the valijson notice phosphor-fsloader installs. The system-Luau build
+# links a separately-installed Luau that carries its own licence, so skip it
+# there.
 if(NOT PHOSPHOR_SYSTEM_LUAU)
     # _p_luau_src is the unpacked archive (set in the acquisition
     # block). Guarded on the file actually existing: a superbuild/parent
@@ -221,7 +222,7 @@ if(NOT PHOSPHOR_SYSTEM_LUAU)
     # a path that was never created.
     if(EXISTS "${_p_luau_src}/LICENSE.txt")
         install(FILES ${_p_luau_src}/LICENSE.txt
-            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/plasmazones
+            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
             RENAME LICENSE.Luau)
     endif()
 endif()
