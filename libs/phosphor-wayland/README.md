@@ -53,6 +53,7 @@ touches this lib through `registerLayerShellPlugin()` at startup.
 | `PhosphorWayland::LayerSurfaceProps`       | Property-key constants used by `LayerSurface` ↔ QPA plugin |
 | `PhosphorWayland::registerLayerShellPlugin`| Header-only env-var setup before `QGuiApplication` |
 | `PhosphorWayland::addCompositorLostCallback` / `removeCompositorLostCallback` | Process-wide subscription to `zwlr_layer_shell_v1` global-removal (one-shot, thread-safe) |
+| `PhosphorWayland::BackgroundEffect`        | Compositor blur behind a region of a window (`ext-background-effect-v1`); `blurSupported` says whether the compositor applies it, and the region is a no-op until it does |
 
 ## Typical use
 
@@ -112,7 +113,8 @@ int main(int argc, char** argv) {
 ## Dependencies
 
 - `QtCore`, `QtGui`
-- `wayland-client`, `wlr-layer-shell-v1` protocol, `Qt6::WaylandClientPrivate`
+- `wayland-client`, `Qt6::WaylandClientPrivate`, and the protocols vendored in
+  `protocols/` (wlr-layer-shell, ext-session-lock, ext-background-effect and the rest)
 
 ## See also
 

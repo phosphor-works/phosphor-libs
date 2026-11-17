@@ -4,6 +4,7 @@
 #include "layershellintegration.h"
 #include "layershellwindow.h"
 #include "sessionlockwindow.h"
+#include "../backgroundeffect_internal.h"
 #include "../compositorlost_internal.h"
 #include <PhosphorWayland/LayerSurface.h>
 #include <PhosphorWayland/LockSurface.h>
@@ -25,6 +26,10 @@ LayerShellIntegration* LayerShellIntegration::s_instance = nullptr;
 static const struct wl_registry_listener s_registryListener = {
     .global = LayerShellIntegration::registryHandler,
     .global_remove = LayerShellIntegration::registryRemoveHandler,
+};
+
+static const struct ext_background_effect_manager_v1_listener s_backgroundEffectListener = {
+    .capabilities = LayerShellIntegration::backgroundEffectCapabilitiesHandler,
 };
 
 LayerShellIntegration::LayerShellIntegration() = default;
@@ -68,6 +73,9 @@ LayerShellIntegration::~LayerShellIntegration()
     if (m_sessionLockManager) {
         ext_session_lock_manager_v1_destroy(m_sessionLockManager);
     }
+    if (m_backgroundEffectManager) {
+        ext_background_effect_manager_v1_destroy(m_backgroundEffectManager);
+    }
     if (m_layerShell) {
         if (m_boundVersion >= 3) {
             // Protocol-level destroy request (added in v3)
@@ -104,6 +112,12 @@ bool LayerShellIntegration::initialize(QtWaylandClient::QWaylandDisplay* display
     m_registry = wl_display_get_registry(wlDisplay);
     wl_registry_add_listener(m_registry, &s_registryListener, this);
     wl_display_roundtrip(wlDisplay);
+    if (m_backgroundEffectManager) {
+        // The manager sends its capabilities in reply to the bind, which went
+        // out during the roundtrip above. One more, so blur support is known
+        // before the first window asks.
+        wl_display_roundtrip(wlDisplay);
+    }
 
     if (!m_layerShell) {
         qCWarning(lcLayerShellIntegration) << "Compositor does not support zwlr_layer_shell_v1 —"
@@ -129,6 +143,11 @@ bool LayerShellIntegration::initialize(QtWaylandClient::QWaylandDisplay* display
     // false, Qt may destroy this object, and we must not leave a dangling s_instance.
     Q_ASSERT_X(!s_instance || s_instance == this, "LayerShellIntegration", "Double initialization detected");
     s_instance = this;
+    if (m_backgroundEffectManager) {
+        // The capabilities arrived in the roundtrip above, before this was the
+        // instance BackgroundEffect asks, so they went unannounced.
+        backgroundEffectCapabilitiesChanged();
+    }
 
     qCInfo(lcLayerShellIntegration) << "Layer shell integration initialized";
     return true;
@@ -324,6 +343,42 @@ void LayerShellIntegration::registryHandler(void* data, struct wl_registry* regi
         self->m_sessionLockManagerId = id;
         self->m_sessionLockManagerAvailable = true;
         qCDebug(lcLayerShellIntegration).nospace() << "Bound ext_session_lock_manager_v1 v" << bindVersion;
+    } else if (strcmp(interface, ext_background_effect_manager_v1_interface.name) == 0) {
+        if (self->m_backgroundEffectManager && self->m_backgroundEffectManagerAvailable)
+            return;
+        // A proxy left from a removed global is destroyed rather than parked:
+        // nothing is dispatched on it any more that matters, since the
+        // capabilities handler ignores every proxy but the current one, and
+        // the per-surface objects made from it stay valid on their own.
+        if (self->m_backgroundEffectManager) {
+            ext_background_effect_manager_v1_destroy(self->m_backgroundEffectManager);
+            self->m_backgroundEffectManager = nullptr;
+        }
+        static constexpr uint32_t kMaxVersion = 1;
+        uint32_t bindVersion = qMin(version, kMaxVersion);
+        self->m_backgroundEffectManager = static_cast<struct ext_background_effect_manager_v1*>(
+            wl_registry_bind(registry, id, &ext_background_effect_manager_v1_interface, bindVersion));
+        ext_background_effect_manager_v1_add_listener(self->m_backgroundEffectManager, &s_backgroundEffectListener,
+                                                      self);
+        self->m_backgroundEffectManagerId = id;
+        self->m_backgroundEffectCapabilities = 0;
+        self->m_backgroundEffectManagerAvailable = true;
+        qCDebug(lcLayerShellIntegration).nospace() << "Bound ext_background_effect_manager_v1 v" << bindVersion;
+    }
+}
+
+void LayerShellIntegration::backgroundEffectCapabilitiesHandler(void* data,
+                                                                struct ext_background_effect_manager_v1* manager,
+                                                                uint32_t flags)
+{
+    auto* self = static_cast<LayerShellIntegration*>(data);
+    if (manager != self->m_backgroundEffectManager) {
+        return;
+    }
+    self->m_backgroundEffectCapabilities = flags;
+    qCDebug(lcLayerShellIntegration) << "ext_background_effect_manager_v1 capabilities" << flags;
+    if (s_instance == self) {
+        backgroundEffectCapabilitiesChanged();
     }
 }
 
@@ -334,8 +389,8 @@ void LayerShellIntegration::registryRemoveHandler(void* data, struct wl_registry
     // Every id field below is 0 when its global was never bound, or was bound
     // and already removed. Wayland never issues object id 0, so a real removal
     // can never alias one of those — but the chain only stays safe while that
-    // holds, so say it here rather than leaving it implicit in eight
-    // comparisons.
+    // holds, so say it here rather than leaving it implicit in every
+    // comparison.
     if (id == 0) {
         return;
     }
@@ -367,6 +422,14 @@ void LayerShellIntegration::registryRemoveHandler(void* data, struct wl_registry
         self->m_sessionLockManagerAvailable = false;
         self->m_sessionLockManagerId = 0;
         qCDebug(lcLayerShellIntegration) << "ext_session_lock_manager_v1 global removed";
+    } else if (id == self->m_backgroundEffectManagerId) {
+        self->m_backgroundEffectManagerAvailable = false;
+        self->m_backgroundEffectManagerId = 0;
+        self->m_backgroundEffectCapabilities = 0;
+        qCDebug(lcLayerShellIntegration) << "ext_background_effect_manager_v1 global removed";
+        if (s_instance == self) {
+            backgroundEffectCapabilitiesChanged();
+        }
     } else if (id == self->m_layerShellId) {
         qCWarning(lcLayerShellIntegration) << "zwlr_layer_shell_v1 global removed (id" << id << ") —"
                                            << "new layer surface creation will fail."
