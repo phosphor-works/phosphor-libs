@@ -36,7 +36,7 @@ class ITileAlgorithmRegistry;
  *
  * The application injects the subdirectory name (relative to
  * `QStandardPaths::GenericDataLocation`) at construction — the library is
- * brand-agnostic. For Phosphor this is `"plasmazones/algorithms"`.
+ * brand-agnostic. PlasmaZones passes `"plasmazones/algorithms"`.
  *
  * User scripts under `writableLocation/<subdirectory>/` override system
  * scripts declaring the same script ID (which defaults to `script:<basename>`
