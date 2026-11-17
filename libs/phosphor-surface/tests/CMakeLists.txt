@@ -54,3 +54,16 @@ phosphorsurface_add_test(test_surfaceshaderregistry)
 phosphorsurface_add_test(test_surfacechaincompose)
 
 phosphorsurface_add_test(test_surfacethemeresolve)
+
+# The library against the packs the apps ship: every pack registers, and every
+# builtin buffer token names a file in their shared/ directory, found beside a
+# pack and through the data subdir an app sets. The packs come from the
+# phosphor-surface-packs commit cmake/PhosphorDependencies.cmake pins, fetched
+# by the top-level CMakeLists when the tests are built, so a configure of this
+# library alone has no packs and builds no such test.
+if(PHOSPHOR_SURFACE_PACKS_DIR)
+    phosphorsurface_add_test(test_surfacepacks)
+    target_compile_definitions(test_surfacepacks PRIVATE
+        "PHOSPHOR_SURFACE_PACKS_DIR=\"${PHOSPHOR_SURFACE_PACKS_DIR}\""
+        "PHOSPHOR_SURFACE_PACKS_DATA_SUBDIR=\"${PHOSPHOR_SURFACE_PACKS_DATA_SUBDIR}\"")
+endif()

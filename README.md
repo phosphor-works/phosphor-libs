@@ -17,7 +17,8 @@ Each library lives in `libs/<name>/` with its own `CMakeLists.txt`, headers, sou
 Needs CMake 3.25, Qt 6.10 with its private headers (Gui, Quick, ShaderTools, WaylandClient), extra-cmake-modules
 and Wayland, plus the Vulkan headers when Qt was built with Vulkan support, as most distributions build it. The
 first configure downloads the pinned Luau and valijson archives (`cmake/PhosphorDependencies.cmake`) into
-`.cache/cpm`.
+`.cache/cpm`, and with the tests on, the pinned
+[phosphor-surface-packs](https://github.com/phosphor-works/phosphor-surface-packs) commit the surface tests load.
 
 ```sh
 cmake --workflow --preset dev
@@ -38,6 +39,11 @@ CPMAddPackage(NAME phosphor-libs
 
 Its `find_package` and `target_link_libraries` calls then resolve to the targets here. To build the app against a
 local checkout instead, configure it with `-DCPM_phosphor-libs_SOURCE=/path/to/phosphor-libs`.
+
+The libraries name no app's data directories. The app passes each one in: the layout, algorithm, scrolling-template
+and shader-preset subdirectories to the classes and functions that read them, the pointer-pack subdirectory to
+`PointerShaderRegistry::includePathsFor`, and, once at startup before any QML loads, the surface-pack subdirectory to
+`PhosphorSurfaceShaders::setSurfacePackDataSubdir` (`PhosphorSurface/SurfacePackLocation.h`).
 
 ## License
 
