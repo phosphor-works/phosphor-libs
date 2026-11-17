@@ -15,8 +15,9 @@ Each library lives in `libs/<name>/` with its own `CMakeLists.txt`, headers, sou
 ## Build
 
 Needs CMake 3.25, Qt 6.10 with its private headers (Gui, Quick, ShaderTools, WaylandClient), extra-cmake-modules
-and Wayland. The first configure downloads the pinned Luau and valijson archives (`cmake/PhosphorDependencies.cmake`)
-into `.cache/cpm`.
+and Wayland, plus the Vulkan headers when Qt was built with Vulkan support, as most distributions build it. The
+first configure downloads the pinned Luau and valijson archives (`cmake/PhosphorDependencies.cmake`) into
+`.cache/cpm`.
 
 ```sh
 cmake --workflow --preset dev

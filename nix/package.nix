@@ -16,6 +16,7 @@
   kdePackages,
   wayland,
   wayland-scanner,
+  vulkan-headers,
   dbus,
   src,
   version,
@@ -74,6 +75,9 @@ stdenv.mkDerivation {
     qt6.qtsvg
     qt6.qtwayland
     wayland
+    # Qt declares QVulkanInstance only with the Vulkan headers present, and
+    # phosphor-surfaces uses it when Qt has Vulkan, as nixpkgs' Qt does.
+    vulkan-headers
     # Optional lookups, so the package builds the code they switch on:
     # KGlobalAccel (phosphor-shortcuts) and PlasmaActivities
     # (phosphor-workspaces). Kirigami is used by phosphor-control's tests.
