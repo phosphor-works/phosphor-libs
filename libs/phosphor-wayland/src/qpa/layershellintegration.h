@@ -19,6 +19,7 @@
 #include "foreign_toplevel_protocol.h"
 #include "data_control_protocol.h"
 #include "session_lock_protocol.h"
+#include "background_effect_protocol.h"
 
 namespace PhosphorWayland {
 
@@ -189,6 +190,24 @@ public:
         m_activeSessionLockGranted = granted;
     }
 
+    /// Background effect manager (`ext_background_effect_manager_v1`). Bound at
+    /// version 1. Returns nullptr when the compositor does not advertise it.
+    struct ext_background_effect_manager_v1* backgroundEffectManager() const
+    {
+        return m_backgroundEffectManagerAvailable ? m_backgroundEffectManager : nullptr;
+    }
+
+    /// The `ext_background_effect_manager_v1.capability` flags the compositor
+    /// last sent. 0 until it sends any, and while the global is not bound.
+    uint32_t backgroundEffectCapabilities() const
+    {
+        return m_backgroundEffectManagerAvailable ? m_backgroundEffectCapabilities : 0;
+    }
+
+    // Public for C callback struct initialization
+    static void backgroundEffectCapabilitiesHandler(void* data, struct ext_background_effect_manager_v1* manager,
+                                                    uint32_t flags);
+
     /// Access the Wayland display for explicit flushing after surface creation.
     QtWaylandClient::QWaylandDisplay* display() const
     {
@@ -237,6 +256,11 @@ private:
     bool m_sessionLockManagerAvailable = false;
     struct ext_session_lock_v1* m_activeSessionLock = nullptr;
     bool m_activeSessionLockGranted = false;
+
+    struct ext_background_effect_manager_v1* m_backgroundEffectManager = nullptr;
+    uint32_t m_backgroundEffectManagerId = 0;
+    uint32_t m_backgroundEffectCapabilities = 0;
+    bool m_backgroundEffectManagerAvailable = false;
 
     std::vector<std::pair<CallbackId, GlobalRemovedCallback>> m_globalRemovedCallbacks;
     CallbackId m_nextCallbackId = 1;
