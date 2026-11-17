@@ -7,8 +7,8 @@
 #include <PhosphorRendering/ShaderNodeRhi.h>
 
 #include <PhosphorShaders/ShaderRegistry.h>
-#include <PhosphorSurface/DecorationSupportedPaths.h>
 #include <PhosphorSurface/SurfaceShaderEffect.h>
+#include <PhosphorSurface/SurfacePackLocation.h>
 #include <PhosphorSurface/SurfaceShaderRegistry.h>
 #include <PhosphorSurface/SurfaceUniformProfile.h>
 
@@ -38,8 +38,8 @@ namespace {
 /// @p base with the `shared/` dir that sits BESIDE THE PACK DIR prepended.
 ///
 /// The static list alone is not parity with the compositor, though the
-/// compositor's comment says it is. That list walks the XDG `plasmazones/surface`
-/// roots and appends each root's `shared/`, which covers a pack INSTALLED under
+/// compositor's comment says it is. That list walks the XDG roots of the app's
+/// surface pack subdir and appends each root's `shared/`, which covers a pack INSTALLED under
 /// one of those roots and nothing else. The compositor instead derives the dir
 /// from the pack's own fragment path and puts it FIRST, ahead of every registry
 /// root, which is also what the validator probes first.
@@ -89,15 +89,17 @@ QStringList SurfaceShaderItem::surfaceIncludePaths()
     // `#include <surface_uniforms.glsl>` in a pack's effect.frag resolves
     // through these dirs. Mirror ZoneShaderItem: locateAll() (not locate()) so
     // the system dir is included alongside ~/.local/share — the user dir holds
-    // user packs but not the shared include. Surface packs install to
-    // `plasmazones/surface` (singular; see the install() rule in
-    // plasmazones/CMakeLists.txt), one of four pack categories beside
-    // `plasmazones/overlays`, `plasmazones/animations` and
-    // `plasmazones/pointer`. The plasmazones daemon warm-bake calls this
-    // same function — see the header doc for why the two must not diverge.
+    // user packs but not the shared include. The subdir is the one the app
+    // named with setSurfacePackDataSubdir(); an app that named none gets an
+    // empty list rather than a search of every data dir's root. An app's
+    // warm-bake calls this same function — see the header doc for why the two
+    // must not diverge.
+    const QString subdir = PhosphorSurfaceShaders::surfacePackDataSubdir();
+    if (subdir.isEmpty()) {
+        return {};
+    }
     const QStringList allSurfaceDirs =
-        QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, PhosphorSurfaceShaders::surfacePackDataSubdir(),
-                                  QStandardPaths::LocateDirectory);
+        QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, subdir, QStandardPaths::LocateDirectory);
     QStringList includePaths;
     for (const QString& dir : allSurfaceDirs) {
         const QString sharedDir = dir + QStringLiteral("/shared");

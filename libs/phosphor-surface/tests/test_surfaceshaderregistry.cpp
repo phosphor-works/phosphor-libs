@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
+#include <PhosphorSurface/SurfacePackLocation.h>
 #include <PhosphorSurface/SurfaceShaderContract.h>
 #include <PhosphorSurface/SurfaceShaderEffect.h>
 #include <PhosphorSurface/SurfaceShaderRegistry.h>
@@ -49,6 +50,27 @@ bool writePack(const QString& root, const QString& subdir, const QJsonObject& me
     }
     return true;
 }
+
+/// Sets the process-wide surface pack subdir for one scope and puts back the
+/// value it found, so a failing test cannot leak its subdir into the next.
+class ScopedSurfacePackDataSubdir
+{
+public:
+    explicit ScopedSurfacePackDataSubdir(const QString& subdir)
+        : m_previous(surfacePackDataSubdir())
+    {
+        setSurfacePackDataSubdir(subdir);
+    }
+    ~ScopedSurfacePackDataSubdir()
+    {
+        setSurfacePackDataSubdir(m_previous);
+    }
+    ScopedSurfacePackDataSubdir(const ScopedSurfacePackDataSubdir&) = delete;
+    ScopedSurfacePackDataSubdir& operator=(const ScopedSurfacePackDataSubdir&) = delete;
+
+private:
+    QString m_previous;
+};
 
 /// A minimal in-memory effect that passes isValid() (id + fragment path).
 SurfaceShaderEffect makeInMemoryEffect(const QString& id)
@@ -642,21 +664,33 @@ private Q_SLOTS:
         QVERIFY(e.bufferShaderPaths.isEmpty());
     }
 
+    void surfacePackDataSubdir_is_unset_until_an_app_sets_it()
+    {
+        // The library carries no app's path of its own: until the app names
+        // its pack directory there is nothing to look in.
+        QVERIFY(surfacePackDataSubdir().isEmpty());
+        {
+            const ScopedSurfacePackDataSubdir scoped(QStringLiteral("phosphor-test/surface"));
+            QCOMPARE(surfacePackDataSubdir(), QStringLiteral("phosphor-test/surface"));
+        }
+        QVERIFY(surfacePackDataSubdir().isEmpty());
+    }
+
     void resolveBuiltinBufferShader_falls_back_to_standard_paths_for_user_packs()
     {
-        // A user pack (~/.local/share/plasmazones/surface/<pack>) has no
-        // sibling shared/ dir, so resolution falls back to
-        // QStandardPaths::locate. Exercise that branch under
-        // QStandardPaths test mode with the shared pass installed into the
-        // test-mode data location. Assertions run only after test mode is
-        // switched off again so a failure cannot leak global state into
-        // sibling tests.
+        // A user pack (~/.local/share/<subdir>/<pack>) has no sibling shared/
+        // dir, so resolution falls back to QStandardPaths::locate under the
+        // subdir the app set. Exercise that branch under QStandardPaths test
+        // mode with the shared pass installed into the test-mode data
+        // location. Assertions run only after test mode is switched off again
+        // so a failure cannot leak global state into sibling tests.
+        const ScopedSurfacePackDataSubdir scoped(QStringLiteral("phosphor-test/surface"));
         QTemporaryDir packRoot; // deliberately WITHOUT a shared/ sibling
         const bool packRootValid = packRoot.isValid();
 
         QStandardPaths::setTestModeEnabled(true);
         const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-        const QString installed = dataDir + QStringLiteral("/plasmazones/surface/shared/gaussian_h.frag");
+        const QString installed = dataDir + QStringLiteral("/phosphor-test/surface/shared/gaussian_h.frag");
         const bool wrote = writeFile(installed, QByteArrayLiteral("// stub\n"));
         const QString resolved = SurfaceShaderRegistry::resolveBuiltinBufferShader(
             QStringLiteral("builtin:gaussian-h"), packRoot.path() + QStringLiteral("/user-pack"));
@@ -683,6 +717,29 @@ private Q_SLOTS:
                  qPrintable(QStringLiteral("resolved outside the test-mode data location (%1), so QStandardPaths "
                                            "did not serve it: %2")
                                 .arg(dataDir, resolved)));
+    }
+
+    void resolveBuiltinBufferShader_searches_no_data_dir_while_the_subdir_is_unset()
+    {
+        // The same installed file as above, but no app has named a subdir. The
+        // fallback must not guess one, so the token resolves to nothing and the
+        // pack takes the fail-closed missing-buffer path.
+        const ScopedSurfacePackDataSubdir scoped{QString()};
+        QTemporaryDir packRoot;
+        const bool packRootValid = packRoot.isValid();
+
+        QStandardPaths::setTestModeEnabled(true);
+        const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+        const QString installed = dataDir + QStringLiteral("/shared/gaussian_h.frag");
+        const bool wrote = writeFile(installed, QByteArrayLiteral("// stub\n"));
+        const QString resolved = SurfaceShaderRegistry::resolveBuiltinBufferShader(
+            QStringLiteral("builtin:gaussian-h"), packRoot.path() + QStringLiteral("/user-pack"));
+        QFile::remove(installed);
+        QStandardPaths::setTestModeEnabled(false);
+
+        QVERIFY(packRootValid);
+        QVERIFY(wrote);
+        QVERIFY2(resolved.isEmpty(), qPrintable(QStringLiteral("resolved with no subdir set: %1").arg(resolved)));
     }
 
     void builtinBuffer_helpers_reject_non_builtin_tokens()

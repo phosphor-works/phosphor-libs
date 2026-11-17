@@ -26,7 +26,7 @@ namespace PhosphorAnimationShaders {
 ///      which it stopped being when the compositor grew the surface fold.
 ///
 ///   3. **Surface shaders** — `PhosphorSurfaceShaders::SurfaceShaderRegistry`,
-///      sourced from `plasmazones/data/surface/*/`. Persistent per-window decoration
+///      sourced from the phosphor-surface-packs repository. Persistent per-window decoration
 ///      layers. SurfaceShaderContract.h carries that contract.
 ///
 ///   4. **Pointer shaders** — `PhosphorPointerShaders::PointerShaderRegistry`,
