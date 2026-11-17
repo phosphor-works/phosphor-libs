@@ -65,23 +65,22 @@ QStringList duplicateIdFiles(const QString& dirPath, const QUuid& id, const QStr
 
 } // namespace
 
-ScrollingTemplateStore::ScrollingTemplateStore(QObject* parent)
+ScrollingTemplateStore::ScrollingTemplateStore(QString templateSubdirectory, QObject* parent)
     : QObject(parent)
+    , m_templateSubdirectory(std::move(templateSubdirectory))
 {
-}
-
-QString ScrollingTemplateStore::templateSubdirectory()
-{
-    return QStringLiteral("plasmazones/scrolling-templates");
 }
 
 void ScrollingTemplateStore::loadTemplates()
 {
     // locateAll answers user first, system last; reverse so system loads
     // first and a user file sharing an id SHADOWS the bundled one — the
-    // same precedence the layout loader uses.
-    QStringList allDirs = QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, templateSubdirectory(),
-                                                    QStandardPaths::LocateDirectory);
+    // same precedence the layout loader uses. With no subdirectory there is
+    // nothing to locate: locateAll would answer every data dir's root.
+    QStringList allDirs = m_templateSubdirectory.isEmpty()
+        ? QStringList()
+        : QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, m_templateSubdirectory,
+                                    QStandardPaths::LocateDirectory);
     std::reverse(allDirs.begin(), allDirs.end());
 
     // Canonicalize the user directory ONCE, outside the loop. An empty
@@ -304,10 +303,13 @@ QUuid ScrollingTemplateStore::duplicateTemplate(const QUuid& id, const QString& 
     return saveTemplate(copy);
 }
 
-QString ScrollingTemplateStore::userTemplateDirectory()
+QString ScrollingTemplateStore::userTemplateDirectory() const
 {
+    if (m_templateSubdirectory.isEmpty()) {
+        return QString();
+    }
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QLatin1Char('/')
-        + templateSubdirectory();
+        + m_templateSubdirectory;
 }
 
 QString ScrollingTemplateStore::userTemplateFilePath(const QUuid& id) const
@@ -319,6 +321,10 @@ QString ScrollingTemplateStore::userTemplateFilePath(const QUuid& id) const
 bool ScrollingTemplateStore::writeTemplateFile(const ScrollingTemplate& templ)
 {
     const QString dirPath = userTemplateDirectory();
+    if (dirPath.isEmpty()) {
+        qCWarning(lcZonesLib) << "ScrollingTemplateStore: no template subdirectory, refusing to save" << templ.id;
+        return false;
+    }
     if (!QDir().mkpath(dirPath)) {
         qCWarning(lcZonesLib) << "ScrollingTemplateStore: cannot create" << dirPath;
         return false;
