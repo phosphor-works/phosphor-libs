@@ -59,9 +59,9 @@ stdenv.mkDerivation {
     pkg-config
     kdePackages.extra-cmake-modules
     wayland-scanner
-    # Its setup hook puts every Qt input's plugins and QML modules (QtQuick,
-    # Controls, Kirigami, each in its own store path) on QT_PLUGIN_PATH and
-    # QML2_IMPORT_PATH for the build, which the tests that load QML need.
+    # Its environment hook collects every Qt input's plugin and QML directories
+    # (QtQuick, Controls, Kirigami, each in its own store path) into
+    # qtWrapperArgs, which preCheck turns into the test environment.
     qt6.wrapQtAppsHook
   ];
 
@@ -99,9 +99,24 @@ stdenv.mkDerivation {
   ];
 
   doCheck = withTests;
-  # The offscreen platform for the GUI tests, and a writable HOME for the ones
-  # the XDG sandbox does not cover.
+  # The tests run uninstalled, from the build tree, so nothing wraps them.
+  # nixpkgs' Qt finds QML modules through NIXPKGS_QT6_QML_IMPORT_PATH and
+  # plugins through QT_PLUGIN_PATH, and wrapQtAppsHook puts both only into the
+  # wrapper arguments of installed programs. Export the same entries here, so
+  # the tests that load QtQuick, Controls or Kirigami find them. Then the
+  # offscreen platform for the GUI tests, and a writable HOME for the ones the
+  # XDG sandbox does not cover.
   preCheck = ''
+    for ((i = 0; i + 3 < ''${#qtWrapperArgs[@]}; i++)); do
+      if [[ "''${qtWrapperArgs[i]}" == --prefix ]]; then
+        case "''${qtWrapperArgs[i + 1]}" in
+          NIXPKGS_QT6_QML_IMPORT_PATH | QT_PLUGIN_PATH)
+            addToSearchPath "''${qtWrapperArgs[i + 1]}" "''${qtWrapperArgs[i + 3]}"
+            ;;
+        esac
+      fi
+    done
+    export NIXPKGS_QT6_QML_IMPORT_PATH QT_PLUGIN_PATH
     export QT_QPA_PLATFORM=offscreen
     export HOME="$(mktemp -d)"
     export CTEST_OUTPUT_ON_FAILURE=1
