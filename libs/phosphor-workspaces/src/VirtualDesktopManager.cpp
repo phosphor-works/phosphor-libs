@@ -371,6 +371,11 @@ void VirtualDesktopManager::refreshFromSource()
     });
 }
 
+void VirtualDesktopManager::refresh()
+{
+    refreshFromSource();
+}
+
 void VirtualDesktopManager::retryOrAbandonRefresh()
 {
     if (m_refreshRetries < MaxRefreshRetries) {

@@ -119,6 +119,12 @@ public:
     /// output (renameScreen), else @p screenId.
     QString liveScreenIdFor(const QString& screenId) const;
 
+    /// Re-read the whole desktop list from the backend, for a consumer that
+    /// knows its picture went stale (the reconciler's expired ledger entry).
+    /// Asynchronous while running, and one read at a time like every other
+    /// read; nothing without a reachable backend.
+    void refresh();
+
     /// Ask KWin to switch to the desktop at this 1-based position. Asynchronous
     /// (a Properties.Set the caller does not wait for): the switch arrives as
     /// currentDesktopChanged.

@@ -189,8 +189,14 @@ private Q_SLOTS:
         QCOMPARE(renamed.count(), 1);
         QCOMPARE(renamed.first().at(1).toString(), QStringLiteral("Web"));
 
-        // With nothing in flight, the next change reads again.
+        // With nothing in flight, the next change reads again, and so does an
+        // asked-for refresh() while that read is out, not at all.
         Q_EMIT rig.backend->desktopDataChangedUnreadable();
+        QCOMPARE(rig.backend->pendingReads.size(), 1);
+        rig.manager->refresh();
+        QCOMPARE(rig.backend->pendingReads.size(), 1);
+        rig.backend->answerRead(snapshot("ab", QStringLiteral("a"), 1, {QString(), QStringLiteral("Web")}));
+        rig.manager->refresh();
         QCOMPARE(rig.backend->pendingReads.size(), 1);
     }
 
