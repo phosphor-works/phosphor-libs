@@ -6,7 +6,6 @@
 #include <PhosphorEngine/DesktopRemap.h>
 
 #include <QCoreApplication>
-#include <QDBusMessage>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -15,11 +14,11 @@ using PhosphorWorkspaces::VirtualDesktopManager;
 
 namespace {
 
-/// Feeds the manager KWin's desktop lists and desktop signals directly, the
-/// way its D-Bus handlers do once they have parsed a message. No KWin and no
-/// D-Bus: the manager is never init()ed, so its getters that answer for an
-/// absent compositor (desktopCount, currentDesktop, the names) keep their
-/// fallbacks, and the tests read the signals and desktopIds() instead.
+/// Feeds the manager desktop lists and the backend's change signals directly,
+/// the way a backend's do. No backend: the manager is never init()ed, so its
+/// getters that answer for an absent compositor (desktopCount,
+/// currentDesktop, the names) keep their fallbacks, and the tests read the
+/// signals and desktopIds() instead.
 class ListDriver : public VirtualDesktopManager
 {
 public:
@@ -41,20 +40,21 @@ public:
     }
     void removed(const QString& desktopId)
     {
-        QVERIFY(QMetaObject::invokeMethod(this, "onKWinDesktopRemoved", Q_ARG(QString, desktopId)));
+        QVERIFY(QMetaObject::invokeMethod(this, "onSourceDesktopRemoved", Q_ARG(QString, desktopId)));
     }
-    void count(uint count)
+    void count(int count)
     {
-        QVERIFY(QMetaObject::invokeMethod(this, "onNumberOfDesktopsChanged", Q_ARG(uint, count)));
+        QVERIFY(QMetaObject::invokeMethod(this, "onSourceCountChanged", Q_ARG(int, count)));
     }
     void current(const QString& desktopId)
     {
-        QVERIFY(QMetaObject::invokeMethod(this, "onKWinCurrentChanged", Q_ARG(QString, desktopId)));
+        QVERIFY(QMetaObject::invokeMethod(this, "onSourceCurrentChanged", Q_ARG(QString, desktopId)));
     }
-    /// KWin's desktopCreated as it arrives off the bus, before any parsing.
-    void createdMessage(const QDBusMessage& message)
+    /// The backend's desktopCreatedUnreadable: a create whose data it could
+    /// not read, with the id when that much was readable.
+    void createdUnreadable(const QString& desktopId)
     {
-        QVERIFY(QMetaObject::invokeMethod(this, "onKWinDesktopCreated", Q_ARG(QDBusMessage, message)));
+        QVERIFY(QMetaObject::invokeMethod(this, "onSourceDesktopCreatedUnreadable", Q_ARG(QString, desktopId)));
     }
 };
 
@@ -106,7 +106,7 @@ private Q_SLOTS:
     void rename_startsNoChange();
     void secondChange_isAnnouncedAgain();
     void currentChangedMidChange_waitsForTheCommit();
-    void malformedCreate_stillEchoesAReadableId();
+    void unreadableCreate_stillEchoesAReadableId();
 };
 
 // A screen with no per-output desktop on record resolves to the global value.
@@ -233,14 +233,14 @@ void TestVirtualDesktopManager::perScreenModeActive_tracksDivergence()
 
 // clampScreenDesktopsToCount: a per-screen entry above a count committed with
 // no list behind it is pulled down to the count, and only that screen
-// re-emits. A manager with KWin reaches the clamp from
-// retryOrAbandonRefresh's count roll-back; this one has no KWin interface, so
-// onNumberOfDesktopsChanged commits the count itself and is used here as the
-// seam that reaches the same clamp.
+// re-emits. A manager with a backend reaches the clamp from
+// retryOrAbandonRefresh's count roll-back; this one has none, so
+// onSourceCountChanged commits the count itself and is used here as the seam
+// that reaches the same clamp.
 void TestVirtualDesktopManager::desktopCountShrink_clampsPerScreenEntries()
 {
     VirtualDesktopManager vdm;
-    QVERIFY(QMetaObject::invokeMethod(&vdm, "onNumberOfDesktopsChanged", Q_ARG(uint, 7)));
+    QVERIFY(QMetaObject::invokeMethod(&vdm, "onSourceCountChanged", Q_ARG(int, 7)));
 
     vdm.updateScreenDesktop(QStringLiteral("DP-1"), 3);
     vdm.updateScreenDesktop(QStringLiteral("DP-2"), 7);
@@ -248,7 +248,7 @@ void TestVirtualDesktopManager::desktopCountShrink_clampsPerScreenEntries()
     QSignalSpy spy(&vdm, &VirtualDesktopManager::screenDesktopChanged);
     // Count 7 -> 4. The entry on 7 must clamp to 4; the entry on 3 is
     // unaffected.
-    QVERIFY(QMetaObject::invokeMethod(&vdm, "onNumberOfDesktopsChanged", Q_ARG(uint, 4)));
+    QVERIFY(QMetaObject::invokeMethod(&vdm, "onSourceCountChanged", Q_ARG(int, 4)));
 
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-1")), 3);
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-2")), 4);
@@ -260,7 +260,7 @@ void TestVirtualDesktopManager::desktopCountShrink_clampsPerScreenEntries()
     // Boundary: an entry sitting EXACTLY at the new count must not be
     // touched (a `>=` in the clamp would pull it down and emit). Shrink to 3:
     // DP-1 sits at 3 and stays put while DP-2 on 4 clamps.
-    QVERIFY(QMetaObject::invokeMethod(&vdm, "onNumberOfDesktopsChanged", Q_ARG(uint, 3)));
+    QVERIFY(QMetaObject::invokeMethod(&vdm, "onSourceCountChanged", Q_ARG(int, 3)));
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-1")), 3);
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-2")), 3);
     QCOMPARE(spy.count(), 2);
@@ -268,7 +268,7 @@ void TestVirtualDesktopManager::desktopCountShrink_clampsPerScreenEntries()
 
     // Growth: raising the count above every entry clamps nothing and emits
     // nothing.
-    QVERIFY(QMetaObject::invokeMethod(&vdm, "onNumberOfDesktopsChanged", Q_ARG(uint, 9)));
+    QVERIFY(QMetaObject::invokeMethod(&vdm, "onSourceCountChanged", Q_ARG(int, 9)));
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-1")), 3);
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-2")), 3);
     QCOMPARE(spy.count(), 2);
@@ -635,35 +635,22 @@ void TestVirtualDesktopManager::currentChangedMidChange_waitsForTheCommit()
     QCOMPARE(currents, QList<int>{3});
 }
 
-void TestVirtualDesktopManager::malformedCreate_stillEchoesAReadableId()
+void TestVirtualDesktopManager::unreadableCreate_stillEchoesAReadableId()
 {
     ListDriver vdm;
     QVERIFY(vdm.commit(ids("ab")));
     QSignalSpy created(&vdm, &VirtualDesktopManager::kwinDesktopCreated);
-    const auto signal = []() {
-        return QDBusMessage::createSignal(QStringLiteral("/VirtualDesktopManager"),
-                                          QStringLiteral("org.kde.KWin.VirtualDesktopManager"),
-                                          QStringLiteral("desktopCreated"));
-    };
 
     // The id is there but the desktop data is not: the create still happened.
     // KWin answers the createDesktop call after this signal, and an answer
     // with no echo ahead of it is read as KWin refusing the create at its
     // ceiling.
-    QDBusMessage idOnly = signal();
-    idOnly << QStringLiteral("x");
-    vdm.createdMessage(idOnly);
+    vdm.createdUnreadable(QStringLiteral("x"));
     QCOMPARE(created.count(), 1);
     QCOMPARE(created.first().at(0).toString(), QStringLiteral("x"));
 
     // Nothing readable: nothing is echoed.
-    vdm.createdMessage(signal());
-    QDBusMessage notAnId = signal();
-    notAnId << 7;
-    vdm.createdMessage(notAnId);
-    QDBusMessage emptyId = signal();
-    emptyId << QString();
-    vdm.createdMessage(emptyId);
+    vdm.createdUnreadable(QString());
     QCOMPARE(created.count(), 1);
 }
 

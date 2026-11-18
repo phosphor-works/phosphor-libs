@@ -2,13 +2,25 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # PhosphorWorkspaces — Virtual desktop / workspace management.
+#
+# Two libraries:
+#   * PhosphorWorkspaces (PhosphorWorkspaces::PhosphorWorkspaces): the desktop
+#     and activity managers, the workspace map and the reconciler. Reaches no
+#     compositor itself: the managers take an IVirtualDesktopBackend and an
+#     IActivityBackend.
+#   * PhosphorWorkspacesPlasma (PhosphorWorkspaces::Plasma): the KDE Plasma
+#     session's backends, KWin's virtual desktops over the session bus and
+#     Plasma's activities over PlasmaActivities.
 
 cmake_minimum_required(VERSION 3.16)
 
 # 0.2.0: WorkspaceMap and WorkspaceReconciler joined the public API and
-# VirtualDesktopManager's interface changed. SOVERSION stays 0 below, like the
-# rest of the phosphor-* catalog, until a deliberate ABI break.
-set(PHOSPHORWORKSPACES_VERSION "0.2.0")
+# VirtualDesktopManager's interface changed.
+# 0.3.0: the managers take backends, KWin's and Plasma's moved to
+# PhosphorWorkspaces::Plasma, and ActivityManager::isAvailable() is per
+# manager. SOVERSION stays 0 below, like the rest of the phosphor-* catalog,
+# until a deliberate ABI break.
+set(PHOSPHORWORKSPACES_VERSION "0.3.0")
 
 # The Qt floor this library requires AND advertises in its generated
 # PhosphorWorkspacesConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
@@ -55,6 +67,8 @@ if(NOT TARGET PhosphorIdentity::PhosphorIdentity)
 endif()
 
 add_library(PhosphorWorkspaces SHARED
+    include/PhosphorWorkspaces/IVirtualDesktopBackend.h
+    include/PhosphorWorkspaces/IActivityBackend.h
     include/PhosphorWorkspaces/VirtualDesktopManager.h
     include/PhosphorWorkspaces/ActivityManager.h
     include/PhosphorWorkspaces/WorkspaceMap.h
@@ -96,8 +110,42 @@ target_link_libraries(PhosphorWorkspaces
         Qt6::Core
         PhosphorEngine::PhosphorEngine
     PRIVATE
-        Qt6::DBus
         PhosphorIdentity::PhosphorIdentity
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PhosphorWorkspacesPlasma Library (PhosphorWorkspaces::Plasma)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+add_library(PhosphorWorkspacesPlasma SHARED
+    include/PhosphorWorkspaces/Plasma/Backends.h
+    include/PhosphorWorkspaces/Plasma/KWinVirtualDesktopBackend.h
+    src/plasma/Backends.cpp
+    src/plasma/KWinVirtualDesktopBackend.cpp
+)
+add_library(PhosphorWorkspaces::Plasma ALIAS PhosphorWorkspacesPlasma)
+
+generate_export_header(PhosphorWorkspacesPlasma
+    EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/PhosphorWorkspaces/Plasma/phosphorworkspacesplasma_export.h
+    EXPORT_MACRO_NAME PHOSPHORWORKSPACESPLASMA_EXPORT
+)
+
+target_include_directories(PhosphorWorkspacesPlasma
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+        $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}>
+)
+
+target_compile_features(PhosphorWorkspacesPlasma PUBLIC cxx_std_20)
+
+# The public headers forward-declare the QDBus types they name, so QtDBus
+# stays PRIVATE: a consumer of the backends gets no D-Bus it did not ask for.
+target_link_libraries(PhosphorWorkspacesPlasma
+    PUBLIC
+        PhosphorWorkspaces::PhosphorWorkspaces
+    PRIVATE
+        Qt6::DBus
 )
 
 # Optional activities support — PlasmaActivities is the canonical KDE
@@ -112,20 +160,28 @@ endif()
 # Gate the compile-define on the actual IMPORTED target existing, not
 # on _FOUND. A legacy Config that exposes only variables (no target)
 # would otherwise wire `HAVE_KACTIVITIES` without a link dependency,
-# producing undefined-symbol errors in the daemon's ActivityManager.
+# producing undefined-symbol errors in the activity backend.
 # This is the only activities lookup in the tree: the app tier links nothing
 # from it directly, and it runs whatever USE_KDE_FRAMEWORKS says, since the
-# library knows no app-tier option.
+# library knows no app-tier option. Without it createActivityBackend()
+# answers null.
+set(_phosphorworkspaces_activities_target "")
 if(TARGET Plasma::Activities)
-    target_compile_definitions(PhosphorWorkspaces PRIVATE HAVE_KACTIVITIES)
-    target_link_libraries(PhosphorWorkspaces PRIVATE Plasma::Activities)
+    set(_phosphorworkspaces_activities_target Plasma::Activities)
     message(STATUS "PhosphorWorkspaces: PlasmaActivities found, activity support enabled")
 elseif(TARGET KF6::Activities)
-    target_compile_definitions(PhosphorWorkspaces PRIVATE HAVE_KACTIVITIES)
-    target_link_libraries(PhosphorWorkspaces PRIVATE KF6::Activities)
+    set(_phosphorworkspaces_activities_target KF6::Activities)
     message(STATUS "PhosphorWorkspaces: KF6Activities found, activity support enabled")
 else()
     message(STATUS "PhosphorWorkspaces: no activities library found, activity support disabled")
+endif()
+if(_phosphorworkspaces_activities_target)
+    target_sources(PhosphorWorkspacesPlasma PRIVATE
+        src/plasma/PlasmaActivityBackend.h
+        src/plasma/PlasmaActivityBackend.cpp
+    )
+    target_compile_definitions(PhosphorWorkspacesPlasma PRIVATE HAVE_KACTIVITIES)
+    target_link_libraries(PhosphorWorkspacesPlasma PRIVATE ${_phosphorworkspaces_activities_target})
 endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -149,7 +205,15 @@ set_target_properties(PhosphorWorkspaces PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
-install(TARGETS PhosphorWorkspaces
+set_target_properties(PhosphorWorkspacesPlasma PROPERTIES
+    VERSION ${PHOSPHORWORKSPACES_VERSION}
+    SOVERSION 0
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    EXPORT_NAME Plasma
+)
+
+install(TARGETS PhosphorWorkspaces PhosphorWorkspacesPlasma
     EXPORT PhosphorWorkspacesTargets
     LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
@@ -162,6 +226,10 @@ install(DIRECTORY include/PhosphorWorkspaces
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorworkspaces_export.h"
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorWorkspaces
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PhosphorWorkspaces/Plasma/phosphorworkspacesplasma_export.h"
+    DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorWorkspaces/Plasma
 )
 
 install(EXPORT PhosphorWorkspacesTargets

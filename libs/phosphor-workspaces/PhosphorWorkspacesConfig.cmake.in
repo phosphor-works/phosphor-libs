@@ -5,8 +5,9 @@
 
 include(CMakeFindDependencyMacro)
 
-# Core only: Qt6::DBus is a PRIVATE link of a shared library, and the public
-# headers only forward-declare the QDBus types they name.
+# Core only. PhosphorWorkspaces::Plasma links Qt6::DBus and PlasmaActivities
+# PRIVATE, as a shared library, and its public headers only forward-declare
+# the QDBus types they name.
 find_dependency(Qt6 @PHOSPHORWORKSPACES_QT_MIN@ COMPONENTS Core)
 find_dependency(PhosphorEngine)
 

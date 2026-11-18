@@ -5,41 +5,52 @@
 
 #include <PhosphorEngine/DesktopRemap.h>
 #include <PhosphorEngine/IVirtualDesktopManager.h>
+#include <PhosphorWorkspaces/IVirtualDesktopBackend.h>
 #include "phosphorworkspaces_export.h"
 #include <QHash>
+#include <QList>
+#include <QMetaObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
 
-QT_BEGIN_NAMESPACE
-class QDBusArgument;
-class QDBusInterface;
-class QDBusMessage;
-QT_END_NAMESPACE
+#include <memory>
 
 namespace PhosphorWorkspaces {
 
+/**
+ * @brief The compositor's virtual desktops, and every rule about them.
+ *
+ * The desktops come from an IVirtualDesktopBackend (KWin's, over the session
+ * bus, is PhosphorWorkspaces::Plasma's). Without one, or when the backend
+ * reaches no desktops, the manager is unavailable and every getter answers for
+ * a single synthetic desktop.
+ */
 class PHOSPHORWORKSPACES_EXPORT VirtualDesktopManager : public QObject, public PhosphorEngine::IVirtualDesktopManager
 {
     Q_OBJECT
 
 public:
-    /// How KWin answered one of the desktop methods (createDesktopAnswered,
-    /// removeDesktopAnswered).
+    /// How the compositor answered one of the desktop methods
+    /// (createDesktopAnswered, removeDesktopAnswered).
     enum class CallAnswer {
-        /// KWin returned from the method. It emits the desktop signals of
-        /// whatever the method did before it returns, so by now every echo of
-        /// it has arrived: no echo means KWin refused (at its desktop cap, the
-        /// last desktop, an unknown id).
+        /// The compositor returned from the method. It emits the desktop
+        /// signals of whatever the method did before it returns, so by now
+        /// every echo of it has arrived: no echo means it refused (KWin: at
+        /// its desktop cap, the last desktop, an unknown id).
         Answered,
-        /// An error came back instead, a timeout included (the interface's
-        /// one-second bound). A stall, not a refusal: KWin may still run the
-        /// method and its echo may still land.
+        /// An error came back instead, a timeout included (KWin's backend
+        /// bounds every call at a second). A stall, not a refusal: the
+        /// compositor may still run the method and its echo may still land.
         Unanswered,
     };
     Q_ENUM(CallAnswer)
 
+    /// No backend: unavailable, a single synthetic desktop.
     explicit VirtualDesktopManager(QObject* parent = nullptr);
+    /// Desktops from @p backend, owned from here on. Null is the same as the
+    /// constructor above.
+    explicit VirtualDesktopManager(std::unique_ptr<IVirtualDesktopBackend> backend, QObject* parent = nullptr);
     ~VirtualDesktopManager() override;
 
     bool init();
@@ -154,11 +165,13 @@ public:
     /// there, filling the empty entries with this library's placeholder. Empty
     /// without KWin.
     QStringList rawDesktopNames() const;
-    /// True once KWin's VirtualDesktopManager interface answered on the
-    /// session bus. False on a non-KWin compositor or before init(), where
-    /// every getter degrades to a single synthetic desktop — a UI should
-    /// hide itself rather than show a pager with one permanent pill.
-    /// init() returns true unconditionally and so cannot be used for this.
+    /// True once init() reached the backend's desktops (for KWin's, once
+    /// KWin's VirtualDesktopManager interface answered on the session bus).
+    /// False without a backend, on a compositor it reaches nothing on, or
+    /// before init(), where every getter degrades to a single synthetic
+    /// desktop — a UI should hide itself rather than show a pager with one
+    /// permanent pill. init() returns true unconditionally and so cannot be
+    /// used for this.
     bool isAvailable() const;
 
     /// Record the desktop an output shows as it is connected or comes back.
@@ -283,52 +296,36 @@ Q_SIGNALS:
     void desktopListChanged(const QStringList& desktopIds);
 
 protected:
-    /// One desktop of a KWin list: 0-based position, UUID, raw name.
-    struct DesktopEntry
-    {
-        int position = 0;
-        QString id;
-        QString name;
-    };
-    /// Commit one whole KWin desktop list: the core behind the blocking Get,
-    /// the asynchronous GetAll, and the list built from KWin's desktop signals
-    /// at countChanged. Returns false, committing nothing, for a list KWin can
-    /// never send (empty, an empty id, a duplicate id). Protected so a driver
-    /// with no compositor (the library's tests) can feed lists directly.
+    using DesktopEntry = PhosphorWorkspaces::DesktopEntry;
+    /// Commit one whole desktop list: the core behind both of the backend's
+    /// reads and the list built from its change signals at countChanged.
+    /// Returns false, committing nothing, for a list no compositor can send
+    /// (empty, an empty id, a duplicate id). Protected so a driver with no
+    /// compositor (the tests) can feed lists directly.
     bool commitDesktopList(QList<DesktopEntry> desktops, const QString& currentId, int rows);
-    /// KWin's desktopCreated and desktopDataChanged, parsed out of the D-Bus
-    /// message. The other KWin signals carry plain values and their slots take
+    /// The backend's desktopCreated and desktopDataChanged. The tests drive
     /// them directly.
     void ingestDesktopCreated(const QString& desktopId, int position, const QString& name);
     void ingestDesktopDataChanged(const QString& desktopId, int position, const QString& name);
 
 private Q_SLOTS:
-    /// KWin's countChanged carries `u`, not `i`. A slot declared `int`
-    /// registers successfully and is then NEVER invoked, because each
-    /// argument's type must match the message's.
-    void onNumberOfDesktopsChanged(uint count);
-    void refreshFromKWin();
-    void onKWinCurrentChanged(const QString& desktopId);
-    /// desktopCreated is s(iss); the whole message is taken so the struct can
-    /// be read (ingestDesktopCreated).
-    void onKWinDesktopCreated(const QDBusMessage& message);
-    void onKWinDesktopRemoved(const QString& desktopId);
-    /// rowsChanged carries the new row count (`u`).
-    void onKWinDesktopRowsChanged(uint rows);
-    /// KWin's per-desktop metadata changed (a rename, or a position move), as
-    /// s(iss) (ingestDesktopDataChanged).
-    void onKWinDesktopDataChanged(const QDBusMessage& message);
+    // The backend's change signals (IVirtualDesktopBackend), connected while
+    // subscribed. Slots so the tests can invoke them by name.
+    void onSourceCountChanged(int count);
+    void onSourceCurrentChanged(const QString& desktopId);
+    void onSourceDesktopCreatedUnreadable(const QString& desktopId);
+    void onSourceDesktopRemoved(const QString& desktopId);
+    void onSourceRowsChanged(int rows);
+    void refreshFromSource();
 
 private:
-    void initKWinDBus();
-    /// Install the session-bus signal subscriptions. Idempotent via
-    /// m_kwinSubscribed, so a stop()/start() cycle re-subscribes without
-    /// ever doubling the hooks.
-    void subscribeToKWin();
-    void applyDesktopListReply(const QDBusMessage& reply, const QString& currentId, int rows);
-    /// Parse the a(uss) desktop array and commit it (commitDesktopList).
-    /// Returns false when the array is malformed or the commit refused it.
-    bool applyDesktopListArg(const QDBusArgument& arg, const QString& currentId, int rows);
+    /// Connect the backend's change signals and let it emit them. Idempotent
+    /// via m_subscribed, so a stop()/start() cycle re-subscribes without ever
+    /// doubling them.
+    void subscribeToSource();
+    void unsubscribeFromSource();
+    /// Commit a backend snapshot (commitDesktopList); false when it refused it.
+    bool commitSnapshot(IVirtualDesktopBackend::Snapshot snapshot);
     /// Clamp any per-screen desktop entry above the live desktop count back down
     /// to the count. Only the list-less count fallback leaves anything for it.
     void clampScreenDesktopsToCount();
@@ -347,12 +344,15 @@ private:
     /// Commit the list built from KWin's signals since the last commit.
     void commitLiveList();
 
-    QDBusInterface* m_kwinVDInterface = nullptr;
+    std::unique_ptr<IVirtualDesktopBackend> m_backend;
+    /// The backend's change-signal connections while subscribed.
+    QList<QMetaObject::Connection> m_sourceConnections;
     bool m_running = false;
-    /// True while the session-bus subscriptions are installed; guards
-    /// subscribeToKWin against doubling them.
-    bool m_kwinSubscribed = false;
-    bool m_useKWinDBus = false;
+    /// True while subscribed to the backend; guards subscribeToSource
+    /// against doubling it.
+    bool m_subscribed = false;
+    /// init() reached the backend's desktops (isAvailable).
+    bool m_available = false;
     int m_currentDesktop = 1;
     /// Per-screen current virtual desktop (screenId → 1-based), populated only
     /// in per-output mode via updateScreenDesktop. Empty otherwise, so every
@@ -369,22 +369,23 @@ private:
     /// setBaselineDesktopIds' list, held until the first snapshot commits.
     QStringList m_baselineDesktopIds;
     /// desktopListChanging went out and no snapshot has committed since
-    /// (noteDesktopListChanging). Appended last: installed class.
+    /// (noteDesktopListChanging).
     bool m_desktopListChangePending = false;
-    /// KWin's names as reported, empty entries included (rawDesktopNames).
-    /// Appended last, like every member below it.
+    /// The names as the compositor reports them, empty entries included
+    /// (rawDesktopNames).
     QStringList m_rawDesktopNames;
-    /// The desktop list as KWin's desktop signals since the last commit say it
-    /// is, in bus order: commitLiveList's input. Equal to m_desktopIds after
-    /// every commit, empty before the first.
+    /// The desktop list as the backend's change signals since the last commit
+    /// say it is, in their order: commitLiveList's input. Equal to
+    /// m_desktopIds after every commit, empty before the first.
     QStringList m_liveIds;
     /// Raw names for m_liveIds, from the same signals.
     QHash<QString, QString> m_liveRawNames;
     /// A currentChanged that arrived while a change was pending: its id is
     /// numbered by the commit that ends the change (F950).
     QString m_pendingCurrentId;
-    /// A GetAll is in flight. Its reply describes KWin after every KWin
-    /// signal received before it, so no second read is issued meanwhile (F914).
+    /// A read is in flight. Its answer describes the compositor after every
+    /// change signal received before it, so no second read is issued
+    /// meanwhile (F914).
     bool m_refreshInFlight = false;
     /// Failed list reads in a row (retryOrAbandonRefresh).
     int m_refreshRetries = 0;
