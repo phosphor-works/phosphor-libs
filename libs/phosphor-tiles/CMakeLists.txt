@@ -214,7 +214,7 @@ endif()
 
 # Ship the pluau standard-library type definitions so users authoring custom
 # `.luau` algorithms get luau-lsp autocomplete and luau-analyze type-checking
-# (see https://phosphor-works.github.io/guides/tiling/). Installed in this
+# (see https://phosphor-works.org/guides/tiling/). Installed in this
 # tree's own data directory, which is no app's algorithms subdirectory: the
 # loader globs `*.luau`, so a `.d.luau` sitting next to the algorithms would be
 # picked up by the scan and then skipped with a warning, since `pluau.d` fails
