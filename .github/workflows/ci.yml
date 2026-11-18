@@ -5,6 +5,9 @@
 #
 #   * Arch: configure, build and test from the dev workflow preset, the same
 #     command as a local build, with a compiler cache.
+#   * Fedora: the same build and tests against Fedora's Qt. Arch ships the
+#     newest Qt, so on its own it passes code that calls an API added after
+#     the Qt the distro packages build with.
 #   * Lint: clang-format and qmlformat over the files a change touches.
 #   * Nix: `nix flake check` (the package with its whole test suite in the
 #     sandbox), the package itself and the dev shell, on x86_64 and aarch64.
@@ -85,6 +88,72 @@ jobs:
           restore-keys: |
             ccache-arch-${{ github.ref_name }}-
             ccache-arch-main-
+
+      - name: Configure, build and test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: cmake --workflow --preset dev
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats || true
+
+  # Fedora 44 ships Qt 6.11, the oldest Qt among the distributions the apps
+  # package for, so this job is the one that fails when a change calls a
+  # newer API. Keep it on the Fedora release with the oldest Qt that the
+  # apps' release workflows still build for.
+  fedora:
+    name: Fedora 44
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: fedora:44
+    steps:
+      # The image has no git, and actions/checkout needs it for a real clone.
+      - name: Bootstrap git
+        run: dnf install -y git
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install packages
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' .github/ci/fedora-packages.txt)
+          for try in 1 2 3; do
+            dnf install -y "${packages[@]}" && exit 0
+            [ "$try" = 3 ] && exit 1
+            sleep 10
+          done
+
+      - name: Show the Qt version
+        run: rpm -q qt6-qtbase-devel
+
+      - name: Restore the dependency archives
+        uses: actions/cache@v5
+        with:
+          path: .cache/cpm
+          key: cpm-${{ hashFiles(env.PIN_FILE) }}
+
+      - name: Set up the compiler cache
+        run: |
+          {
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
+            echo "CCACHE_MAXSIZE=2G"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v5
+        with:
+          path: .ccache
+          key: ccache-fedora-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-fedora-${{ github.ref_name }}-
+            ccache-fedora-main-
 
       - name: Configure, build and test
         env:

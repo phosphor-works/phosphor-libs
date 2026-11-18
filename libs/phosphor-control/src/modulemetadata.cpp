@@ -108,7 +108,7 @@ QJsonValue localized(const QJsonObject& json, QLatin1String key, Localizable kin
 {
     for (const QString& variant : variants) {
         const auto it = json.constFind(key + QLatin1Char('[') + variant + QLatin1Char(']'));
-        if (it != json.cend() && ModuleMetadataKeys::isUsable(*it, kind)) {
+        if (it != json.constEnd() && ModuleMetadataKeys::isUsable(*it, kind)) {
             return *it;
         }
     }
@@ -120,7 +120,7 @@ QJsonValue localized(const QJsonObject& json, QLatin1String key, Localizable kin
 int integerValue(const QJsonObject& json, QLatin1String key, int fallback, const QString& where, QStringList* problems)
 {
     const auto it = json.constFind(key);
-    if (it == json.cend()) {
+    if (it == json.constEnd()) {
         return fallback;
     }
     const double value = it->toDouble(std::numeric_limits<double>::quiet_NaN());
@@ -137,7 +137,7 @@ int integerValue(const QJsonObject& json, QLatin1String key, int fallback, const
 QString stringValue(const QJsonObject& json, QLatin1String key, const QString& where, QStringList* problems)
 {
     const auto it = json.constFind(key);
-    if (it == json.cend()) {
+    if (it == json.constEnd()) {
         return QString();
     }
     if (!it->isString()) {
@@ -153,7 +153,7 @@ QString stringValue(const QJsonObject& json, QLatin1String key, const QString& w
 QJsonArray arrayValue(const QJsonObject& json, QLatin1String key, const QString& where, QStringList* problems)
 {
     const auto it = json.constFind(key);
-    if (it == json.cend()) {
+    if (it == json.constEnd()) {
         return QJsonArray();
     }
     if (!it->isArray()) {
@@ -186,7 +186,7 @@ bool baseKindOk(const QJsonObject& json, QLatin1String key, Localizable kind, co
                 QStringList* problems)
 {
     const auto it = json.constFind(key);
-    if (it == json.cend()) {
+    if (it == json.constEnd()) {
         return true;
     }
     if (kind == Localizable::String && !it->isString()) {
@@ -269,7 +269,7 @@ void checkLocalizableText(const QJsonObject& json, KeyTable keys, const QString&
 // parse() can ever pick, which gets a note of its own.
 void noteUnknownKeys(const QJsonObject& json, KeyTable keys, const QString& where, QStringList* notes)
 {
-    for (auto it = json.cbegin(); it != json.cend(); ++it) {
+    for (auto it = json.constBegin(); it != json.constEnd(); ++it) {
         const QString key = it.key();
         const bool known = std::any_of(keys.begin(), keys.end(), [&key](const ModuleMetadataKeys::Key& candidate) {
             return key == candidate.name;
@@ -805,7 +805,7 @@ ModuleMetadata ModuleMetadata::parse(const QJsonObject& json, const QLocale& loc
         searchKeys.insert(searchKey);
         metadata.search.append(entry);
     }
-    if (const auto providers = json.constFind(QLatin1String("SearchProviders")); providers != json.cend()) {
+    if (const auto providers = json.constFind(QLatin1String("SearchProviders")); providers != json.constEnd()) {
         if (!providers->isBool()) {
             problems.append(QStringLiteral("\"SearchProviders\" must be true or false"));
         } else {

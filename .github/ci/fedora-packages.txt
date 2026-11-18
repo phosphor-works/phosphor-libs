@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-License-Identifier: LGPL-2.1-or-later
+#
+# The Fedora packages CI installs to configure, build and test every library
+# against Fedora's Qt, which is older than Arch's. One package per line. A
+# comment after `#` is ignored.
+gcc-c++
+git
+ccache
+cmake
+ninja-build
+extra-cmake-modules
+qt6-qtbase-devel
+qt6-qtbase-private-devel
+qt6-qtdeclarative-devel
+qt6-qtshadertools-devel
+qt6-qtsvg-devel
+qt6-qtwayland-devel
+wayland-devel
+wayland-protocols-devel
+vulkan-headers
+# The optional lookups the Arch list also installs: KGlobalAccel
+# (phosphor-shortcuts), Kirigami (phosphor-control's tests) and
+# PlasmaActivities (phosphor-workspaces).
+kf6-kglobalaccel-devel
+kf6-kirigami-devel
+plasma-activities-devel
+# dbus-run-session, which PhosphorTestIsolation runs each test under.
+dbus-daemon
+# The offscreen and Wayland tests' runtime.
+mesa-dri-drivers
+mesa-libEGL
