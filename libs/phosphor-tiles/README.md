@@ -67,7 +67,7 @@ Luau host (sandbox, watchdog, marshalling) lives in
 
 The `pluau` standard library (`src/pluau/pluau.luau`) and its type stubs (`src/pluau/pluau.d.luau`)
 are the Luau-side API surface. See the
-[tiling algorithm authoring guide](https://phosphor-works.github.io/guides/tiling/).
+[tiling algorithm authoring guide](https://phosphor-works.org/guides/tiling/).
 
 ## Typical use
 
