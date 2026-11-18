@@ -12,6 +12,7 @@
 // status to Running.
 
 #include <PhosphorWorkspaces/ActivityManager.h>
+#include <PhosphorWorkspaces/Plasma/Backends.h>
 
 #include <QCoreApplication>
 #include <QDBusArgument>
@@ -193,9 +194,6 @@ private Q_SLOTS:
     // service.
     void lateServiceIsConnectedAndARestartIsFollowed()
     {
-        if (!ActivityManager::isAvailable()) {
-            QSKIP("built without the activities library");
-        }
         QDBusConnection bus = QDBusConnection::sessionBus();
         if (!bus.isConnected() || !bus.interface()) {
             QSKIP("no session bus");
@@ -204,7 +202,8 @@ private Q_SLOTS:
             QSKIP("a real activity manager owns the name; this needs the private test bus");
         }
 
-        ActivityManager manager;
+        ActivityManager manager(PhosphorWorkspaces::Plasma::createActivityBackend());
+        QVERIFY(manager.isAvailable());
         QVERIFY(manager.init());
         manager.start();
         QVERIFY(manager.currentActivity().isEmpty());
@@ -247,9 +246,6 @@ private Q_SLOTS:
     // comes back on. start() then catches up on that switch, once.
     void stoppedManagerIsSilentThroughABounce()
     {
-        if (!ActivityManager::isAvailable()) {
-            QSKIP("built without the activities library");
-        }
         QDBusConnection bus = QDBusConnection::sessionBus();
         if (!bus.isConnected() || !bus.interface()) {
             QSKIP("no session bus");
@@ -258,7 +254,8 @@ private Q_SLOTS:
             QSKIP("a real activity manager owns the name; this needs the private test bus");
         }
 
-        ActivityManager manager;
+        ActivityManager manager(PhosphorWorkspaces::Plasma::createActivityBackend());
+        QVERIFY(manager.isAvailable());
         QVERIFY(manager.init());
         manager.start();
         auto first = std::make_unique<FakeActivityService>(QStringLiteral("fake-kamd-stopped-1"), kFirst);
@@ -289,9 +286,6 @@ private Q_SLOTS:
     // init().
     void secondInitIsANoOp()
     {
-        if (!ActivityManager::isAvailable()) {
-            QSKIP("built without the activities library");
-        }
         QDBusConnection bus = QDBusConnection::sessionBus();
         if (!bus.isConnected() || !bus.interface()) {
             QSKIP("no session bus");
@@ -300,7 +294,8 @@ private Q_SLOTS:
             QSKIP("a real activity manager owns the name; this needs the private test bus");
         }
 
-        ActivityManager manager;
+        ActivityManager manager(PhosphorWorkspaces::Plasma::createActivityBackend());
+        QVERIFY(manager.isAvailable());
         QVERIFY(manager.init());
         QVERIFY(manager.init());
         manager.start();

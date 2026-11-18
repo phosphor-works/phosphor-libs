@@ -32,8 +32,8 @@ endif()
 
 # The workspace-map, reconciler, ledger and VirtualDesktopManager suites.
 # Headless: the WorkspaceMap is a pure value type, and the WorkspaceReconciler's
-# and the manager's inputs are plain calls (no bus traffic, no KWin; the
-# manager's suite builds D-Bus messages but never sends one), so the suites
+# and the managers' inputs are plain calls (no bus traffic, no KWin; the KWin
+# backend's suite builds D-Bus messages but never sends one), so the suites
 # drive scripted notification sequences directly. The reconciler's ledger
 # expiry and destroy debounce run on timers, so those suites need a running
 # event loop, which a QCoreApplication supplies without a platform plugin.
@@ -57,13 +57,18 @@ pw_add_test(pw_test_workspace_map test_workspace_map.cpp)
 pw_add_test(pw_test_workspace_reconciler test_workspace_reconciler.cpp)
 pw_add_test(pw_test_workspace_ledger test_workspace_ledger.cpp)
 pw_add_test(pw_test_virtualdesktopmanager test_virtualdesktopmanager.cpp)
-# Qt6::DBus on top of the shared set: the suite hands the manager's KWin signal
-# slots whole D-Bus messages, malformed ones included, to cover the parsing the
-# protected ingest seams sit behind.
-target_link_libraries(pw_test_virtualdesktopmanager PRIVATE Qt6::DBus)
+# The manager against a scripted backend, and the activity manager likewise.
+# Both need nothing beyond the core library.
+pw_add_test(pw_test_virtualdesktopmanager_backend test_virtualdesktopmanager_backend.cpp)
+pw_add_test(pw_test_activitymanager_backend test_activitymanager_backend.cpp)
+# KWin's backend, handed whole D-Bus messages, malformed ones included, to
+# cover the parsing in front of the manager. Qt6::DBus for the messages.
+pw_add_test(pw_test_kwin_virtualdesktop_backend test_kwin_virtualdesktop_backend.cpp)
+target_link_libraries(pw_test_kwin_virtualdesktop_backend PRIVATE PhosphorWorkspaces::Plasma Qt6::DBus)
 
-# The ActivityManager suite drives the manager against a fake activity service,
-# so it has nothing to test in a build without the activities library.
+# The ActivityManager suite drives the manager and Plasma's backend against a
+# fake activity service, so it has nothing to test in a build without the
+# activities library.
 if(TARGET Plasma::Activities OR TARGET KF6::Activities)
     # The private bus matters more here than for most suites: the test registers a
     # fake org.kde.ActivityManager, and on the ambient session bus it would either
@@ -71,5 +76,5 @@ if(TARGET Plasma::Activities OR TARGET KF6::Activities)
     # the developer's own session. Qt6::DBus on top of the shared set, because the
     # fake service is a QDBus object the test registers itself.
     pw_add_test(pw_test_activitymanager test_activitymanager.cpp)
-    target_link_libraries(pw_test_activitymanager PRIVATE Qt6::DBus)
+    target_link_libraries(pw_test_activitymanager PRIVATE PhosphorWorkspaces::Plasma Qt6::DBus)
 endif()

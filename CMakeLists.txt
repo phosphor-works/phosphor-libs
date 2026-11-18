@@ -254,6 +254,7 @@ set(PHOSPHOR_ENGINE_TARGETS
     PhosphorScrollEngine
     PhosphorEngine
     PhosphorWorkspaces
+    PhosphorWorkspacesPlasma
     PhosphorPlacement
 )
 
