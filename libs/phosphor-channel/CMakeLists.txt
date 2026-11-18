@@ -8,7 +8,8 @@
 #
 # The library links no Qt and no other Phosphor library. The tests use Qt
 # Test, as the other libraries do.
-# Linux only: memfd, SCM_RIGHTS and MSG_NOSIGNAL have no portable stand-in.
+# Linux and FreeBSD only: sealed memfds, SCM_RIGHTS and MSG_NOSIGNAL have no
+# portable stand-in.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -20,8 +21,8 @@ if(NOT PROJECT_VERSION)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "PhosphorChannel needs Linux (memfd, SCM_RIGHTS, MSG_NOSIGNAL)")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|FreeBSD)$")
+    message(FATAL_ERROR "PhosphorChannel needs Linux or FreeBSD (sealed memfd, SCM_RIGHTS, MSG_NOSIGNAL)")
 endif()
 
 # While the version is 0.x, every minor version may change the ABI: the

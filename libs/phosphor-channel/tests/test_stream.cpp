@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -1300,9 +1301,11 @@ void TestStream::destruction_restoresFlagsAndKeepsStdioTaken()
     {
         Stream stream(0, 0, Stream::Options());
     }
-    char target[64] = {};
-    QVERIFY(::readlink("/proc/self/fd/0", target, sizeof target - 1) > 0);
-    QCOMPARE(std::string(target), std::string("/dev/null"));
+    struct stat in{};
+    struct stat null{};
+    QVERIFY(::fstat(0, &in) == 0);
+    QVERIFY(::stat("/dev/null", &null) == 0);
+    QVERIFY(in.st_dev == null.st_dev && in.st_ino == null.st_ino);
 }
 
 void TestStream::refusesAnotherVersionAndNamesBoth()

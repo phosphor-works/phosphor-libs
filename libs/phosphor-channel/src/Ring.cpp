@@ -10,12 +10,20 @@
 #include <cstring>
 
 #include <fcntl.h>
-#include <linux/magic.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/vfs.h>
 #include <unistd.h>
+
+#if defined(__linux__)
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#elif defined(__FreeBSD__)
+#include <sys/filio.h>
+#include <sys/ioctl.h>
+#include <sys/param.h>
+#include <sys/user.h>
+#endif
 
 namespace PhosphorChannel {
 
@@ -105,6 +113,27 @@ bool drain(int fd)
         return errno == EAGAIN;
     }
     return true;
+}
+
+// Plain shared memory: huge pages could run out under the mapping. On Linux
+// that is a tmpfs file. On FreeBSD a memfd is a shared memory object, and one
+// with large pages is the only kind that answers the large-page query.
+bool isPlainSharedMemory(int fd)
+{
+#if defined(__linux__)
+    struct statfs filesystem{};
+    return ::fstatfs(fd, &filesystem) == 0 && filesystem.f_type == TMPFS_MAGIC;
+#elif defined(__FreeBSD__)
+    struct kinfo_file file{};
+    file.kf_structsize = sizeof(file);
+    if (::fcntl(fd, F_KINFO, &file) != 0 || file.kf_type != KF_TYPE_SHM) {
+        return false;
+    }
+    struct shm_largepage_conf largePages{};
+    return ::ioctl(fd, FIOGSHMLPGCNF, &largePages) != 0;
+#else
+#error "PhosphorChannel needs Linux or FreeBSD"
+#endif
 }
 
 } // namespace
@@ -316,9 +345,7 @@ std::unique_ptr<RingReader> RingReader::attach(int memoryFd, int wakeFd, std::st
         setError(error, "the ring's wake descriptor is not a Unix stream socket");
         return nullptr;
     }
-    // Plain shared memory: huge pages could run out under the mapping.
-    struct statfs filesystem{};
-    if (::fstatfs(memoryFd, &filesystem) != 0 || filesystem.f_type != TMPFS_MAGIC) {
+    if (!isPlainSharedMemory(memoryFd)) {
         setError(error, "the ring's memory is not plain shared memory");
         return nullptr;
     }

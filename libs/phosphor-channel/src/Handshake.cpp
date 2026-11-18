@@ -28,19 +28,23 @@ constexpr std::uint32_t UnknownCodec = 2;
 constexpr std::size_t RingFds = 2;
 
 // Room for the ring's fds and the control messages that a socket may add to
-// them: credentials with SO_PASSCRED, a pidfd with SO_PASSPIDFD, a security
-// label of a usual length with SO_PASSSEC. A longer label, or more fds, sets
-// MSG_CTRUNC, which refuses the offer.
+// them: credentials with SO_PASSCRED (LOCAL_CREDS on FreeBSD), a pidfd with
+// SO_PASSPIDFD, a security label of a usual length with SO_PASSSEC. A longer
+// label, or more fds, sets MSG_CTRUNC, which refuses the offer.
 constexpr std::size_t ControlBytes = 512;
 
 // The control message of SO_PASSPIDFD. glibc names it only from 2.39, while
 // the kernel headers that enable SO_PASSPIDFD come earlier: the kernel's value,
-// the same on every architecture, so that no build leaks the pidfd.
+// the same on every architecture, so that no build leaks the pidfd. Other
+// systems have no pidfds, and their 0x04 is another message (SCM_BINTIME, a
+// timestamp, on FreeBSD), whose bytes must not be closed as fds.
 #ifdef SCM_PIDFD
 constexpr int PidfdMessage = SCM_PIDFD;
 static_assert(SCM_PIDFD == 0x04);
-#else
+#elif defined(__linux__)
 constexpr int PidfdMessage = 0x04;
+#else
+constexpr int PidfdMessage = -1;
 #endif
 
 std::string socketFailed()

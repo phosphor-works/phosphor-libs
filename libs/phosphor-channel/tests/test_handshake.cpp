@@ -12,8 +12,10 @@
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 using namespace PhosphorChannel;
@@ -83,8 +85,15 @@ bool readAnswer(int socket, std::uint32_t (&reply)[3])
 std::size_t openFds()
 {
     std::size_t count = 0;
+#ifdef __linux__
     for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator("/proc/self/fd"))
         ++count;
+#else
+    // No /proc: ask each fd that the process may have.
+    for (int fd = 0, end = ::getdtablesize(); fd < end; ++fd)
+        if (::fcntl(fd, F_GETFD) != -1)
+            ++count;
+#endif
     return count;
 }
 
@@ -143,7 +152,11 @@ void TestHandshake::ringCrossesASocketThatPassesCredentials()
     // credentials to the fds of the offer.
     SocketPair pair;
     const int on = 1;
+#ifdef SO_PASSCRED
     QVERIFY(::setsockopt(pair.b, SOL_SOCKET, SO_PASSCRED, &on, sizeof on) == 0);
+#else
+    QVERIFY(::setsockopt(pair.b, SOL_LOCAL, LOCAL_CREDS_PERSISTENT, &on, sizeof on) == 0);
+#endif
     auto writer = RingWriter::create(1 << 16, "t.v1", nullptr);
     QVERIFY(writer);
     bool offered = false;

@@ -4,7 +4,7 @@
 # phosphor-channel
 
 > Ordered frames of opaque bytes from one process to another, with
-> backpressure. No Qt and no other Phosphor library. Linux only.
+> backpressure. No Qt and no other Phosphor library. Linux and FreeBSD.
 
 ## Responsibility
 
@@ -17,8 +17,8 @@ The first consumer is the mux daemon of Afterglow, which sends terminal state
 to a window and input back. The library links no Qt, so that daemon does not
 need it. It builds with the rest of phosphor-libs.
 
-It needs Linux: memfd, SCM_RIGHTS and MSG_NOSIGNAL have no portable stand-in,
-and the configure stops on any other system.
+It needs Linux or FreeBSD: sealed memfds, SCM_RIGHTS and MSG_NOSIGNAL have no
+portable stand-in, and the configure stops on any other system.
 
 It is a separate library from phosphor-ipc. phosphor-ipc carries JSON calls
 and events. phosphor-channel carries bytes at a high rate.
@@ -36,7 +36,9 @@ and events. phosphor-channel carries bytes at a high rate.
 - A memfd that both processes map, sealed with `F_SEAL_SHRINK`, `F_SEAL_GROW`
   and `F_SEAL_SEAL`. The reader refuses a memfd that is not plain shared
   memory, lacks the size seals, or is larger than `AcceptOptions::maxCapacity`,
-  so the writer can never cut the mapping short.
+  so the writer can never cut the mapping short. Plain shared memory is a
+  tmpfs file on Linux, and a shared memory object without large pages on
+  FreeBSD.
 - The write position, the read position and each end's wake request sit on
   cache lines of their own, and the closed flags share one. Records are
   8-byte aligned, and a skip record pads the wrap.
