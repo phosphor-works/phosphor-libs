@@ -68,19 +68,14 @@ void ScreenManager::start()
     // swallowed by PlasmaPanelSource::issueQuery's !m_running guard.
     syncTrackedScreens();
 
-    // Initial population changes the effective screen set. Ensure the first
-    // effectiveScreenIds() call after start() rebuilds instead of returning a
-    // stale empty cache.
-    m_effectiveScreenIdsDirty = true;
-
-    if (m_cfg.panelSource) {
-        connect(m_cfg.panelSource, &IPanelSource::panelOffsetsChanged, this, &ScreenManager::onPanelOffsetsChanged);
-        connect(m_cfg.panelSource, &IPanelSource::requeryCompleted, this, &ScreenManager::onPanelRequeryCompleted);
-        m_cfg.panelSource->start();
+    if (IPanelSource* const panels = m_cfg.panelSource) {
+        connect(panels, &IPanelSource::panelOffsetsChanged, this, &ScreenManager::onPanelOffsetsChanged);
+        connect(panels, &IPanelSource::requeryCompleted, this, &ScreenManager::onPanelRequeryCompleted);
+        panels->start();
     } else {
-        // No panel source — emit panelGeometryReady on the next event-loop
-        // tick so listeners that gate on it don't hang. The bit is set
-        // inside the deferred lambda so callers invoking
+        // No panel source: panelGeometryReady still goes out, on the next
+        // event-loop tick, so nothing waiting for it waits forever. The bit
+        // is set inside the deferred lambda so callers invoking
         // isPanelGeometryReady() BEFORE the tick fires (in tests especially)
         // see the false state they expect.
         //
@@ -208,6 +203,11 @@ void ScreenManager::syncTrackedScreens()
     // m_trackedScreens incrementally, so the tracked geometry/identifier
     // snapshots never drift from the source's current view.
     m_trackedScreens = m_physicalScreenSource->screens();
+    // A new tracked set can change which effective screens exist, so the
+    // cached list is rebuilt on its next read. Here rather than at each
+    // caller: the first population in start() is a resync like any other,
+    // and the cache from before it is empty.
+    m_effectiveScreenIdsDirty = true;
 }
 
 PhysicalScreen ScreenManager::trackedScreenByName(const QString& name) const
@@ -998,7 +998,6 @@ void ScreenManager::onSourceScreenAdded(const PhysicalScreen& screen)
     }
 
     syncTrackedScreens();
-    m_effectiveScreenIdsDirty = true;
     propagateIdentifierDrift(oldIds);
 
     if (m_cfg.useGeometrySensors) {
@@ -1039,7 +1038,6 @@ void ScreenManager::onSourceScreenRemoved(const PhysicalScreen& screen)
     }
 
     syncTrackedScreens();
-    m_effectiveScreenIdsDirty = true;
     // Do NOT clear m_virtualConfigs[physId] — the host's IConfigStore is the
     // authoritative source. Stale entries for unconnected screens are
     // filtered by effectiveScreenIds().
@@ -1062,7 +1060,6 @@ void ScreenManager::onSourceScreenGeometryChanged(const PhysicalScreen& screen)
     } else {
         invalidateVirtualGeometryCache();
     }
-    m_effectiveScreenIdsDirty = true;
     syncTrackedScreens();
     // Recompute available geometry against the new screen rect. The
     // available-geometry cache is screen-origin-relative (availGeom is

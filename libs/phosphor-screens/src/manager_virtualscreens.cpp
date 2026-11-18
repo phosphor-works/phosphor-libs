@@ -173,8 +173,8 @@ QStringList ScreenManager::effectiveScreenIds() const
     }
 
     QStringList result;
-    for (const auto& screen : m_trackedScreens) {
-        const QString physId = screen.identifier;
+    for (const auto& tracked : std::as_const(m_trackedScreens)) {
+        const QString physId = tracked.identifier;
         if (physId.isEmpty()) {
             // A tracked screen with no identifier carries no persistable ID
             // — skip it rather than emit an empty effective-screen entry

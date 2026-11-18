@@ -15,6 +15,8 @@
 #include <QScreen>
 #include <QThread>
 
+#include <algorithm>
+
 namespace PhosphorScreens::ScreenIdentity {
 
 namespace {
@@ -51,6 +53,18 @@ QHash<QString, QPointer<QScreen>>& reverseCache()
     Q_ASSERT_X(QCoreApplication::instance() != nullptr                                                                 \
                    && QThread::currentThread() == QCoreApplication::instance()->thread(),                              \
                Q_FUNC_INFO, "ScreenIdentity helpers must be called on the GUI thread")
+
+/// The first connected screen @p matches accepts, in Qt's screen order, or
+/// null. A null entry in Qt's list is never handed to @p matches.
+template<typename Predicate>
+QScreen* firstConnectedScreen(Predicate matches)
+{
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    const auto found = std::find_if(screens.cbegin(), screens.cend(), [&matches](QScreen* screen) {
+        return screen && matches(screen);
+    });
+    return found == screens.cend() ? nullptr : *found;
+}
 
 } // namespace
 
@@ -193,10 +207,10 @@ QScreen* findByIdOrName(const QString& identifier)
     const QString physId = PhosphorIdentity::VirtualScreenId::extractPhysicalId(identifier);
 
     // Fast path: connector name match.
-    for (QScreen* screen : QGuiApplication::screens()) {
-        if (screen->name() == physId) {
-            return screen;
-        }
+    if (QScreen* byConnector = firstConnectedScreen([&physId](QScreen* screen) {
+            return screen->name() == physId;
+        })) {
+        return byConnector;
     }
 
     auto& cache = reverseCache();
@@ -209,17 +223,14 @@ QScreen* findByIdOrName(const QString& identifier)
         cache.remove(physId);
     }
 
-    // Exact canonical screen ID match.
-    // Use physId, not the raw identifier, because virtual-screen IDs have
-    // already been reduced to their physical parent above.
-    for (QScreen* screen : QGuiApplication::screens()) {
-        if (!screen)
-            continue;
-
-        if (identifierFor(screen) == physId) {
-            cache.insert(physId, screen);
-            return screen;
-        }
+    // Next, a screen whose canonical identifier is physId itself. Never the
+    // raw identifier: a virtual-screen id was reduced to its physical parent
+    // above, and only that parent names a connected output.
+    if (QScreen* exact = firstConnectedScreen([&physId](QScreen* screen) {
+            return identifierFor(screen) == physId;
+        })) {
+        cache.insert(physId, exact);
+        return exact;
     }
 
     // Disambiguated form: "Manuf:Model:Serial/CONNECTOR".
@@ -242,32 +253,31 @@ QScreen* findByIdOrName(const QString& identifier)
     if (slashPos > 0) {
         const QString connectorPart = physId.mid(slashPos + 1);
         const QString basePart = physId.left(slashPos);
-        for (QScreen* screen : QGuiApplication::screens()) {
-            if (screen->name() == connectorPart && baseIdentifierFor(screen) == basePart) {
-                cache.insert(physId, screen);
-                return screen;
-            }
+        // The same monitor on the same connector first, then the base id alone.
+        QScreen* disambiguated = firstConnectedScreen([&connectorPart, &basePart](QScreen* screen) {
+            return screen->name() == connectorPart && baseIdentifierFor(screen) == basePart;
+        });
+        if (!disambiguated) {
+            disambiguated = firstConnectedScreen([&basePart](QScreen* screen) {
+                return identifierFor(screen) == basePart;
+            });
         }
-        for (QScreen* screen : QGuiApplication::screens()) {
-            if (identifierFor(screen) == basePart) {
-                cache.insert(physId, screen);
-                return screen;
-            }
+        if (disambiguated) {
+            cache.insert(physId, disambiguated);
+            return disambiguated;
         }
     }
 
     // Reverse fallback: stored config has bare base ID without suffix,
     // but currently-connected monitors are duplicates (so identifierFor
     // adds suffix). Match by base part of current screens.
-    if (physId.contains(QLatin1Char(':')) && !physId.contains(QLatin1Char('/'))) {
-        for (QScreen* screen : QGuiApplication::screens()) {
-            if (!screen)
-                continue;
-
-            if (baseIdentifierFor(screen) == physId) {
-                cache.insert(physId, screen);
-                return screen;
-            }
+    const bool bareEdidId = physId.contains(QLatin1Char(':')) && !physId.contains(QLatin1Char('/'));
+    if (bareEdidId) {
+        if (QScreen* byBase = firstConnectedScreen([&physId](QScreen* screen) {
+                return baseIdentifierFor(screen) == physId;
+            })) {
+            cache.insert(physId, byBase);
+            return byBase;
         }
     }
 
