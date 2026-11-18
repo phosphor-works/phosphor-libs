@@ -155,10 +155,19 @@ jobs:
             ccache-fedora-${{ github.ref_name }}-
             ccache-fedora-main-
 
-      - name: Configure, build and test
+      # The dev preset's steps one at a time rather than as the workflow, so
+      # ninja can keep going past the first file that does not compile and
+      # one run reports every call that this Qt lacks.
+      - name: Configure
+        run: cmake --preset dev
+
+      - name: Build
+        run: cmake --build --preset dev -- -k 0
+
+      - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: cmake --workflow --preset dev
+        run: ctest --preset dev
 
       - name: Compiler cache statistics
         if: always()

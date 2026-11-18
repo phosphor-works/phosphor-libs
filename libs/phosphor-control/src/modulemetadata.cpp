@@ -473,7 +473,7 @@ ModuleMetadata ModuleMetadata::parse(const QJsonObject& json, const QLocale& loc
             anchorSet.insert(anchor);
             page.anchors.append(anchor);
         }
-        if (const auto visibility = object.constFind(QLatin1String("Visibility")); visibility != object.cend()) {
+        if (const auto visibility = object.constFind(QLatin1String("Visibility")); visibility != object.constEnd()) {
             const auto parsed = visibilityFromString(visibility->toString());
             if (!visibility->isString() || !parsed) {
                 problems.append(
@@ -482,7 +482,7 @@ ModuleMetadata ModuleMetadata::parse(const QJsonObject& json, const QLocale& loc
                 page.visibility = *parsed;
             }
         }
-        if (const auto divider = object.constFind(QLatin1String("DividerAfter")); divider != object.cend()) {
+        if (const auto divider = object.constFind(QLatin1String("DividerAfter")); divider != object.constEnd()) {
             if (!divider->isBool()) {
                 problems.append(QStringLiteral("%1\"DividerAfter\" must be true or false").arg(where));
             } else {
@@ -738,7 +738,7 @@ ModuleMetadata ModuleMetadata::parse(const QJsonObject& json, const QLocale& loc
         baseKindOk(object, QLatin1String("Keywords"), Localizable::List, where, &problems);
         entry.title = localized(object, QLatin1String("Title"), Localizable::String, variants).toString();
         entry.keywords = stringList(localized(object, QLatin1String("Keywords"), Localizable::List, variants));
-        if (const auto advanced = object.constFind(QLatin1String("AdvancedOnly")); advanced != object.cend()) {
+        if (const auto advanced = object.constFind(QLatin1String("AdvancedOnly")); advanced != object.constEnd()) {
             if (!advanced->isBool()) {
                 problems.append(QStringLiteral("%1\"AdvancedOnly\" must be true or false").arg(where));
             } else {
