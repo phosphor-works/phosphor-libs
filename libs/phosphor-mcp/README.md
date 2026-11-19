@@ -167,9 +167,18 @@ or whose paths come to more than 64 Ki UTF-16 code units together, get one
 line instead, which says that they do not match and are too large for the
 server to list each error. Smaller arguments get that line too when the
 schema would make the list slow to build. The server multiplies the size of
-the arguments by a cost of the schema, which grows with its size and with
-each anyOf or oneOf nested in another, and lists the errors only when the
-product keeps the work to a fraction of a second. Where valijson gives no
+the arguments, in which a long string counts by its length, by a cost of the
+schema. The cost grows with the size of the schema, with the length of the
+names and values it lists (`required`, `enum`, `const`), and with each anyOf
+or oneOf nested in another. The server lists the errors only when the product
+keeps the work to about 0.2 s in a release build, whatever the strings and
+names are made of. Checking the arguments in the first place reads a string
+once for each `minLength` or `maxLength` that applies to it, which takes
+about 20 ms for 16 MiB of text that is not ASCII. So a schema with many of
+them around one long string makes each call slower, near a second for fifty
+of them, and so does a long array of numbers. That work grows with the
+longest line the server reads, so an application whose tools take no long
+text lowers it with `setMaxLineBytes`. Where valijson gives no
 reason for a failure (a `false` subschema, for one), the line names the
 place and says that it does not match the schema. A string or a member name
 with an unpaired UTF-16 surrogate, and an integral number outside the range

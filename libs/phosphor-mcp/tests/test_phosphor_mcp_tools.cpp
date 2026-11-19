@@ -804,6 +804,105 @@ private Q_SLOTS:
             << QJsonObject{{QLatin1StringView("v"), items(1000, 990)}} << tooLarge;
     }
 
+    void longStringsAnswerFast()
+    {
+        // Each string of the arguments is converted to UTF-8 once, however
+        // many values of an enum it is compared with. A long string, and a
+        // long name in the schema, count by their length in whether the
+        // errors are listed.
+        QFETCH(QJsonObject, schema);
+        QFETCH(QJsonObject, arguments);
+        QFETCH(QString, expected);
+        Peer peer;
+        McpServer server;
+        int calls = 0;
+        QString error;
+        QVERIFY2(server.addTool(
+                     McpTool(QStringLiteral("long")).setInputSchema(schema),
+                     [&](McpCall call) {
+                         ++calls;
+                         call.finish(McpResult::text(QStringLiteral("ran")));
+                     },
+                     &error),
+                 qPrintable(error));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("long"), arguments)));
+        // Each answer takes well under a second, in a debug build too. With
+        // the string converted for each comparison the first took 81 s in a
+        // debug build. The others listed each error, which the expected
+        // line rules out.
+        const int bound = 30000;
+        const QJsonObject reply = peer.readOne(bound);
+        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
+        QCOMPARE(errorLines(reply), expected);
+        QCOMPARE(calls, 0);
+    }
+
+    void longStringsAnswerFast_data()
+    {
+        QTest::addColumn<QJsonObject>("schema");
+        QTest::addColumn<QJsonObject>("arguments");
+        QTest::addColumn<QString>("expected");
+        const QString tooLarge = QStringLiteral(
+            "- arguments: does not match the schema, and is too large for the server to list each error");
+        const auto object = [](const QJsonObject& property) {
+            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
+                               {QLatin1StringView("properties"), QJsonObject{{QLatin1StringView("a"), property}}}};
+        };
+        const auto arrayOf = [](const QJsonObject& item) {
+            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
+                               {QLatin1StringView("items"), item}};
+        };
+        // U+4E2D, three bytes in UTF-8.
+        const QChar cjk(0x4E2D);
+
+        // 15 MB of UTF-8 against each of 3000 values.
+        QJsonArray values;
+        for (int i = 0; i < 3000; ++i) {
+            values.append(QStringLiteral("v%1").arg(i));
+        }
+        QTest::newRow("CJK string against an enum")
+            << object(QJsonObject{{QLatin1StringView("enum"), values}})
+            << QJsonObject{{QLatin1StringView("a"), QString(5000000, cjk)}} << tooLarge;
+
+        // valijson copies a string out and counts its characters for each
+        // maxLength, and listing the errors checks each branch again.
+        QJsonArray lengths;
+        for (int i = 1; i <= 35; ++i) {
+            lengths.append(QJsonObject{{QLatin1StringView("maxLength"), i}});
+        }
+        QJsonArray strings;
+        for (int i = 0; i < 24; ++i) {
+            strings.append(QString(100000, cjk));
+        }
+        QTest::newRow("CJK strings against maxLength in an anyOf")
+            << object(arrayOf(QJsonObject{{QLatin1StringView("anyOf"), lengths}}))
+            << QJsonObject{{QLatin1StringView("a"), strings}} << tooLarge;
+
+        // valijson copies a required name into each error that says it is
+        // missing.
+        QJsonArray names;
+        for (int i = 0; i < 10; ++i) {
+            names.append(QString(QStringLiteral("r%1").arg(i) + QString(65536, QLatin1Char('x'))));
+        }
+        QJsonArray empties;
+        for (int i = 0; i < 100; ++i) {
+            empties.append(QJsonObject());
+        }
+        QTest::newRow("long required names") << object(arrayOf(
+            QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")}, {QLatin1StringView("required"), names}}))
+                                             << QJsonObject{{QLatin1StringView("a"), empties}} << tooLarge;
+        // The same schema lists the errors of a small value.
+        QTest::newRow("long required names, 1 item")
+            << object(arrayOf(QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
+                                          {QLatin1StringView("required"), QJsonArray{names.at(0)}}}))
+            << QJsonObject{{QLatin1StringView("a"), QJsonArray{QJsonObject()}}}
+            << QString(QStringLiteral("- arguments/a/0/r0") + QString(59, QLatin1Char('x'))
+                       + QStringLiteral("...: is required"));
+    }
+
     void longNamesAreShortInErrors()
     {
         // The model reads its errors back: a name of any length is cut.

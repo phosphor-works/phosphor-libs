@@ -3,6 +3,8 @@
 
 #include "mcpschema.h"
 
+#include "mcpjsontree.h"
+
 #include <QHash>
 #include <QJsonArray>
 #include <QLatin1StringView>
@@ -10,7 +12,6 @@
 #include <QLocale>
 #include <QSet>
 
-#include <valijson/adapters/qtjson_adapter.hpp>
 #include <valijson/constraints/concrete_constraints.hpp>
 #include <valijson/schema.hpp>
 #include <valijson/schema_parser.hpp>
@@ -47,12 +48,16 @@ constexpr qsizetype MaxCollectedPointerLength = 64 * 1024;
 // around the subschema, so a schema of many combinators makes it slow on a
 // small value. The errors are collected only when the size of the value
 // (Inspector::size()) times the cost of the schema (errorPathCost()) is at
-// most this. The slowest value found within it takes about 0.2 s in a
-// release build, many required names missing from each of 240 items.
+// most this. A long string or member name in the value, and a long name or
+// value in the schema, count by their length. The slowest value found within
+// it takes about 0.2 s in a release build, many required names missing from
+// each of a few hundred items. Long strings and names, ASCII or not, list
+// their errors in less than 0.1 s.
 constexpr qint64 MaxErrorWork = 100000;
-// See Inspector::size().
+// See Inspector::size() and literalCost().
 constexpr qint64 PointerLengthPerValue = 16;
-constexpr qint64 StringLengthPerValue = 8192;
+constexpr qint64 StringBytesPerValue = 1024;
+constexpr qint64 LiteralLengthPerValue = 128;
 
 // A member name in an error is cut to this many code units: a model's
 // arguments may have names of any length, and the error goes back to it.
@@ -240,6 +245,27 @@ std::optional<QJsonObject> objectAt(QJsonValue value, const QStringList& names)
         return std::nullopt;
     }
     return value.toObject();
+}
+
+// The same in the tree of the value.
+std::optional<JsonTreeValue> objectAt(JsonTreeValue value, const QStringList& names)
+{
+    for (const QString& name : names) {
+        const std::optional<JsonTreeValue> member = value.member(name.toStdString());
+        if (!member) {
+            return std::nullopt;
+        }
+        value = *member;
+    }
+    if (!value.isObject()) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+JsonTreeValue undefinedValue()
+{
+    return JsonTreeValue(JsonTree::undefined(), 0);
 }
 
 // The value at `names` below `value`, or Undefined.
@@ -570,29 +596,46 @@ QString checkSchema(const QJsonValue& schema, const QString& path, bool fixedLoc
     return QString();
 }
 
-// The JSON values in `value`, itself included.
-qint64 valueCount(const QJsonValue& value)
+// The JSON values in `value`, itself included, and the code units of its
+// strings and member names.
+void measureLiteral(const QJsonValue& value, qint64& values, qint64& length)
 {
-    qint64 count = 1;
-    if (value.isArray()) {
+    ++values;
+    if (value.isString()) {
+        length += value.toString().size();
+    } else if (value.isArray()) {
         for (const QJsonValue& item : value.toArray()) {
-            count += valueCount(item);
+            measureLiteral(item, values, length);
         }
     } else if (value.isObject()) {
         const QJsonObject object = value.toObject();
         for (auto it = object.begin(); it != object.end(); ++it) {
-            count += valueCount(it.value());
+            length += it.key().size();
+            measureLiteral(it.value(), values, length);
         }
     }
-    return count;
+}
+
+// The cost of a value that a subschema compares with or names (enum, const,
+// required, type), in values. valijson copies a required name into each
+// error that says it is missing, and collect() copies and converts it again,
+// so a long name costs more than a value. As measured, about
+// LiteralLengthPerValue code units of names cost as much as one more value.
+qint64 literalCost(const QJsonValue& value)
+{
+    qint64 values = 0;
+    qint64 length = 0;
+    measureLiteral(value, values, length);
+    return values + length / LiteralLengthPerValue;
 }
 
 // The most work that listing the errors does for each value of the
 // arguments under `schema`, a schema that checkSchema accepted, up to a
 // constant factor. A value is checked against each subschema at most once,
 // so each subschema counts with its constraints and the values they compare
-// with (enum, const, required, type). It counts once more for each branch of
-// an anyOf or a oneOf that it is in, `enclosing` at `schema`. valijson
+// with (enum, const, required, type, see literalCost()). It counts once more
+// for each branch of an anyOf or a oneOf that it is in, `enclosing` at
+// `schema`. valijson
 // copies an error up through each of them, and collect() checks each such
 // branch again on its own where the combinator failed.
 qint64 errorPathCost(const QJsonValue& schema, qint64 enclosing)
@@ -625,7 +668,7 @@ qint64 errorPathCost(const QJsonValue& schema, qint64 enclosing)
             }
         } else if (key == QLatin1StringView("enum") || key == QLatin1StringView("const")
                    || key == QLatin1StringView("required") || key == QLatin1StringView("type")) {
-            own += valueCount(value);
+            own += literalCost(value);
         } else if (key != QLatin1StringView("description") && key != QLatin1StringView("title")
                    && key != QLatin1StringView("default") && key != QLatin1StringView("examples")
                    && key != QLatin1StringView("readOnly") && key != QLatin1StringView("writeOnly")
@@ -724,10 +767,9 @@ public:
         m_pointerLength += pointerLength;
         if (value.isString()) {
             const QString string = value.toString();
-            m_stringLength += string.size();
-            // valijson reads strings through QString::toStdString(), which
-            // drops an unpaired surrogate: it would check another string
-            // than the one the handler gets.
+            // valijson reads strings in UTF-8 (JsonTree), which cannot hold
+            // an unpaired surrogate. It would check another string than the
+            // one the handler gets.
             if (!string.isValidUtf16()) {
                 problem(QStringLiteral(": contains an unpaired UTF-16 surrogate"));
             }
@@ -758,10 +800,12 @@ public:
 
     // Whether the errors of the value are few and short enough to collect,
     // and quick to list under a schema of `schemaCost` (errorPathCost()).
-    [[nodiscard]] bool isSmall(qint64 schemaCost) const
+    // `stringBytes`: the UTF-8 bytes of the value's strings and member names
+    // (JsonTree::textSize()).
+    [[nodiscard]] bool isSmall(qint64 schemaCost, std::size_t stringBytes) const
     {
         return m_nodes <= MaxCollectedNodes && m_pointerLength <= MaxCollectedPointerLength
-            && size() <= MaxErrorWork / schemaCost;
+            && size(stringBytes) <= MaxErrorWork / schemaCost;
     }
 
 private:
@@ -774,12 +818,12 @@ private:
     // The size of the value for the work of listing its errors, counted in
     // JSON values. Each error costs about the same, a few microseconds, but
     // valijson and collect() copy its pointer several times, and valijson
-    // converts a string to UTF-8 each time it checks its length. As
-    // measured, PointerLengthPerValue code units of pointer cost as much as
-    // one more value, and StringLengthPerValue code units of string.
-    [[nodiscard]] qint64 size() const
+    // copies a string out and counts its characters each time it checks its
+    // length. As measured, PointerLengthPerValue code units of pointer cost
+    // as much as one more value, and StringBytesPerValue bytes of string.
+    [[nodiscard]] qint64 size(std::size_t stringBytes) const
     {
-        return m_nodes + m_pointerLength / PointerLengthPerValue + m_stringLength / StringLengthPerValue;
+        return m_nodes + m_pointerLength / PointerLengthPerValue + qint64(stringBytes) / StringBytesPerValue;
     }
 
     static qsizetype digits(qsizetype n)
@@ -808,7 +852,6 @@ private:
     QList<Segment> m_path;
     qsizetype m_nodes = 0;
     qsizetype m_pointerLength = 0;
-    qint64 m_stringLength = 0;
 };
 
 bool typeAccepts(const QString& type, const QJsonValue& value)
@@ -975,8 +1018,9 @@ struct McpSchema::Private
     // What one collect() works out once for all the errors it describes.
     struct Collection
     {
-        // The value that collect() checks.
+        // The value that collect() checks, and its tree.
         const QJsonValue& value;
+        const JsonTreeValue& tree;
         // The places where a wrapper adds nothing (see collect()).
         QSet<QString> covered;
         // Whether every branch of an anyOf or oneOf fails at a place, by the
@@ -985,14 +1029,14 @@ struct McpSchema::Private
     };
 
     QString takePropertyNames(QJsonObject& node, const QStringList& location);
-    bool matches(const QJsonValue& value) const;
+    bool matches(const JsonTreeValue& value) const;
     template<typename Combinator>
-    bool combinatorFails(const Combinator* combinator, const QString& place, const QJsonValue& instance,
+    bool combinatorFails(const Combinator* combinator, const QString& place, const JsonTreeValue& instance,
                          Collection& collection) const;
-    void collect(const QJsonValue& value, Report& report) const;
+    void collect(const QJsonValue& value, const JsonTreeValue& tree, Report& report) const;
     void applicableSchemas(const QJsonValue& schema, const valijson::Subschema* compiledSchema,
-                           const QJsonValue& instance, const QStringList& names, qsizetype index, const QString& place,
-                           Collection& collection, QList<QJsonObject>& out) const;
+                           const JsonTreeValue& instance, const QStringList& names, qsizetype index,
+                           const QString& place, Collection& collection, QList<QJsonObject>& out) const;
     void describe(const valijson::ValidationResults::Error& error, Collection& collection, Report& report) const;
 
     // The schema that valijson compiled, without propertyNames.
@@ -1038,20 +1082,20 @@ QString McpSchema::Private::takePropertyNames(QJsonObject& node, const QStringLi
     return QString();
 }
 
-bool McpSchema::Private::matches(const QJsonValue& value) const
+bool McpSchema::Private::matches(const JsonTreeValue& value) const
 {
     // No results: valijson stops at the first failure and keeps nothing.
-    const valijson::adapters::QtJsonAdapter adapter(value);
+    const JsonTreeAdapter adapter(value);
     if (!validator.validate(schema, adapter, nullptr)) {
         return false;
     }
     for (const NameRule& rule : nameRules) {
-        const std::optional<QJsonObject> members = objectAt(value, rule.location);
+        const std::optional<JsonTreeValue> members = objectAt(value, rule.location);
         if (!members) {
             continue;
         }
-        for (auto it = members->begin(); it != members->end(); ++it) {
-            if (!rule.names || !rule.names->d->matches(QJsonValue(it.key()))) {
+        for (std::size_t i = 0; i < members->node().count; ++i) {
+            if (!rule.names || !rule.names->d->matches(members->memberName(i))) {
                 return false;
             }
         }
@@ -1063,13 +1107,13 @@ bool McpSchema::Private::matches(const QJsonValue& value) const
 // `combinator`. Each branch is checked as valijson compiled it, in the
 // schema, and the answer is kept for the other errors of the collection.
 template<typename Combinator>
-bool McpSchema::Private::combinatorFails(const Combinator* combinator, const QString& place, const QJsonValue& instance,
-                                         Collection& collection) const
+bool McpSchema::Private::combinatorFails(const Combinator* combinator, const QString& place,
+                                         const JsonTreeValue& instance, Collection& collection) const
 {
     const std::pair<const void*, QString> key(combinator, place);
     auto failed = collection.combinatorFailed.constFind(key);
     if (failed == collection.combinatorFailed.cend()) {
-        const valijson::adapters::QtJsonAdapter adapter(instance);
+        const JsonTreeAdapter adapter(instance);
         const std::vector<const valijson::Subschema*> branches = branchesOf(combinator);
         const bool none = std::none_of(branches.begin(), branches.end(), [&](const valijson::Subschema* branch) {
             return validator.validate(*branch, adapter, nullptr);
@@ -1079,10 +1123,10 @@ bool McpSchema::Private::combinatorFails(const Combinator* combinator, const QSt
     return *failed;
 }
 
-void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
+void McpSchema::Private::collect(const QJsonValue& value, const JsonTreeValue& tree, Report& report) const
 {
     valijson::ValidationResults results;
-    const valijson::adapters::QtJsonAdapter adapter(value);
+    const JsonTreeAdapter adapter(tree);
     validator.validate(schema, adapter, &results);
 
     // A wrapper about a place adds nothing when a deeper error is listed.
@@ -1090,7 +1134,7 @@ void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
     // another wrapper about a place below it. So the covered places are
     // those of the errors other than wrappers, those above the place of each
     // wrapper, and all their ancestors.
-    Collection collection{value, {}, {}};
+    Collection collection{value, tree, {}, {}};
     const auto cover = [&](QString pointer) {
         // Each place in the set has its ancestors in it.
         while (!collection.covered.contains(pointer)) {
@@ -1126,21 +1170,24 @@ void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
 
     for (const NameRule& rule : nameRules) {
         const std::optional<QJsonObject> members = objectAt(value, rule.location);
-        if (!members) {
+        const std::optional<JsonTreeValue> treeMembers = objectAt(tree, rule.location);
+        if (!members || !treeMembers) {
             continue;
         }
-        for (auto it = members->begin(); it != members->end(); ++it) {
+        // The tree has the members in the order of the object.
+        std::size_t index = 0;
+        for (auto it = members->begin(); it != members->end(); ++it, ++index) {
             const QStringList names = rule.location + QStringList{it.key()};
             if (!rule.names) {
                 report.add(names, QStringLiteral("is not allowed, because the schema allows no property here"));
                 continue;
             }
-            const QJsonValue name(it.key());
-            if (rule.names->d->matches(name)) {
+            const JsonTreeValue treeName = treeMembers->memberName(index);
+            if (rule.names->d->matches(treeName)) {
                 continue;
             }
             Report nameReport;
-            rule.names->d->collect(name, nameReport);
+            rule.names->d->collect(QJsonValue(it.key()), treeName, nameReport);
             if (nameReport.isEmpty()) {
                 report.add(names, QStringLiteral("the property name does not match propertyNames"));
             }
@@ -1167,7 +1214,7 @@ void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
 // only then. A branch that failed beside one that matched is no reason for
 // the value to fail. Not into not, whose failure valijson reports as one.
 void McpSchema::Private::applicableSchemas(const QJsonValue& schema, const valijson::Subschema* compiledSchema,
-                                           const QJsonValue& instance, const QStringList& names, qsizetype index,
+                                           const JsonTreeValue& instance, const QStringList& names, qsizetype index,
                                            const QString& place, Collection& collection, QList<QJsonObject>& out) const
 {
     if (!schema.isObject() || compiledSchema == nullptr) {
@@ -1199,7 +1246,7 @@ void McpSchema::Private::applicableSchemas(const QJsonValue& schema, const valij
     const QString& name = names.at(index);
     const QString below = place + QLatin1Char('/') + pointerToken(name);
     if (instance.isObject()) {
-        const QJsonValue child = instance.toObject().value(name);
+        const JsonTreeValue child = instance.member(name.toStdString()).value_or(undefinedValue());
         const QJsonObject properties = node.value(QLatin1StringView("properties")).toObject();
         if (properties.contains(name)) {
             applicableSchemas(properties.value(name), propertySubschema(structure.properties, name), child, names,
@@ -1210,8 +1257,12 @@ void McpSchema::Private::applicableSchemas(const QJsonValue& schema, const valij
                               collection, out);
         }
     } else if (instance.isArray() && structure.items != nullptr) {
+        bool ok = false;
+        const qlonglong item = name.toLongLong(&ok);
+        const std::optional<JsonTreeValue> child =
+            ok && item >= 0 ? instance.item(std::size_t(item)) : std::optional<JsonTreeValue>();
         applicableSchemas(node.value(QLatin1StringView("items")), structure.items->getItemsSubschema(),
-                          valueAt(instance, {name}), names, index + 1, below, collection, out);
+                          child.value_or(undefinedValue()), names, index + 1, below, collection, out);
     }
 }
 
@@ -1296,7 +1347,7 @@ void McpSchema::Private::describe(const valijson::ValidationResults::Error& erro
     const QJsonValue instance = valueAt(collection.value, names);
     const auto applicable = [&]() {
         QList<QJsonObject> schemas;
-        applicableSchemas(source, &this->schema, collection.value, names, 0, QString(), collection, schemas);
+        applicableSchemas(source, &this->schema, collection.tree, names, 0, QString(), collection, schemas);
         return schemas;
     };
     bool described = false;
@@ -1417,7 +1468,8 @@ QString McpSchema::compileChecked(const QJsonObject& schema)
         return error;
     }
     try {
-        const valijson::adapters::QtJsonAdapter adapter(stripped);
+        const JsonTree tree{QJsonValue(stripped)};
+        const JsonTreeAdapter adapter(tree);
         valijson::SchemaParser parser(valijson::SchemaParser::kDraft7);
         parser.populateSchema(adapter, d->schema);
         d->source = stripped;
@@ -1445,13 +1497,16 @@ QStringList McpSchema::validate(const QJsonValue& value) const
         if (!report.isEmpty()) {
             return report.take();
         }
-        if (d->matches(value)) {
+        // Each string is converted to UTF-8 here, once for all the checks.
+        const JsonTree tree(value);
+        const JsonTreeValue root(tree, 0);
+        if (d->matches(root)) {
             return {};
         }
-        if (!inspector.isSmall(d->errorCost)) {
+        if (!inspector.isSmall(d->errorCost, tree.textSize())) {
             return {QStringLiteral(": does not match the schema, and is too large for the server to list each error")};
         }
-        d->collect(value, report);
+        d->collect(value, root, report);
         if (report.isEmpty()) {
             return {QStringLiteral(": does not match the schema")};
         }
