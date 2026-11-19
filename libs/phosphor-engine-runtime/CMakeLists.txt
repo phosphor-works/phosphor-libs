@@ -552,8 +552,7 @@ target_link_libraries(PhosphorEngineRuntime
         # The hub's shader warm-up bakes the surface packs through
         # SurfaceShaderItem's own bake path.
         PhosphorSurfaceQuick::PhosphorSurfaceQuick
-        # The hub runs the warm bake and the startup layout scan off the GUI
-        # thread with QtConcurrent.
+        # The hub's shader warm-up bakes off the GUI thread with QtConcurrent.
         Qt6::Concurrent
         # overlay/settings.cpp reaches PhosphorRendering's ShaderCompiler.h.
         Qt6::ShaderToolsPrivate

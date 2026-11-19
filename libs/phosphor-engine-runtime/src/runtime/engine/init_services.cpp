@@ -5,9 +5,7 @@
 #include "runtime/engine/helpers.h"
 
 #include <QGuiApplication>
-#include <QFutureWatcher>
 #include <QPointer>
-#include <QtConcurrent>
 #include <QScreen>
 #include <QSet>
 
