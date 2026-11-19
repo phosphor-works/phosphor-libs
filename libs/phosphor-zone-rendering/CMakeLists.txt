@@ -109,11 +109,13 @@ target_link_libraries(PhosphorZoneRendering
         Qt6::Quick
         PhosphorRendering::PhosphorRendering
         PhosphorShaders::PhosphorShaders
+        # The public headers (ZoneShaderItem.h, ZoneShaderNodeRhi.h) reach
+        # <rhi/qrhi.h> through PhosphorRendering's RHI node.
+        Qt6::GuiPrivate
     PRIVATE
         PhosphorZones::PhosphorZones
         # The warm bake compiles through PhosphorRendering's ShaderCompiler,
         # whose header includes QShaderBaker.
-        Qt6::GuiPrivate
         Qt6::ShaderToolsPrivate
 )
 

@@ -58,5 +58,3 @@ target_link_libraries(test_zone_rendering_qml_module
 
 # The trusted overlay roots follow the app's overlay pack directory.
 phosphorzonerendering_add_test(test_overlay_pack_location)
-# ZoneShaderNodeRhi.h reaches <rhi/qrhi.h> through PhosphorRendering.
-target_link_libraries(test_overlay_pack_location PRIVATE Qt6::GuiPrivate Qt6::ShaderToolsPrivate)
