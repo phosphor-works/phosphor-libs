@@ -26,6 +26,7 @@ find_dependency(PhosphorAudio)
 find_dependency(PhosphorGeometry)
 find_dependency(PhosphorPlacement)
 find_dependency(PhosphorWorkspaces)
+find_dependency(PhosphorContextResolver)
 find_dependency(PhosphorZones)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PhosphorEngineRuntimeTargets.cmake")

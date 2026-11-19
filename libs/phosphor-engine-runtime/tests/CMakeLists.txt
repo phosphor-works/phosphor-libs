@@ -48,3 +48,4 @@ endfunction()
 
 phosphorengineruntime_add_test(test_settings_model)
 phosphorengineruntime_add_test(test_core_helpers)
+phosphorengineruntime_add_test(test_drag_activation)

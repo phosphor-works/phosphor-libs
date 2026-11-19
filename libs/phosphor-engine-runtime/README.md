@@ -4,7 +4,7 @@ The placement engine runtime a host embeds: the snap, tile and scroll engines' h
 and its settings. PlasmaZones' daemon (`plasmazonesd`) hosts it beside KWin today, and the Phosphor compositor
 will host it in process.
 
-It arrives here area by area from PlasmaZones. So far: the **settings model**, and the **core** the runtime is built on.
+It arrives here area by area from PlasmaZones. So far: the **settings model**, the **core** the runtime is built on, and **window tracking and drag**.
 
 ## Responsibility
 
@@ -19,6 +19,9 @@ It arrives here area by area from PlasmaZones. So far: the **settings model**, a
   cross-surface and geometry resolvers, geometry and layout-list helpers, the zone-selector and strip-selector
   layouts, the animation profile bootstrap, the zone-overlay shader registry, the runtime's logging categories and
   its translation catalog (`RuntimeI18n`, context `PhosphorEngineRuntime`).
+- Window tracking (`WindowTracker`): every managed window's placement, its per-mode float state, persistence
+  across restarts, evacuation when an output leaves, and the rules applied as windows open. The drag resolver
+  (`DragResolver`): what a drag with a trigger held does, from zone highlighting to the drop, and the drop proxy.
 
 ## Key types
 
@@ -36,6 +39,9 @@ It arrives here area by area from PlasmaZones. So far: the **settings model**, a
 | `AnimationBootstrap` | `AnimationBootstrap.h` | Loads the curve and motion-profile registries the overlays animate with |
 | `ShaderRegistry` | `ShaderRegistry.h` | The zone-overlay shader packs |
 | `RuntimeI18n` | `RuntimeI18n.h` | The runtime's translation context and `loadRuntimeTranslations` |
+| `WindowTracker` | `WindowTracker.h` | Window placement tracking, float state, persistence and evacuation |
+| `DragResolver` | `DragResolver.h` | A drag's activation, zone highlight and drop |
+| `WindowLifecycleRelay` | `WindowLifecycleRelay.h` | The window lifecycle signals the services listen to |
 
 ## Typical use
 
@@ -67,4 +73,5 @@ Qt Core and Gui, and PhosphorConfig (the store), PhosphorAnimation (motion profi
 PhosphorRegistry (decoration and overlay trees), PhosphorRules (per-mode disable rules), PhosphorZones,
 PhosphorScreens, PhosphorEngine and the three engines' settings interfaces, PhosphorTiles, PhosphorShaders,
 PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose;
-PhosphorGeometry, PhosphorPlacement, PhosphorWorkspaces and PhosphorAudio for the core.
+PhosphorGeometry, PhosphorPlacement, PhosphorWorkspaces and PhosphorAudio for the core; PhosphorContextResolver and
+PhosphorShortcuts (privately) for tracking and drag.
