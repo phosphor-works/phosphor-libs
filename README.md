@@ -6,7 +6,7 @@ Phosphor compositor and shell.
 
 | Area | Libraries |
 | --- | --- |
-| Placement | `phosphor-engine`, `phosphor-snap-engine`, `phosphor-tile-engine`, `phosphor-scroll-engine`, `phosphor-zones`, `phosphor-tiles`, `phosphor-workspaces`, `phosphor-placement`, `phosphor-context-resolver`, `phosphor-layout-api`, `phosphor-engine-runtime` |
+| Placement | `phosphor-engine`, `phosphor-snap-engine`, `phosphor-tile-engine`, `phosphor-scroll-engine`, `phosphor-zones`, `phosphor-tiles`, `phosphor-workspaces`, `phosphor-placement`, `phosphor-context-resolver`, `phosphor-layout-api`, `phosphor-engine-runtime`, `phosphor-zone-rendering` |
 | Rendering and surfaces | `phosphor-rendering`, `phosphor-shaders`, `phosphor-animation`, `phosphor-surface`, `phosphor-surface-quick`, `phosphor-pointer`, `phosphor-layer`, `phosphor-overlay`, `phosphor-surfaces`, `phosphor-shell-patterns`, `phosphor-wayland` |
 | Infrastructure | `phosphor-config`, `phosphor-control`, `phosphor-registry`, `phosphor-fsloader`, `phosphor-ipc`, `phosphor-channel`, `phosphor-dbus`, `phosphor-protocol`, `phosphor-identity`, `phosphor-geometry`, `phosphor-screens`, `phosphor-rules`, `phosphor-scripting`, `phosphor-shortcuts`, `phosphor-service-idle`, `phosphor-audio`, `phosphor-compositor` |
 
