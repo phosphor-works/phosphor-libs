@@ -154,20 +154,21 @@ PHOSPHORENGINERUNTIME_EXPORT void seedShellAnimationFamilies(PhosphorAnimation::
 /// `setDefaultRegistry` calls (`PhosphorCurve::setDefaultRegistry`,
 /// `PhosphorProfileRegistry::setDefaultRegistry`,
 /// `QtQuickClockManager::setDefaultManager`) — those publications live
-/// in the composition-root code (editor's main.cpp, settings's main.cpp,
-/// or the daemon's setupAnimationProfiles) rather than here, because
+/// in the composition-root code (the editor's and the settings app's
+/// main.cpp, or plasmazonesd's Daemon) rather than here, because
 /// the QML-side handles (`PhosphorCurve` / `QtQuickClockManager`) live
-/// in the QML module which `plasmazones_core` does not link against.
+/// in the QML module, which this library does not link against.
 ///
 /// Each composition root constructs one of these in `main()` before
 /// loading QML and keeps it alive for the application lifetime. Use
 /// the `profileRegistry()` / `curveRegistry()` accessors to thread the
 /// owned registries into other services or to publish them.
 ///
-/// The daemon owns equivalent wiring directly in `Daemon` (where the
-/// registries are full-fat members alongside the rest of the daemon's
-/// services); `AnimationBootstrap` is the lightweight shape for
-/// processes that don't need the rest of the daemon machinery.
+/// `EngineRuntime` owns equivalent registries directly, publishes its
+/// profile registry itself and hands its curve registry to the host's
+/// `Platform::publishCurveRegistry`, and the host owns the clock manager.
+/// `AnimationBootstrap` is the lightweight shape for processes that don't
+/// need the rest of the runtime.
 ///
 /// This is the PlasmaZones-flavoured wrapper — it scans
 /// `${XDG_DATA_DIRS}/plasmazones/{curves,profiles}` and the user-writable

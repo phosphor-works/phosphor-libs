@@ -10,8 +10,8 @@
 # drag resolver, the services a host binds to its transport with the host
 # interfaces it implements, and the controllers and overlays with the overlay
 # QML (shortcuts, workspaces, the layout controller, the OSDs, snap assist, the
-# zone selector and the cheatsheet). The EngineRuntime hub that wires them
-# follows. Built standalone or as a subdirectory of Phosphor.
+# zone selector and the cheatsheet), and the EngineRuntime hub that wires
+# them for a host. Built standalone or as a subdirectory of Phosphor.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -37,7 +37,7 @@ include(GenerateExportHeader)
 # Dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
 
-find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick Concurrent)
 # The overlay settings warm-bake through PhosphorRendering's ShaderCompiler,
 # whose header includes QShaderBaker (rhi/), in this private module.
 if(NOT TARGET Qt6::ShaderToolsPrivate)
@@ -126,6 +126,9 @@ endif()
 if(NOT TARGET PhosphorShellPatterns::PhosphorShellPatterns)
     find_package(PhosphorShellPatterns CONFIG REQUIRED)
 endif()
+if(NOT TARGET PhosphorSurfaceQuick::PhosphorSurfaceQuick)
+    find_package(PhosphorSurfaceQuick CONFIG REQUIRED)
+endif()
 if(NOT TARGET PhosphorSurfaces::PhosphorSurfaces)
     find_package(PhosphorSurfaces CONFIG REQUIRED)
 endif()
@@ -172,6 +175,9 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/DragResolver.h
     include/PhosphorEngineRuntime/DropProxy.h
     include/PhosphorEngineRuntime/EngineFactory.h
+    include/PhosphorEngineRuntime/EngineRouting.h
+    include/PhosphorEngineRuntime/EngineRuntime.h
+    include/PhosphorEngineRuntime/EngineRuntimeFwd.h
     include/PhosphorEngineRuntime/Enums.h
     include/PhosphorEngineRuntime/GeometryUtils.h
     include/PhosphorEngineRuntime/IHostApps.h
@@ -201,8 +207,10 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/RuntimeI18n.h
     include/PhosphorEngineRuntime/ScreenIdResolver.h
     include/PhosphorEngineRuntime/ScreenModeRouter.h
+    include/PhosphorEngineRuntime/ScreenReshapeTracker.h
     include/PhosphorEngineRuntime/ScreenScale.h
     include/PhosphorEngineRuntime/ScrollingService.h
+    include/PhosphorEngineRuntime/SeedOrderFilter.h
     include/PhosphorEngineRuntime/Settings.h
     include/PhosphorEngineRuntime/SettingsConfigStore.h
     include/PhosphorEngineRuntime/SettingsInterfaces.h
@@ -214,10 +222,12 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/ShortcutManager.h
     include/PhosphorEngineRuntime/ShortcutManagerIds.h
     include/PhosphorEngineRuntime/SnapAssistThumbnailProvider.h
+    include/PhosphorEngineRuntime/SnapGapTracker.h
     include/PhosphorEngineRuntime/SnapService.h
     include/PhosphorEngineRuntime/SpatialAdjacency.h
     include/PhosphorEngineRuntime/StripCardSerialize.h
     include/PhosphorEngineRuntime/StripSelectorHitTest.h
+    include/PhosphorEngineRuntime/StripZones.h
     include/PhosphorEngineRuntime/ThumbnailUrl.h
     include/PhosphorEngineRuntime/TilingService.h
     include/PhosphorEngineRuntime/Types.h
@@ -316,6 +326,36 @@ set(phosphorengineruntime_SRCS
     src/runtime/dragresolver/drop.cpp
     src/runtime/dragresolver/dropproxy.cpp
     src/runtime/dragresolver/selector_gate.cpp
+    src/runtime/engine/animation_profiles.cpp
+    src/runtime/engine/autotile.cpp
+    src/runtime/engine/autotile_init.cpp
+    src/runtime/engine/cheatsheet.cpp
+    src/runtime/engine/desktop_renumber.cpp
+    src/runtime/engine/engine_release.cpp
+    src/runtime/engine/enginerouting.cpp
+    src/runtime/engine/engineruntime.cpp
+    src/runtime/engine/evacuees.cpp
+    src/runtime/engine/helpers.h
+    src/runtime/engine/idle.cpp
+    src/runtime/engine/init_adaptors.cpp
+    src/runtime/engine/init_assignment_apply.cpp
+    src/runtime/engine/init_engines.cpp
+    src/runtime/engine/init_service_wiring.cpp
+    src/runtime/engine/init_services.cpp
+    src/runtime/engine/lifecycle.cpp
+    src/runtime/engine/macros.h
+    src/runtime/engine/navigation.cpp
+    src/runtime/engine/osd.cpp
+    src/runtime/engine/screenreshapetracker.cpp
+    src/runtime/engine/scrolling.cpp
+    src/runtime/engine/scrolling_init.cpp
+    src/runtime/engine/seedorderfilter.cpp
+    src/runtime/engine/shader_warmup.cpp
+    src/runtime/engine/shortcuts_wiring.cpp
+    src/runtime/engine/signals.cpp
+    src/runtime/engine/snapgaptracker.cpp
+    src/runtime/engine/start.cpp
+    src/runtime/engine/workspaces.cpp
     src/runtime/overlay/animation_config.cpp
     src/runtime/overlay/cheatsheet.cpp
     src/runtime/overlay/decoration.cpp
@@ -509,6 +549,11 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorRendering::PhosphorRendering
         PhosphorSurfaces::PhosphorSurfaces
         PhosphorZoneRendering::PhosphorZoneRendering
+        # The hub's shader warm-up bakes the surface packs through
+        # SurfaceShaderItem's own bake path.
+        PhosphorSurfaceQuick::PhosphorSurfaceQuick
+        # The hub's shader warm-up bakes off the GUI thread with QtConcurrent.
+        Qt6::Concurrent
         # overlay/settings.cpp reaches PhosphorRendering's ShaderCompiler.h.
         Qt6::ShaderToolsPrivate
 )
