@@ -24,8 +24,8 @@
 #      so -DCPM_luau_SOURCE=<dir> builds a local Luau checkout instead.
 #
 # A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU,
-# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON) checks that option before calling in
-# here, so a system build reaches neither path.
+# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, PHOSPHORMCP_USE_SYSTEM_VALIJSON) checks
+# that option before calling in here, so a system build reaches neither path.
 #
 # Script mode, for packagers and CI:
 #
@@ -56,7 +56,7 @@ set(PHOSPHOR_DEP_luau_FILE "luau-0.745.tar.gz")
 set(PHOSPHOR_DEP_luau_SHA256 "53c22773bace6cabbabaead576fbc08d11a0317fce11a3dbf9d027dda6849248")
 
 # valijson (BSD-2-Clause, Tristan Penman), header-only JSON Schema validation
-# (phosphor-fsloader).
+# (phosphor-fsloader, phosphor-mcp).
 set(PHOSPHOR_DEP_valijson_VERSION "1.1.3")
 set(PHOSPHOR_DEP_valijson_URL "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz")
 set(PHOSPHOR_DEP_valijson_FILE "valijson-1.1.3.tar.gz")
