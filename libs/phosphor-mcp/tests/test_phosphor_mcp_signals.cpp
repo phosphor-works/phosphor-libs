@@ -522,7 +522,15 @@ private Q_SLOTS:
         auto* context = new QObject;
         context->moveToThread(&worker);
         const auto stop = qScopeGuard([&] {
-            QMetaObject::invokeMethod(context, &QObject::deleteLater);
+            // Deleted before the loop is told to quit: a deleteLater() could
+            // still wait in the queue when the loop ends, and the context
+            // would leak.
+            QMetaObject::invokeMethod(
+                context,
+                [context] {
+                    delete context;
+                },
+                Qt::BlockingQueuedConnection);
             worker.quit();
             worker.wait();
         });

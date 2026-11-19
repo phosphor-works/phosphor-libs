@@ -901,6 +901,28 @@ private Q_SLOTS:
             << QJsonObject{{QLatin1StringView("a"), QJsonArray{QJsonObject()}}}
             << QString(QStringLiteral("- arguments/a/0/r0") + QString(59, QLatin1Char('x'))
                        + QStringLiteral("...: is required"));
+
+        // A tool that takes a long text, with a dozen other properties, still
+        // says why 4.4 MB of emoji is refused.
+        QJsonObject properties{
+            {QLatin1StringView("text"),
+             QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")},
+                         {QLatin1StringView("maxLength"), 1048576}}},
+            {QLatin1StringView("pane"), QJsonObject{{QLatin1StringView("type"), QStringLiteral("integer")}}}};
+        for (int i = 0; i < 12; ++i) {
+            properties.insert(QStringLiteral("p%1").arg(i),
+                              QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")}});
+        }
+        QString emoji;
+        emoji.reserve(2 * 1100000);
+        for (int i = 0; i < 1100000; ++i) {
+            emoji += QString::fromUcs4(U"\U0001F600", 1);
+        }
+        QTest::newRow("a few megabytes of text still list")
+            << QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
+                           {QLatin1StringView("properties"), properties}}
+            << QJsonObject{{QLatin1StringView("text"), emoji}}
+            << QStringLiteral("- arguments/text: must be at most 1048576 characters long");
     }
 
     void longNamesAreShortInErrors()

@@ -52,11 +52,11 @@ constexpr qsizetype MaxCollectedPointerLength = 64 * 1024;
 // value in the schema, count by their length. The slowest value found within
 // it takes about 0.2 s in a release build, many required names missing from
 // each of a few hundred items. Long strings and names, ASCII or not, list
-// their errors in less than 0.1 s.
+// their errors in about 0.15 s at most.
 constexpr qint64 MaxErrorWork = 100000;
 // See Inspector::size() and literalCost().
 constexpr qint64 PointerLengthPerValue = 16;
-constexpr qint64 StringBytesPerValue = 1024;
+constexpr qint64 StringBytesPerValue = 2048;
 constexpr qint64 LiteralLengthPerValue = 128;
 
 // A member name in an error is cut to this many code units: a model's
@@ -635,9 +635,8 @@ qint64 literalCost(const QJsonValue& value)
 // so each subschema counts with its constraints and the values they compare
 // with (enum, const, required, type, see literalCost()). It counts once more
 // for each branch of an anyOf or a oneOf that it is in, `enclosing` at
-// `schema`. valijson
-// copies an error up through each of them, and collect() checks each such
-// branch again on its own where the combinator failed.
+// `schema`. valijson copies an error up through each of them, and collect()
+// checks each such branch again on its own where the combinator failed.
 qint64 errorPathCost(const QJsonValue& schema, qint64 enclosing)
 {
     const qint64 weight = 1 + enclosing;
@@ -820,7 +819,10 @@ private:
     // valijson and collect() copy its pointer several times, and valijson
     // copies a string out and counts its characters each time it checks its
     // length. As measured, PointerLengthPerValue code units of pointer cost
-    // as much as one more value, and StringBytesPerValue bytes of string.
+    // as much as one more value. StringBytesPerValue bytes of string count as
+    // one value, about half of what they cost at worst (text that is not
+    // ASCII): the errors of long strings stay well under those of the
+    // slowest values, and a few megabytes of text still get their list.
     [[nodiscard]] qint64 size(std::size_t stringBytes) const
     {
         return m_nodes + m_pointerLength / PointerLengthPerValue + qint64(stringBytes) / StringBytesPerValue;
