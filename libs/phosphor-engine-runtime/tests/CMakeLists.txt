@@ -47,3 +47,4 @@ function(phosphorengineruntime_add_test name)
 endfunction()
 
 phosphorengineruntime_add_test(test_settings_model)
+phosphorengineruntime_add_test(test_core_helpers)
