@@ -21,13 +21,15 @@ class McpServer;
 // request and the arguments. The handler answers it then or later, through
 // finish() or fail(), and keeps it meanwhile:
 //
+//     // m_jobs is a std::list, whose elements stay put, so `job` stays valid
+//     // until the job is erased.
 //     server.addTool(tool, [this](PhosphorMcp::McpCall call) {
 //         Job& job = m_jobs.emplace_back(std::move(call));
 //         job.call.onCancelled([this, &job] { stop(job); });
 //         start(job); // answers through job.call when it ends
 //     });
 //
-// Calls run at the same time: the server reads the next request while this
+// Calls run at the same time. The server reads the next request while this
 // one waits, and each reply goes out when its call finishes, in the order
 // they finish.
 //
@@ -36,24 +38,32 @@ class McpServer;
 // false. A call destroyed unanswered is answered with a JSON-RPC internal
 // error, so that the client does not wait for an answer that never comes.
 //
-// Move-only. Use it on the server's thread. It holds the server weakly: a
-// call that outlives the server does nothing.
+// Move-only. A moved-from call holds no call, as a default-constructed one
+// does. It is not valid, not cancelled, its accessors return empty values,
+// and its destruction sends nothing.
+//
+// Use it on the server's thread only. Off that thread every function does
+// nothing, with a warning (and an assertion in a debug build), and the call
+// stays unanswered. It holds the server weakly: a call that outlives the
+// server does nothing.
 class PHOSPHORMCP_EXPORT McpCall
 {
 public:
     // Holds no call.
     McpCall();
     ~McpCall();
+    // `other` holds no call afterwards.
     McpCall(McpCall&& other) noexcept;
-    // Abandons the call this object held, as the destructor does.
+    // Takes the call `other` holds, then abandons the call this object held,
+    // as the destructor does. `other` holds no call afterwards.
     McpCall& operator=(McpCall&& other) noexcept;
     McpCall(const McpCall&) = delete;
     McpCall& operator=(const McpCall&) = delete;
 
     // True while the call can still be answered.
     [[nodiscard]] bool isValid() const;
-    // True once the client cancelled the call, or the server ended while
-    // it ran.
+    // True once the client cancelled the call, or the server ended or was
+    // destroyed while the call ran unanswered. It stays true.
     [[nodiscard]] bool isCancelled() const;
 
     [[nodiscard]] QString toolName() const;
@@ -66,24 +76,40 @@ public:
     [[nodiscard]] QJsonObject requestMeta() const;
     [[nodiscard]] bool hasProgressToken() const;
 
-    // Sends the result. Returns false when there was nothing to answer.
+    // Sends the result. True when the reply was queued for the client, which
+    // is not a promise that the client reads it. False when there was
+    // nothing to answer (see above), and when the output is already gone.
+    // Also false when the tool has an output schema and the result does not
+    // match it. The call is answered then all the same, with a JSON-RPC
+    // internal error, and holds nothing more.
     bool finish(const McpResult& result);
     // Sends a failed result (isError) with one text block. Returns as
     // finish() does.
     bool fail(const QString& text);
 
     // Sends notifications/progress, when the request asked for it with a
-    // progressToken. `progress` must be larger than the last value sent for
-    // this call, and finite, and so must `total` when given. Returns false,
-    // and sends nothing, when the request has no token, for a value that
-    // does not grow, and after the answer.
+    // progressToken. `progress` must be finite and larger than the last
+    // value sent for this call. `total`, when given, must be finite, and may
+    // stay the same or change from one notification to the next. `message`
+    // is left out when empty. Returns false, and sends nothing, when the
+    // request has no token, for a value that is not finite or does not grow
+    // (both with a warning), after the answer, after a cancellation, and
+    // while the client leaves more than the server's high-water mark of
+    // replies unread (McpServer::setMaxPendingWriteBytes). A dropped
+    // notification is not sent later.
     bool progress(double progress, std::optional<double> total = std::nullopt, const QString& message = QString());
 
     // Runs `callback` once when the client cancels the call
     // (notifications/cancelled), or when the server ends while the call
-    // runs. Nothing more goes out for the call after it: a later finish()
-    // is dropped. On a call that is already cancelled, `callback` runs now,
-    // inside this function. The callback may destroy this object.
+    // runs. Nothing more goes out for the call after it, and a later
+    // finish() is dropped. On a call that is already cancelled, `callback`
+    // runs now, inside this function. The callback may destroy this object.
+    //
+    // One callback per call. A second one replaces the first, which is
+    // destroyed without running. An empty `callback` changes nothing. On a
+    // call that holds nothing (answered, moved from, or whose server is
+    // gone) it does nothing, and the callback is dropped. Destroying the
+    // server runs no callback.
     void onCancelled(std::function<void()> callback);
 
 private:
@@ -91,7 +117,10 @@ private:
     McpCall(McpServer* server, quint64 token, const QString& toolName, const QJsonObject& arguments,
             const QJsonValue& requestId, const QJsonObject& requestMeta, bool hasProgressToken);
 
+    // The server, when this object holds a call and runs on its thread.
+    McpServer* serverOnThisThread() const;
     void abandon();
+    void swapWith(McpCall& other) noexcept;
 
     QPointer<McpServer> m_server;
     // The server's key for the call. 0 when this object holds none.

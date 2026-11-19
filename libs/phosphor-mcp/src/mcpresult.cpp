@@ -3,8 +3,9 @@
 
 #include <PhosphorMcp/McpResult.h>
 
+#include "mcplogging.h"
+
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QLatin1StringView>
 
 namespace PhosphorMcp {
@@ -26,6 +27,23 @@ McpContent McpContent::image(const QByteArray& bytes, const QString& mimeType)
     return content;
 }
 
+McpContent McpContent::audio(const QByteArray& bytes, const QString& mimeType)
+{
+    McpContent content;
+    content.m_type = Type::Audio;
+    content.m_bytes = bytes;
+    content.m_mimeType = mimeType;
+    return content;
+}
+
+McpContent McpContent::fromJson(const QJsonObject& block)
+{
+    McpContent content;
+    content.m_type = Type::Json;
+    content.m_json = block;
+    return content;
+}
+
 McpContent::Type McpContent::type() const
 {
     return m_type;
@@ -36,7 +54,7 @@ QString McpContent::text() const
     return m_text;
 }
 
-QByteArray McpContent::imageBytes() const
+QByteArray McpContent::bytes() const
 {
     return m_bytes;
 }
@@ -48,12 +66,22 @@ QString McpContent::mimeType() const
 
 QJsonObject McpContent::toJson() const
 {
-    if (m_type == Type::Image) {
+    switch (m_type) {
+    case Type::Image:
+    case Type::Audio: {
+        // Base64 is ASCII. As a Latin-1 view it goes into the JSON value as
+        // it is, without a UTF-16 copy of twice its size.
+        const QByteArray base64 = m_bytes.toBase64();
         return QJsonObject{
-            {QLatin1StringView("type"), QStringLiteral("image")},
-            {QLatin1StringView("data"), QString::fromLatin1(m_bytes.toBase64())},
+            {QLatin1StringView("type"), m_type == Type::Image ? QStringLiteral("image") : QStringLiteral("audio")},
+            {QLatin1StringView("data"), QJsonValue(QLatin1StringView(base64))},
             {QLatin1StringView("mimeType"), m_mimeType},
         };
+    }
+    case Type::Json:
+        return m_json;
+    case Type::Text:
+        break;
     }
     return QJsonObject{
         {QLatin1StringView("type"), QStringLiteral("text")},
@@ -76,7 +104,7 @@ McpResult McpResult::error(const QString& text)
     return result;
 }
 
-McpResult McpResult::structured(const QJsonObject& value)
+McpResult McpResult::structured(const QJsonValue& value)
 {
     McpResult result;
     result.setStructuredContent(value);
@@ -85,26 +113,47 @@ McpResult McpResult::structured(const QJsonObject& value)
 
 McpResult& McpResult::addText(const QString& text)
 {
-    m_content.append(McpContent::text(text));
-    return *this;
+    return addContent(McpContent::text(text));
 }
 
 McpResult& McpResult::addImage(const QByteArray& bytes, const QString& mimeType)
 {
-    m_content.append(McpContent::image(bytes, mimeType));
-    return *this;
+    return addContent(McpContent::image(bytes, mimeType));
+}
+
+McpResult& McpResult::addAudio(const QByteArray& bytes, const QString& mimeType)
+{
+    return addContent(McpContent::audio(bytes, mimeType));
 }
 
 McpResult& McpResult::addContent(const McpContent& content)
 {
+    switch (content.type()) {
+    case McpContent::Type::Image:
+    case McpContent::Type::Audio:
+        if (content.bytes().isEmpty() || content.mimeType().isEmpty()) {
+            qCWarning(lcMcp).noquote()
+                << "McpResult: an image or audio block needs bytes and a MIME type, so this one is not added";
+            return *this;
+        }
+        break;
+    case McpContent::Type::Json:
+        if (!content.toJson().value(QLatin1StringView("type")).isString()) {
+            qCWarning(lcMcp).noquote()
+                << "McpResult: a content block needs a string \"type\", so this one is not added";
+            return *this;
+        }
+        break;
+    case McpContent::Type::Text:
+        break;
+    }
     m_content.append(content);
     return *this;
 }
 
-McpResult& McpResult::setStructuredContent(const QJsonObject& value)
+McpResult& McpResult::setStructuredContent(const QJsonValue& value)
 {
     m_structured = value;
-    m_hasStructured = true;
     return *this;
 }
 
@@ -121,10 +170,10 @@ const QList<McpContent>& McpResult::content() const
 
 bool McpResult::hasStructuredContent() const
 {
-    return m_hasStructured;
+    return !m_structured.isUndefined();
 }
 
-QJsonObject McpResult::structuredContent() const
+QJsonValue McpResult::structuredContent() const
 {
     return m_structured;
 }
@@ -141,12 +190,12 @@ QJsonObject McpResult::toJson() const
         content.append(block.toJson());
     }
     QJsonObject result;
-    if (m_hasStructured) {
+    if (hasStructuredContent()) {
         // The spec asks a tool that returns structured content to return
         // its serialized JSON as text too, for clients that do not read
         // structuredContent.
         content.append(
-            McpContent::text(QString::fromUtf8(QJsonDocument(m_structured).toJson(QJsonDocument::Compact))).toJson());
+            McpContent::text(QString::fromUtf8(m_structured.toJson(QJsonValue::JsonFormat::Compact))).toJson());
         result.insert(QLatin1StringView("structuredContent"), m_structured);
     }
     result.insert(QLatin1StringView("content"), content);

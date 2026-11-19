@@ -5,11 +5,15 @@
 
 #include "mcplogging.h"
 
+#include <QAbstractEventDispatcher>
+#include <QObject>
 #include <QSocketNotifier>
+#include <QThread>
 
 #include <atomic>
 #include <cerrno>
 #include <csignal>
+#include <thread>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -18,54 +22,119 @@ namespace PhosphorMcp {
 
 namespace {
 
-// Read by the handler, which may run on any thread, so atomic. -1 while no
-// instance is installed.
+// The handler may run on any thread, so what it reads is atomic, and atomics
+// that are lock-free are safe in a signal handler.
+static_assert(std::atomic<int>::is_always_lock_free);
+static_assert(std::atomic<pid_t>::is_always_lock_free);
+
+// The write end of the pipe, -1 while no instance holds the signals.
 std::atomic<int> s_writeFd{-1};
-int s_readFd = -1;
+// Handlers between their read of s_writeFd and their write. release() waits
+// for them, so that no handler writes to a descriptor after it closed and
+// its number went to another file.
+std::atomic<int> s_handlersRunning{0};
+// The process that installed the handlers. A child forked before exec
+// inherits them, and the pipe with them.
+std::atomic<pid_t> s_pid{0};
 McpTerminationSignals* s_owner = nullptr;
 
+// Written by install() before the handler goes in, and only read after.
 struct sigaction s_oldTerm;
 struct sigaction s_oldHup;
+bool s_termHandled = false;
+bool s_hupHandled = false;
 
 extern "C" void onTerminationSignal(int signal)
 {
     const int savedErrno = errno;
-    const int fd = s_writeFd.load(std::memory_order_relaxed);
+    if (::getpid() != s_pid.load()) {
+        // A child forked before exec. The signal is the child's, not the
+        // server's, so the child gets the disposition that it would have had
+        // without the server. The signal is blocked while this runs, so the
+        // raised one comes to that disposition when this returns.
+        sigaction(signal, signal == SIGTERM ? &s_oldTerm : &s_oldHup, nullptr);
+        raise(signal);
+        errno = savedErrno;
+        return;
+    }
+    s_handlersRunning.fetch_add(1);
+    const int fd = s_writeFd.load();
     if (fd >= 0) {
         const unsigned char byte = static_cast<unsigned char>(signal);
         // A full pipe already holds a byte that ends the server.
         [[maybe_unused]] const ssize_t written = ::write(fd, &byte, 1);
     }
+    s_handlersRunning.fetch_sub(1);
     errno = savedErrno;
 }
 
-} // namespace
-
-std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(std::function<void(int)> callback)
+bool isOurs(const struct sigaction& action)
 {
-    if (s_owner) {
-        qCWarning(lcMcp, "McpServer::handleTerminationSignals: another server handles the signals");
-        return nullptr;
-    }
-    int fds[2];
-    if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
-        qCWarning(lcMcp, "McpServer::handleTerminationSignals: cannot make the self-pipe");
-        return nullptr;
-    }
-    std::unique_ptr<McpTerminationSignals> self(new McpTerminationSignals);
-    self->m_callback = std::move(callback);
-    s_readFd = fds[0];
-    s_writeFd.store(fds[1]);
-    s_owner = self.get();
+    return (action.sa_flags & SA_SIGINFO) == 0 && action.sa_handler == onTerminationSignal;
+}
 
+// Installs the handler for `signal`, unless the process ignores it. Keeps the
+// disposition it found in `old`.
+bool installUnlessIgnored(int signal, struct sigaction& old)
+{
+    sigaction(signal, nullptr, &old);
+    if ((old.sa_flags & SA_SIGINFO) == 0 && old.sa_handler == SIG_IGN) {
+        return false;
+    }
     struct sigaction action = {};
     action.sa_handler = onTerminationSignal;
     sigemptyset(&action.sa_mask);
     action.sa_flags = SA_RESTART;
-    sigaction(SIGTERM, &action, &s_oldTerm);
-    sigaction(SIGHUP, &action, &s_oldHup);
+    sigaction(signal, &action, nullptr);
+    return true;
+}
 
-    self->m_notifier = new QSocketNotifier(s_readFd, QSocketNotifier::Read);
+// Puts `old` back, unless someone installed another handler since: theirs
+// stays.
+void restoreIfOurs(int signal, bool handled, const struct sigaction& old)
+{
+    if (!handled) {
+        return;
+    }
+    struct sigaction current;
+    sigaction(signal, nullptr, &current);
+    if (isOurs(current)) {
+        sigaction(signal, &old, nullptr);
+    }
+}
+
+} // namespace
+
+std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(QObject* context,
+                                                                      std::function<void(int)> callback)
+{
+    if (s_owner) {
+        qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: another server handles the signals";
+        return nullptr;
+    }
+    if (!context || !QAbstractEventDispatcher::instance(context->thread())) {
+        // The notifier would never fire, and the signals would end nothing.
+        qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: the server's thread has no event"
+                                   << "dispatcher, so create the QCoreApplication first";
+        return nullptr;
+    }
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
+        qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: cannot make the self-pipe";
+        return nullptr;
+    }
+    std::unique_ptr<McpTerminationSignals> self(new McpTerminationSignals);
+    self->m_callback = std::move(callback);
+    self->m_readFd = fds[0];
+    self->m_writeFd = fds[1];
+    s_pid.store(::getpid());
+    s_writeFd.store(fds[1]);
+    s_owner = self.get();
+
+    s_termHandled = installUnlessIgnored(SIGTERM, s_oldTerm);
+    s_hupHandled = installUnlessIgnored(SIGHUP, s_oldHup);
+
+    self->m_notifier = new QSocketNotifier(fds[0], QSocketNotifier::Read, context);
     McpTerminationSignals* raw = self.get();
     QObject::connect(self->m_notifier, &QSocketNotifier::activated, self->m_notifier, [raw] {
         raw->onReadable();
@@ -75,26 +144,45 @@ std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(std::funct
 
 McpTerminationSignals::~McpTerminationSignals()
 {
+    release();
+    delete m_notifier.data();
+    ::close(m_readFd);
+    ::close(m_writeFd);
+}
+
+void McpTerminationSignals::release()
+{
+    if (m_released) {
+        return;
+    }
+    m_released = true;
     // The old dispositions first, so that a signal from here on no longer
-    // reaches a pipe that is about to close.
-    sigaction(SIGTERM, &s_oldTerm, nullptr);
-    sigaction(SIGHUP, &s_oldHup, nullptr);
-    const int writeFd = s_writeFd.exchange(-1);
-    delete m_notifier;
-    ::close(s_readFd);
-    ::close(writeFd);
-    s_readFd = -1;
+    // reaches the pipe.
+    restoreIfOurs(SIGTERM, s_termHandled, s_oldTerm);
+    restoreIfOurs(SIGHUP, s_hupHandled, s_oldHup);
+    s_termHandled = false;
+    s_hupHandled = false;
+    s_writeFd.store(-1);
+    // A handler on another thread may have read the descriptor just before.
+    // Its write is one non-blocking byte, so this wait is short.
+    while (s_handlersRunning.load() != 0) {
+        std::this_thread::yield();
+    }
+    if (m_notifier) {
+        m_notifier->setEnabled(false);
+    }
     s_owner = nullptr;
 }
 
 void McpTerminationSignals::onReadable()
 {
     unsigned char bytes[16];
-    const ssize_t got = ::read(s_readFd, bytes, sizeof bytes);
-    if (got <= 0) {
+    const ssize_t got = ::read(m_readFd, bytes, sizeof bytes);
+    if (got <= 0 || m_released) {
         return;
     }
-    // The first signal ends the server; any after it change nothing.
+    // The first signal ends the server. One after it finds the server
+    // ending already, until the server's finish releases the signals.
     m_callback(bytes[0]);
 }
 

@@ -31,26 +31,41 @@ class McpTransport;
 //     server.setCache(60000, PhosphorMcp::McpServer::CacheScope::Public);
 //     server.addTool(tool, [](PhosphorMcp::McpCall call) { call.finish(...); });
 //     server.handleTerminationSignals();
-//     QObject::connect(&server, &PhosphorMcp::McpServer::finished, &app, &QCoreApplication::quit);
-//     server.start();
+//     using Reason = PhosphorMcp::McpServer::FinishReason;
+//     QObject::connect(&server, &PhosphorMcp::McpServer::finished, &app, [](Reason reason) {
+//         // A failed read or write is an error. The other reasons are ends.
+//         QCoreApplication::exit(reason == Reason::InputFailed || reason == Reason::OutputFailed ? 1 : 0);
+//     });
+//     // A server that does not start never finishes, so the application
+//     // must not wait for it.
+//     if (!server.start())
+//         return 1;
 //     return app.exec();
 //
 // The server answers server/discover, tools/list and tools/call, and does
 // every check of the protocol: the _meta of each request, the version, the
 // client capabilities a tool needs, the arguments against the tool's input
 // schema. It keeps nothing from one request for the next. It offers no
-// resources, prompts, logging or subscriptions, sends no requests to the
-// client, and writes nothing to stdout but protocol messages: its
+// resources, prompts, logging or subscriptions, and sends no requests to the
+// client. It writes nothing to stdout but protocol messages, and its
 // diagnostics go to the logging category "phosphormcp", on stderr.
 //
 // Single-threaded: use it on the thread that owns it. Never destroy it from
-// inside a handler or a cancel callback; deleteLater() is fine.
+// inside a handler or a cancel callback, but deleteLater() is fine.
+// Handlers and cancel callbacks must not throw. The library is built
+// without exceptions, and an exception that leaves a callback is undefined
+// behavior.
+//
+// Destroying a server that runs ends it at once, without finished(). It
+// writes nothing more, runs no cancel callback, and the calls it leaves
+// read isCancelled() true. The descriptors stay open, as they are the
+// caller's.
 class PHOSPHORMCP_EXPORT McpServer : public QObject
 {
     Q_OBJECT
 public:
-    // How long a client may keep the answers of server/discover and
-    // tools/list, and whether one client's copy serves others.
+    // Whether one client's copy of the answers of server/discover and
+    // tools/list may serve other clients (setCache()).
     enum class CacheScope {
         Public,
         Private,
@@ -62,17 +77,22 @@ public:
         EndOfInput,
         // A read of stdin failed.
         InputFailed,
-        // stdout went away, or a write to it failed.
+        // The client closed stdout (EPIPE).
         OutputClosed,
         // SIGTERM, with handleTerminationSignals().
         Terminated,
         // SIGHUP, with handleTerminationSignals().
         HangUp,
+        // A write to stdout failed for another reason than its reader going
+        // away (a full disk, an I/O error). The reason is in a warning.
+        OutputFailed,
     };
     Q_ENUM(FinishReason)
 
-    // How long the server waits, after the end of stdin, for the client to
-    // read the replies already queued.
+    // After the end of stdin, how long the server waits for the client to
+    // read more of the replies already queued. The wait starts again each
+    // time the client reads some, so a slow reader of a large reply gets it
+    // whole, and a client that reads nothing for this long loses the rest.
     static constexpr int DrainTimeoutMs = 2000;
 
     using Handler = std::function<void(McpCall call)>;
@@ -81,8 +101,10 @@ public:
     ~McpServer() override;
     Q_DISABLE_COPY_MOVE(McpServer)
 
-    // The name and version in each result's _meta. The default is the
-    // application's name and version.
+    // The name and version in each result's _meta. By default, or when
+    // empty, the application's name (QCoreApplication sets it to the
+    // executable's name unless the application gives one) and version ("0"
+    // when the application gives none).
     void setServerInfo(const QString& name, const QString& version);
     // The instructions of server/discover. Omitted when empty.
     void setInstructions(const QString& instructions);
@@ -90,51 +112,72 @@ public:
     // is 0 and Private. False, and nothing changed, for a negative ttl.
     bool setCache(qint64 ttlMs, CacheScope scope);
     // The longest request line, without its newline. A longer one is
-    // answered with an Invalid Request error, and dropped.
-    // McpTransport::DefaultMaxLineBytes by default.
+    // answered with an Invalid Request error, and dropped. A value under 1
+    // counts as 1. McpTransport::DefaultMaxLineBytes by
+    // default. Takes effect at once, on a running server too.
     void setMaxLineBytes(qint64 bytes);
     // The high-water mark of the replies that wait for the client to read
     // them. Past it, the server reads no more requests until the client took
-    // half of them. Replies are never dropped.
-    // McpTransport::DefaultMaxPendingWriteBytes (64 MiB) by default.
+    // half of them, and progress notifications are dropped. Replies are
+    // never dropped. A value under 1 counts as 1.
+    // McpTransport::DefaultMaxPendingWriteBytes (64 MiB) by default. Takes
+    // effect at once, on a running server too.
     void setMaxPendingWriteBytes(qint64 bytes);
 
     // Adds a tool, in the order tools/list shows them. Returns false, with
     // the reason in `error` and a warning, for a name that is not 1 to 128
     // of [A-Za-z0-9_.-] or that another tool has, for a schema that the
     // server cannot check arguments against (see the README, "Schemas"), for
-    // a handler that is empty, and after start(): the list stays the same
-    // for the life of the server.
+    // a handler that is empty, and after start(), since the list stays the
+    // same for the life of the server.
     bool addTool(const McpTool& tool, Handler handler, QString* error = nullptr);
+    // The tools added, in the order tools/list shows them.
     [[nodiscard]] QList<McpTool> tools() const;
 
     // SIGTERM and SIGHUP end the server (finished(Terminated) or
     // finished(HangUp)). Signal dispositions are global to the process, so
-    // this is the application's choice. The old dispositions come back when
-    // the server is destroyed. False, with a warning, when another server
-    // handles them, or when the self-pipe cannot be made.
+    // this is the application's choice. A signal that the process ignores
+    // when this runs (nohup ignores SIGHUP) stays ignored. The old
+    // dispositions come back when the server finishes, so a second signal
+    // during a slow teardown has its usual effect, and at the latest when
+    // the server is destroyed. A handler that someone else installed since
+    // stays. Call it after QCoreApplication exists, and before the server
+    // ends.
+    //
+    // True when the server handles the signals, also when it did before.
+    // False, with a warning, when another server handles them, when the
+    // server's thread has no event dispatcher, when the self-pipe cannot be
+    // made, and after the server ended.
     //
     // SIGPIPE is left alone, here and everywhere in the library: an ignored
     // SIGPIPE survives exec, and the programs the application starts would
     // inherit it. The transport keeps a closed stdout from raising it.
     bool handleTerminationSignals();
 
-    // Reads requests on stdin and writes replies on stdout.
-    bool start();
+    // Reads requests on stdin and writes replies on stdout. A server with no
+    // tool starts too, with a warning, and offers no tools capability.
+    [[nodiscard]] bool start();
     // The same on other descriptors, which stay the caller's. One
-    // descriptor may do both. False when the server was started before, or
-    // the transport does not open.
-    bool start(int readFd, int writeFd);
+    // descriptor may do both. False, with a warning, when the server was
+    // started before, when it ended before it started (a signal), and when
+    // the transport does not open. finished() never comes then.
+    [[nodiscard]] bool start(int readFd, int writeFd);
+    // True from start() until the server ends, which is before finished()
+    // when replies still drain.
     [[nodiscard]] bool isRunning() const;
 
-    // The transport while the server runs, else nullptr.
-    [[nodiscard]] McpTransport* transport() const;
+    // The transport, for its read-only state (pendingWriteBytes(),
+    // isReadingPaused()), from start() until finished(), else nullptr. It
+    // stays during the drain after the end of stdin.
+    [[nodiscard]] const McpTransport* transport() const;
 
 Q_SIGNALS:
     // The server ended and reads and writes nothing more. Comes once, from
     // the event loop. Every call still running was cancelled first (its
-    // cancel callback ran). After the end of stdin it comes when the
-    // replies already queued were written, or after DrainTimeoutMs.
+    // cancel callback ran). After the end of stdin or a failed read it
+    // comes when the replies already queued were written, or when the
+    // client read none of them for DrainTimeoutMs. A signal or a closed
+    // output during that wait ends it at once, with its own reason.
     void finished(PhosphorMcp::McpServer::FinishReason reason);
 
 private:
@@ -144,20 +187,26 @@ private:
     std::unique_ptr<Private> d;
 
     void onLine(const QByteArray& line);
-    void handleRequest(const QJsonValue& id, const QString& method, const QJsonObject& params, bool hasParams);
+    void handleRequest(const QJsonValue& id, const QString& method, const QJsonObject& params);
     void handleNotification(const QString& method, const QJsonObject& params);
     void handleDiscover(const QJsonValue& id);
     void handleToolsList(const QJsonValue& id, const QJsonObject& params);
     void handleToolsCall(const QJsonValue& id, const QJsonObject& params);
     // Checks params._meta. Sends the error and returns false when it fails.
-    bool checkMeta(const QJsonValue& id, const QJsonObject& params, bool hasParams);
+    bool checkMeta(const QJsonValue& id, const QJsonObject& params);
 
-    void sendResult(const QJsonValue& id, QJsonObject result);
-    void sendError(const QJsonValue& id, int code, const QString& message, const QJsonValue& data = QJsonValue());
-    void sendMessage(const QJsonObject& message);
+    // Each returns whether the message was queued. An undefined id leaves
+    // the id out of an error, for a request whose id cannot be read.
+    bool sendResult(const QJsonValue& id, QJsonObject result);
+    bool sendError(const QJsonValue& id, int code, const QString& message, const QJsonValue& data = QJsonValue());
+    bool sendMessage(const QJsonObject& message);
 
     void end(FinishReason reason, bool drain);
+    void drainThenFinish(FinishReason reason);
+    void finishSoon(FinishReason reason);
     void emitFinished(FinishReason reason);
+    void cancelCall(quint64 token);
+    void runCancelCallback(quint64 token);
 
     // For McpCall.
     bool callIsValid(quint64 token) const;

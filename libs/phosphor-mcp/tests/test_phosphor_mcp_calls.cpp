@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Calls that answer later: completion out of order, a slow reader of a large
-// reply, cancellation, progress, calls dropped unanswered, request ids, and
-// the end of the input while calls run.
+// reply, back-pressure on a client that reads nothing, nested event loops in
+// handlers and cancel callbacks, cancellation and cancel callbacks that
+// destroy calls, progress, calls dropped unanswered or overwritten by a move,
+// request ids, the end of the input while calls run and the drain of the
+// replies after it, a failed read or write, the destruction of the server
+// with calls held, the shapes of results and their structured content, and
+// the use of a call off the server's thread.
 
 #include "mcptesthelpers.h"
 
@@ -11,6 +16,7 @@
 #include <PhosphorMcp/McpServer.h>
 #include <PhosphorMcp/McpTransport.h>
 
+#include <QDeadlineTimer>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonArray>
@@ -22,9 +28,16 @@
 #include <QTimer>
 
 #include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
+#include <thread>
 #include <type_traits>
+
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 using namespace PhosphorMcp;
 using namespace PhosphorMcpTests;
@@ -34,10 +47,7 @@ static_assert(!std::is_copy_assignable_v<McpCall>);
 static_assert(std::is_nothrow_move_constructible_v<McpCall>);
 static_assert(std::is_nothrow_move_assignable_v<McpCall>);
 
-// Named, not anonymous: the test class's lambdas capture a Fixture, and a
-// type from an anonymous namespace in a member of a class outside it trips
-// -Wsubobject-linkage.
-namespace PhosphorMcpCallsTest {
+namespace {
 
 // A server whose "job" tool keeps each call under the name its "job"
 // argument gives, for the test to answer, and whose "now" tool answers at
@@ -91,6 +101,13 @@ struct Fixture
                    return jobs.count(job) == 1;
                });
     }
+    // Answers a "now" call, so that everything the client sent before it
+    // was handled.
+    bool sync(int id)
+    {
+        return peer.send(callRequest(id, QStringLiteral("now")))
+            && peer.readOne().value(QLatin1StringView("id")) == QJsonValue(id);
+    }
 };
 
 QJsonObject metaWithToken(const QJsonValue& token)
@@ -100,15 +117,46 @@ QJsonObject metaWithToken(const QJsonValue& token)
     return m;
 }
 
-} // namespace PhosphorMcpCallsTest
+QJsonObject errorOf(const QJsonObject& message)
+{
+    return message.value(QLatin1StringView("error")).toObject();
+}
 
-using namespace PhosphorMcpCallsTest;
+// Sets a flag when it is destroyed, to show what a callback owned went.
+struct DestroyFlag
+{
+    explicit DestroyFlag(bool* flag)
+        : m_flag(flag)
+    {
+    }
+    ~DestroyFlag()
+    {
+        *m_flag = true;
+    }
+    Q_DISABLE_COPY_MOVE(DestroyFlag)
+    bool* m_flag;
+};
+
+QJsonObject typed(const char* type)
+{
+    return QJsonObject{{QLatin1StringView("type"), QString::fromLatin1(type)}};
+}
+
+} // namespace
 
 class TestPhosphorMcpCalls : public QObject
 {
     Q_OBJECT
 
 private Q_SLOTS:
+    void init()
+    {
+        // Every warning a test expects, it names with ignoreMessage(). One
+        // more is a failure: a call left unanswered at the end of a test, or
+        // a drain cut short.
+        QTest::failOnWarning();
+    }
+
     void answersInTheOrderTheyFinish()
     {
         Fixture f;
@@ -141,23 +189,26 @@ private Q_SLOTS:
         QVERIFY(f.callJob(1, QStringLiteral("big")));
         const QString big(16 * 1024 * 1024, QLatin1Char('x'));
         QVERIFY(f.jobs.at(QStringLiteral("big")).finish(McpResult::text(big)));
-        McpTransport* transport = f.server->transport();
+        const McpTransport* transport = f.server->transport();
         QVERIFY(transport);
         QVERIFY(transport->pendingWriteBytes() > 8 * 1024 * 1024);
 
         // Nothing read yet: the next call still runs, and timers still fire.
-        QVERIFY(f.peer.send(callRequest(2, QStringLiteral("now"))));
         int ticks = 0;
         QTimer timer;
         connect(&timer, &QTimer::timeout, this, [&] {
             ++ticks;
         });
         timer.start(1);
+        QVERIFY(f.peer.send(callRequest(2, QStringLiteral("now"))));
         QVERIFY(spinUntil([&] {
             return f.nowCalls == 1;
         }));
-        const qint64 readWhenAnswered = f.peer.bytesRead();
-        QCOMPARE(readWhenAnswered, 0);
+        spinFor(50);
+        // Sampled while the client still reads nothing, and most of the
+        // reply waits in the queue.
+        QVERIFY2(ticks > 5, qPrintable(QString::number(ticks)));
+        QVERIFY(transport->pendingWriteBytes() > 8 * 1024 * 1024);
 
         QList<QJsonObject> replies;
         QVERIFY(spinUntil(
@@ -169,8 +220,7 @@ private Q_SLOTS:
                 }
                 return false;
             },
-            60000));
-        QVERIFY(ticks > 5);
+            20000));
         QCOMPARE(replies.size(), 2);
         // Finished first, sent first: the large reply, then the small one
         // that waited behind it.
@@ -183,7 +233,7 @@ private Q_SLOTS:
     {
         // Many calls with large results, and a client that reads nothing.
         // Past the mark the server stops reading requests, so its queue stays
-        // near the mark; when the client reads, the rest are read and
+        // near the mark. When the client reads, the rest are read and
         // answered, each once and in order.
         constexpr qint64 Mark = 4 * 1024 * 1024;
         constexpr qint64 Blob = 1024 * 1024;
@@ -214,7 +264,7 @@ private Q_SLOTS:
         QCOMPARE(f.blobCalls, handledWhilePaused);
 
         // The client reads: everything is answered.
-        const QList<QJsonObject> replies = f.peer.read(Calls + 1, 30000);
+        const QList<QJsonObject> replies = f.peer.read(Calls + 1, 20000);
         QCOMPARE(replies.size(), Calls + 1);
         for (int i = 0; i < Calls; ++i) {
             QCOMPARE(replies.at(i).value(QLatin1StringView("id")), QJsonValue(i + 1));
@@ -225,6 +275,41 @@ private Q_SLOTS:
         QCOMPARE(f.nowCalls, 1);
         QVERIFY(f.peer.readFor(100).isEmpty());
         QVERIFY(!f.server->transport()->isReadingPaused());
+    }
+
+    void progressIsDroppedWhileTheClientReadsNothing()
+    {
+        // Progress is a hint, and is not queued past the high-water mark.
+        constexpr qint64 Mark = 64 * 1024;
+        Fixture f;
+        f.server->setMaxPendingWriteBytes(Mark);
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a"), metaWithToken(QStringLiteral("tok"))));
+        QVERIFY(f.callJob(2, QStringLiteral("big")));
+        QVERIFY(f.jobs.at(QStringLiteral("big")).finish(McpResult::text(QString(4 * 1024 * 1024, QLatin1Char('x')))));
+        const McpTransport* transport = f.server->transport();
+        const qint64 queued = transport->pendingWriteBytes();
+        // The precondition: the reply waits for the client, past the mark.
+        QVERIFY2(queued > Mark, qPrintable(QString::number(queued)));
+
+        McpCall& call = f.jobs.at(QStringLiteral("a"));
+        QVERIFY(!call.progress(1));
+        QCOMPARE(transport->pendingWriteBytes(), queued);
+
+        // The client reads. The dropped value was never sent, so it may go
+        // now.
+        const QJsonObject reply = f.peer.readOne(10000);
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(2));
+        QVERIFY(spinUntil([&] {
+            return transport->pendingWriteBytes() == 0;
+        }));
+        QVERIFY(call.progress(1));
+        const QJsonObject note = f.peer.readOne();
+        QCOMPARE(note.value(QLatin1StringView("method")).toString(), QStringLiteral("notifications/progress"));
+        QCOMPARE(note.value(QLatin1StringView("params")).toObject().value(QLatin1StringView("progress")),
+                 QJsonValue(1));
+        QVERIFY(call.finish(McpResult::text(QStringLiteral("done"))));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(1));
     }
 
     void nestedEventLoopInAHandler_data()
@@ -370,7 +455,7 @@ private Q_SLOTS:
     {
         Fixture f;
         QVERIFY(f.start());
-        QVERIFY(f.callJob(5, QStringLiteral("a")));
+        QVERIFY(f.callJob(5, QStringLiteral("a"), metaWithToken(QStringLiteral("tok"))));
         McpCall& call = f.jobs.at(QStringLiteral("a"));
         int cancelled = 0;
         call.onCancelled([&] {
@@ -378,6 +463,10 @@ private Q_SLOTS:
         });
         QVERIFY(call.isValid());
         QVERIFY(!call.isCancelled());
+        // The request has a token, so progress goes out while it runs.
+        QVERIFY(call.progress(1));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("method")).toString(),
+                 QStringLiteral("notifications/progress"));
 
         QVERIFY(f.peer.send(cancelNotification(5)));
         QVERIFY(spinUntil([&] {
@@ -388,7 +477,7 @@ private Q_SLOTS:
         // Nothing more for the request: no reply, no progress, ever.
         QVERIFY(!call.finish(McpResult::text(QStringLiteral("late"))));
         QVERIFY(!call.fail(QStringLiteral("late")));
-        QVERIFY(!call.progress(1));
+        QVERIFY(!call.progress(2));
         QVERIFY(f.peer.readFor(150).isEmpty());
 
         // A callback set after the cancellation runs at once.
@@ -397,39 +486,87 @@ private Q_SLOTS:
             ++late;
         });
         QCOMPARE(late, 1);
-        // A second cancel of the same request changes nothing.
+        // A second cancel of the same request changes nothing. The call
+        // after it is answered once the server handled the cancel.
         QVERIFY(f.peer.send(cancelNotification(5)));
-        spinFor(50);
+        QVERIFY(f.sync(6));
         QCOMPARE(cancelled, 1);
+        QCOMPARE(late, 1);
+        QVERIFY(call.isCancelled());
 
-        // Its id is free again.
+        // Its id is free again, for a call that answers as any other.
         f.jobs.clear();
         QVERIFY(f.callJob(5, QStringLiteral("again")));
         QVERIFY(f.jobs.at(QStringLiteral("again")).finish(McpResult::text(QStringLiteral("ok"))));
-        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(5));
+        const QJsonObject reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(5));
+        QVERIFY(!reply.contains(QLatin1StringView("error")));
+        QCOMPARE(firstText(reply), QStringLiteral("ok"));
+    }
+
+    void cancelReachesTheRunningCallOfAReusedId()
+    {
+        // The cancelled call is still held, and a new call takes its id. A
+        // cancel of that id is for the new call.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(5, QStringLiteral("old")));
+        int oldRuns = 0;
+        f.jobs.at(QStringLiteral("old")).onCancelled([&] {
+            ++oldRuns;
+        });
+        QVERIFY(f.peer.send(cancelNotification(5)));
+        QVERIFY(spinUntil([&] {
+            return oldRuns == 1;
+        }));
+
+        QVERIFY(f.callJob(5, QStringLiteral("new")));
+        int newRuns = 0;
+        f.jobs.at(QStringLiteral("new")).onCancelled([&] {
+            ++newRuns;
+        });
+        QVERIFY(f.peer.send(cancelNotification(5)));
+        QVERIFY(f.sync(6));
+        QCOMPARE(newRuns, 1);
+        QCOMPARE(oldRuns, 1);
+        QVERIFY(f.jobs.at(QStringLiteral("old")).isCancelled());
+        QVERIFY(f.jobs.at(QStringLiteral("new")).isCancelled());
     }
 
     void cancelsThatMatchNothingAreIgnored()
     {
         Fixture f;
         QVERIFY(f.start());
-        QVERIFY(f.callJob(QStringLiteral("s1"), QStringLiteral("a")));
+        // A string id, and a number id with the same text as another string.
+        QVERIFY(f.callJob(QStringLiteral("1"), QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
         int cancelled = 0;
-        f.jobs.at(QStringLiteral("a")).onCancelled([&] {
-            ++cancelled;
-        });
-        // Another id, the same id as a number, no id, and a call that
-        // already answered.
+        for (const char* job : {"a", "b"}) {
+            f.jobs.at(QString::fromLatin1(job)).onCancelled([&] {
+                ++cancelled;
+            });
+        }
+        // Another id, the number 1 for the string "1", the string "2" for the
+        // number 2, a requestId that is no id, no requestId, params that are
+        // not an object, and a call that already answered.
         QVERIFY(f.peer.send(cancelNotification(99)));
-        QVERIFY(f.peer.send(cancelNotification(QStringLiteral("s2"))));
+        QVERIFY(f.peer.send(cancelNotification(1)));
+        QVERIFY(f.peer.send(cancelNotification(QStringLiteral("2"))));
+        QVERIFY(f.peer.send(cancelNotification(QJsonObject())));
+        QVERIFY(f.peer.send(cancelNotification(1.5)));
         QVERIFY(f.peer.send(notification(QStringLiteral("notifications/cancelled"))));
-        QVERIFY(f.peer.send(callRequest(7, QStringLiteral("now"))));
-        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(7));
+        QJsonObject arrayParams = notification(QStringLiteral("notifications/cancelled"));
+        arrayParams.insert(QLatin1StringView("params"), QJsonArray{QStringLiteral("1")});
+        QVERIFY(f.peer.send(arrayParams));
+        QVERIFY(f.sync(7));
         QVERIFY(f.peer.send(cancelNotification(7)));
+        QVERIFY(f.sync(8));
         QVERIFY(f.peer.readFor(100).isEmpty());
         QCOMPARE(cancelled, 0);
         QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("ok"))));
-        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(QStringLiteral("s1")));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(QStringLiteral("1")));
+        QVERIFY(f.jobs.at(QStringLiteral("b")).finish(McpResult::text(QStringLiteral("ok"))));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(2));
     }
 
     void cancelCallbackMayDestroyTheCall()
@@ -446,6 +583,118 @@ private Q_SLOTS:
         QVERIFY(spinUntil([&] {
             return ran;
         }));
+        QVERIFY(f.jobs.empty());
+        QVERIFY(f.peer.readFor(100).isEmpty());
+    }
+
+    void callbackThatRunsAtOnceMayDestroyTheCall()
+    {
+        // On a cancelled call the callback runs inside onCancelled(), which
+        // must not touch the call after it.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.peer.send(cancelNotification(1)));
+        QVERIFY(spinUntil([&] {
+            return f.jobs.at(QStringLiteral("a")).isCancelled();
+        }));
+        bool ran = false;
+        f.jobs.at(QStringLiteral("a")).onCancelled([&] {
+            ran = true;
+            f.jobs.erase(QStringLiteral("a"));
+        });
+        QVERIFY(ran);
+        QVERIFY(f.jobs.empty());
+        QVERIFY(f.peer.readFor(100).isEmpty());
+    }
+
+    void finishInsideACancelCallback()
+    {
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        std::optional<bool> finished;
+        f.jobs.at(QStringLiteral("a")).onCancelled([&] {
+            finished = f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("late")));
+        });
+        QVERIFY(f.peer.send(cancelNotification(1)));
+        QVERIFY(spinUntil([&] {
+            return finished.has_value();
+        }));
+        QVERIFY(!*finished);
+        QVERIFY(f.peer.readFor(100).isEmpty());
+    }
+
+    void onCancelledTwice()
+    {
+        // The second callback replaces the first, which goes without running.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        McpCall& call = f.jobs.at(QStringLiteral("a"));
+        bool firstGone = false;
+        int first = 0;
+        int second = 0;
+        call.onCancelled([&first, guard = std::make_shared<DestroyFlag>(&firstGone)] {
+            ++first;
+        });
+        QVERIFY(!firstGone);
+        call.onCancelled([&] {
+            ++second;
+        });
+        QVERIFY(firstGone);
+        // An empty callback changes nothing.
+        call.onCancelled(std::function<void()>());
+        QVERIFY(f.peer.send(cancelNotification(1)));
+        QVERIFY(spinUntil([&] {
+            return second == 1;
+        }));
+        QCOMPARE(first, 0);
+
+        // On an answered call it is dropped at once, and never runs.
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
+        QVERIFY(f.jobs.at(QStringLiteral("b")).finish(McpResult::text(QStringLiteral("b"))));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(2));
+        bool answeredGone = false;
+        int answeredRuns = 0;
+        f.jobs.at(QStringLiteral("b"))
+            .onCancelled([&answeredRuns, guard = std::make_shared<DestroyFlag>(&answeredGone)] {
+                ++answeredRuns;
+            });
+        QVERIFY(answeredGone);
+        QCOMPARE(answeredRuns, 0);
+    }
+
+    void endMarksEveryCallCancelledBeforeAnyCallbackRuns()
+    {
+        // The first callback to run destroys every call, its own included.
+        // It finds the others cancelled already, and theirs never run.
+        Fixture f;
+        QSignalSpy finished(f.server.get(), &McpServer::finished);
+        QVERIFY(f.start());
+        const QStringList names{QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")};
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            QVERIFY(f.callJob(int(i + 1), names.at(i)));
+        }
+        int runs = 0;
+        bool othersCancelled = true;
+        for (const QString& name : names) {
+            f.jobs.at(name).onCancelled([&, name] {
+                ++runs;
+                for (const QString& other : names) {
+                    if (other != name && !f.jobs.at(other).isCancelled()) {
+                        othersCancelled = false;
+                    }
+                }
+                f.jobs.clear();
+            });
+        }
+        f.peer.closeWrite();
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QCOMPARE(runs, 1);
+        QVERIFY(othersCancelled);
         QVERIFY(f.jobs.empty());
         QVERIFY(f.peer.readFor(100).isEmpty());
     }
@@ -468,13 +717,17 @@ private Q_SLOTS:
                               {QLatin1StringView("total"), 10},
                               {QLatin1StringView("message"), QStringLiteral("first line")}}));
 
-        // It must grow.
+        // It must grow, and be finite, and so must the total.
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("progress must grow")));
         QVERIFY(!call.progress(1));
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("progress must grow")));
         QVERIFY(!call.progress(0.5));
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("not a finite number")));
         QVERIFY(!call.progress(std::nan("")));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("not a finite number")));
+        QVERIFY(!call.progress(2, std::numeric_limits<double>::infinity()));
+        // The refused 2 was not sent, so 1.5 still grows, and is the next
+        // notification.
         QVERIFY(call.progress(1.5));
         note = f.peer.readOne();
         QCOMPARE(note.value(QLatin1StringView("params")).toObject(),
@@ -504,6 +757,10 @@ private Q_SLOTS:
         const QJsonObject note = f.peer.readOne();
         QCOMPARE(note.value(QLatin1StringView("params")).toObject().value(QLatin1StringView("progressToken")),
                  QJsonValue(42));
+
+        QVERIFY(f.jobs.at(QStringLiteral("none")).finish(McpResult::text(QStringLiteral("none"))));
+        QVERIFY(f.jobs.at(QStringLiteral("int")).finish(McpResult::text(QStringLiteral("int"))));
+        QCOMPARE(f.peer.read(2).size(), 2);
     }
 
     void droppedCallsAnswerWithAnError()
@@ -521,23 +778,105 @@ private Q_SLOTS:
 
         // Overwritten by a move: the call it held is abandoned.
         QVERIFY(f.callJob(2, QStringLiteral("a")));
-        QVERIFY(f.callJob(3, QStringLiteral("b")));
+        QVERIFY(f.callJob(3, QStringLiteral("b"), metaWithToken(QStringLiteral("tok"))));
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dropped a call")));
         f.jobs.at(QStringLiteral("a")) = std::move(f.jobs.at(QStringLiteral("b")));
         reply = f.peer.readOne();
         QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(2));
         QCOMPARE(errorCode(reply), ErrorCode::InternalError);
 
-        // The moved-from call holds nothing, and its destruction sends
-        // nothing.
-        QVERIFY(!f.jobs.at(QStringLiteral("b")).isValid());
+        // The moved-from call holds nothing of either call, and its
+        // destruction sends nothing.
+        const McpCall& movedFrom = f.jobs.at(QStringLiteral("b"));
+        QVERIFY(!movedFrom.isValid());
+        QVERIFY(!movedFrom.isCancelled());
+        QVERIFY(movedFrom.toolName().isEmpty());
+        QVERIFY(movedFrom.arguments().isEmpty());
+        QVERIFY(movedFrom.requestId().isNull());
+        QVERIFY(movedFrom.requestMeta().isEmpty());
+        QVERIFY(!movedFrom.hasProgressToken());
         QVERIFY(!f.jobs.at(QStringLiteral("b")).finish(McpResult::text(QStringLiteral("x"))));
         f.jobs.erase(QStringLiteral("b"));
         QVERIFY(f.peer.readFor(100).isEmpty());
+        const McpCall& moved = f.jobs.at(QStringLiteral("a"));
+        QCOMPARE(moved.requestId(), QJsonValue(3));
+        QVERIFY(moved.hasProgressToken());
         QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("b's answer"))));
         reply = f.peer.readOne();
         QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(3));
         QCOMPARE(firstText(reply), QStringLiteral("b's answer"));
+    }
+
+    void moveAssignOverACallWhoseCallbackOwnsTheSource()
+    {
+        // The old call's cancel callback owns the call moved in. The move
+        // reads it before the old call is abandoned, which destroys it.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
+        auto target = std::make_shared<McpCall>(std::move(f.jobs.at(QStringLiteral("a"))));
+        auto source = std::make_shared<McpCall>(std::move(f.jobs.at(QStringLiteral("b"))));
+        f.jobs.clear();
+        McpCall* sourceCall = source.get();
+        target->onCancelled([source] { });
+        source.reset();
+
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dropped a call")));
+        *target = std::move(*sourceCall);
+        QJsonObject reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(1));
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+        QCOMPARE(target->requestId(), QJsonValue(2));
+        QVERIFY(target->finish(McpResult::text(QStringLiteral("b"))));
+        reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(2));
+        QCOMPARE(firstText(reply), QStringLiteral("b"));
+    }
+
+    void moveAssignOverACallWhoseCallbackOwnsTheTarget()
+    {
+        // The old call's cancel callback owns the object assigned to, so
+        // abandoning the old call destroys it, and the call moved in with it.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
+        auto target = std::make_shared<McpCall>(std::move(f.jobs.at(QStringLiteral("a"))));
+        target->onCancelled([target] { });
+        McpCall* targetCall = target.get();
+        target.reset();
+
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dropped a call")));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dropped a call")));
+        *targetCall = std::move(f.jobs.at(QStringLiteral("b")));
+        const QList<QJsonObject> replies = f.peer.read(2);
+        QCOMPARE(replies.size(), 2);
+        QCOMPARE(replies.at(0).value(QLatin1StringView("id")), QJsonValue(1));
+        QCOMPARE(errorCode(replies.at(0)), ErrorCode::InternalError);
+        QCOMPARE(replies.at(1).value(QLatin1StringView("id")), QJsonValue(2));
+        QCOMPARE(errorCode(replies.at(1)), ErrorCode::InternalError);
+    }
+
+    void answerBeforeTheCallsItsCallbackOwned()
+    {
+        // The answered call's cancel callback owns another call. That one is
+        // destroyed after the answer goes out, not inside the server's table.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
+        auto owned = std::make_shared<McpCall>(std::move(f.jobs.at(QStringLiteral("b"))));
+        f.jobs.at(QStringLiteral("a")).onCancelled([owned] { });
+        owned.reset();
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dropped a call")));
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("a"))));
+        const QList<QJsonObject> replies = f.peer.read(2);
+        QCOMPARE(replies.size(), 2);
+        QCOMPARE(replies.at(0).value(QLatin1StringView("id")), QJsonValue(1));
+        QCOMPARE(firstText(replies.at(0)), QStringLiteral("a"));
+        QCOMPARE(replies.at(1).value(QLatin1StringView("id")), QJsonValue(2));
+        QCOMPARE(errorCode(replies.at(1)), ErrorCode::InternalError);
     }
 
     void oneAnswerOnly()
@@ -548,11 +887,32 @@ private Q_SLOTS:
         McpCall& call = f.jobs.at(QStringLiteral("a"));
         QVERIFY(call.finish(McpResult::text(QStringLiteral("first"))));
         QVERIFY(!call.isValid());
+        QVERIFY(!call.isCancelled());
         QVERIFY(!call.finish(McpResult::text(QStringLiteral("second"))));
         QVERIFY(!call.fail(QStringLiteral("third")));
         QCOMPARE(f.peer.readFor(150).size(), 1);
         QVERIFY(!McpCall().finish(McpResult()));
         QVERIFY(!McpCall().isValid());
+        QVERIFY(!McpCall().isCancelled());
+    }
+
+    void finishIsTrueWhenQueuedNotWhenRead()
+    {
+        // The client reads nothing more. The first answer is queued, and its
+        // write then fails: true said only that it was queued. After that
+        // failure nothing more is queued.
+        Fixture f;
+        QSignalSpy finished(f.server.get(), &McpServer::finished);
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("b")));
+        ::shutdown(f.peer.clientFd(), SHUT_RD);
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("a"))));
+        QVERIFY(!f.jobs.at(QStringLiteral("b")).finish(McpResult::text(QStringLiteral("b"))));
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::OutputClosed);
     }
 
     void requestIdsInFlight()
@@ -592,8 +952,13 @@ private Q_SLOTS:
             return finished.count() == 1;
         }));
         QCOMPARE(cancelled, 1);
-        QVERIFY(!f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QStringLiteral("late"))));
+        McpCall& call = f.jobs.at(QStringLiteral("a"));
+        QVERIFY(!call.finish(McpResult::text(QStringLiteral("late"))));
         QVERIFY(f.peer.readFor(100).isEmpty());
+        // It stays cancelled, after the finish and after the server.
+        QVERIFY(call.isCancelled());
+        f.server.reset();
+        QVERIFY(call.isCancelled());
     }
 
     void endOfInputWaitsForQueuedReplies()
@@ -604,6 +969,7 @@ private Q_SLOTS:
         QVERIFY(f.callJob(1, QStringLiteral("a")));
         const QString reply(4 * 1024 * 1024, QLatin1Char('r'));
         QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(reply)));
+        // The precondition: the reply waits for the client.
         QVERIFY(f.server->transport()->pendingWriteBytes() > 0);
         f.peer.closeWrite();
         // The client has not read: the server waits for it.
@@ -625,6 +991,8 @@ private Q_SLOTS:
         QVERIFY(f.start());
         QVERIFY(f.callJob(1, QStringLiteral("a")));
         QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QString(4 * 1024 * 1024, QLatin1Char('r')))));
+        QVERIFY(f.server->transport()->pendingWriteBytes() > 0);
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("read none of its replies")));
         f.peer.closeWrite();
         QElapsedTimer elapsed;
         elapsed.start();
@@ -634,6 +1002,85 @@ private Q_SLOTS:
             },
             McpServer::DrainTimeoutMs + 3000));
         QVERIFY(elapsed.elapsed() >= McpServer::DrainTimeoutMs - 100);
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::EndOfInput);
+    }
+
+    void drainWaitsForASlowReader()
+    {
+        // A client that reads 64 KiB each 50 ms takes longer than
+        // DrainTimeoutMs for the whole reply, but never stops reading for
+        // that long: it gets the reply whole.
+        Fixture f;
+        QSignalSpy finished(f.server.get(), &McpServer::finished);
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        const QString reply(6 * 1024 * 1024, QLatin1Char('r'));
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(reply)));
+        QVERIFY(f.server->transport()->pendingWriteBytes() > 0);
+        f.peer.closeWrite();
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const QDeadlineTimer deadline(30000);
+        while (finished.count() == 0 && !deadline.hasExpired()) {
+            f.peer.pump(64 * 1024);
+            spinFor(50);
+        }
+        // The precondition: the reading took longer than the timeout.
+        QVERIFY2(elapsed.elapsed() > McpServer::DrainTimeoutMs, qPrintable(QString::number(elapsed.elapsed())));
+        QCOMPARE(finished.count(), 1);
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::EndOfInput);
+        const QList<QJsonObject> replies = f.peer.read(1, 5000);
+        QCOMPARE(replies.size(), 1);
+        QCOMPARE(firstText(replies.first()).size(), reply.size());
+    }
+
+    void outputClosedDuringTheDrain()
+    {
+        // The client goes away while the replies drain: the server ends at
+        // once, for that reason.
+        Fixture f;
+        QSignalSpy finished(f.server.get(), &McpServer::finished);
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(QString(4 * 1024 * 1024, QLatin1Char('r')))));
+        QVERIFY(f.server->transport()->pendingWriteBytes() > 0);
+        f.peer.closeWrite();
+        spinFor(100);
+        QCOMPARE(finished.count(), 0);
+        f.peer.closeClient();
+        QElapsedTimer elapsed;
+        elapsed.start();
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QVERIFY(elapsed.elapsed() < McpServer::DrainTimeoutMs);
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::OutputClosed);
+    }
+
+    void inputFailedDrainsTheReplies()
+    {
+        // A failed read leaves stdout as it was: the replies already queued
+        // still go out.
+        Fixture f;
+        Peer output;
+        QSignalSpy finished(f.server.get(), &McpServer::finished);
+        QVERIFY(f.server->start(f.peer.serverFd(), output.serverFd()));
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        const QString reply(4 * 1024 * 1024, QLatin1Char('r'));
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(reply)));
+        QVERIFY(f.server->transport()->pendingWriteBytes() > 0);
+        // The client's end of the input closes with a byte it never read, so
+        // the server's next read fails with ECONNRESET.
+        QCOMPARE(::write(f.peer.serverFd(), "x", 1), 1);
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("reading the input failed")));
+        f.peer.closeClient();
+        const QList<QJsonObject> replies = output.read(1, 10000);
+        QCOMPARE(replies.size(), 1);
+        QCOMPARE(firstText(replies.first()).size(), reply.size());
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::InputFailed);
     }
 
     void callsOutliveTheServer()
@@ -641,6 +1088,8 @@ private Q_SLOTS:
         Fixture f;
         QVERIFY(f.start());
         QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QVERIFY(f.callJob(2, QStringLiteral("answered")));
+        QVERIFY(f.jobs.at(QStringLiteral("answered")).finish(McpResult::text(QStringLiteral("done"))));
         int cancelled = 0;
         f.jobs.at(QStringLiteral("a")).onCancelled([&] {
             ++cancelled;
@@ -648,6 +1097,10 @@ private Q_SLOTS:
         f.server.reset();
         McpCall& call = f.jobs.at(QStringLiteral("a"));
         QVERIFY(!call.isValid());
+        // The server went while the call ran: it reads cancelled, though no
+        // callback ran. An answered call does not.
+        QVERIFY(call.isCancelled());
+        QVERIFY(!f.jobs.at(QStringLiteral("answered")).isCancelled());
         QVERIFY(!call.finish(McpResult::text(QStringLiteral("late"))));
         QVERIFY(!call.progress(1));
         QCOMPARE(cancelled, 0);
@@ -663,12 +1116,261 @@ private Q_SLOTS:
         QVERIFY(f.callJob(1, QStringLiteral("a")));
         auto owned = std::make_shared<McpCall>(std::move(f.jobs.at(QStringLiteral("a"))));
         f.jobs.clear();
-        owned->onCancelled([owned] { });
+        bool callbackGone = false;
+        owned->onCancelled([owned, guard = std::make_shared<DestroyFlag>(&callbackGone)] { });
         McpCall* raw = owned.get();
         owned.reset();
         QVERIFY(raw->isValid());
         f.server.reset();
+        // The callback went with the server, and the call it owned with it.
+        QVERIFY(callbackGone);
+    }
+
+    void serverDestroyedWithAHandlerThatOwnsACall()
+    {
+        // A handler that keeps its call in its own captures. The handler
+        // goes in the server's destruction, and the call's destructor looks
+        // the call up while the server's state is whole.
+        Fixture f;
+        bool handlerGone = false;
+        std::optional<McpCall>* held = nullptr;
+        {
+            auto slot = std::make_shared<std::optional<McpCall>>();
+            held = slot.get();
+            QVERIFY(f.server->addTool(McpTool(QStringLiteral("hold")),
+                                      [slot, guard = std::make_shared<DestroyFlag>(&handlerGone)](McpCall call) {
+                                          slot->emplace(std::move(call));
+                                      }));
+        }
+        QVERIFY(f.start());
+        QVERIFY(f.peer.send(callRequest(1, QStringLiteral("hold"))));
+        QVERIFY(spinUntil([&] {
+            return held->has_value();
+        }));
+        QVERIFY((*held)->isValid());
+        f.server.reset();
+        QVERIFY(handlerGone);
+    }
+
+    void contentAndResultShapes()
+    {
+        const McpContent text = McpContent::text(QStringLiteral("hi"));
+        QCOMPARE(text.type(), McpContent::Type::Text);
+        QCOMPARE(text.text(), QStringLiteral("hi"));
+        QVERIFY(text.bytes().isEmpty());
+        QVERIFY(text.mimeType().isEmpty());
+        QCOMPARE(text.toJson(),
+                 (QJsonObject{{QLatin1StringView("type"), QStringLiteral("text")},
+                              {QLatin1StringView("text"), QStringLiteral("hi")}}));
+
+        const QByteArray png("\x89PNG\r\n", 6);
+        const McpContent image = McpContent::image(png, QStringLiteral("image/png"));
+        QCOMPARE(image.type(), McpContent::Type::Image);
+        QCOMPARE(image.bytes(), png);
+        QCOMPARE(image.mimeType(), QStringLiteral("image/png"));
+        QVERIFY(image.text().isEmpty());
+        QCOMPARE(image.toJson(),
+                 (QJsonObject{{QLatin1StringView("type"), QStringLiteral("image")},
+                              {QLatin1StringView("data"), QString::fromLatin1(png.toBase64())},
+                              {QLatin1StringView("mimeType"), QStringLiteral("image/png")}}));
+
+        const QByteArray wav("RIFF", 4);
+        const McpContent audio = McpContent::audio(wav, QStringLiteral("audio/wav"));
+        QCOMPARE(audio.type(), McpContent::Type::Audio);
+        QCOMPARE(audio.toJson(),
+                 (QJsonObject{{QLatin1StringView("type"), QStringLiteral("audio")},
+                              {QLatin1StringView("data"), QString::fromLatin1(wav.toBase64())},
+                              {QLatin1StringView("mimeType"), QStringLiteral("audio/wav")}}));
+
+        QJsonObject link = typed("resource_link");
+        link.insert(QLatin1StringView("uri"), QStringLiteral("file:///tmp/x"));
+        link.insert(QLatin1StringView("name"), QStringLiteral("x"));
+        const McpContent raw = McpContent::fromJson(link);
+        QCOMPARE(raw.type(), McpContent::Type::Json);
+        QCOMPARE(raw.toJson(), link);
+
+        McpResult result;
+        result.addText(QStringLiteral("hi")).addImage(png, QStringLiteral("image/png"));
+        result.addAudio(wav, QStringLiteral("audio/wav")).addContent(raw);
+        // Blocks a client would refuse are not added.
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("needs bytes and a MIME type")));
+        result.addImage(QByteArray(), QStringLiteral("image/png"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("needs bytes and a MIME type")));
+        result.addAudio(wav, QString());
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("needs a string \"type\"")));
+        result.addContent(McpContent::fromJson(QJsonObject{{QLatin1StringView("uri"), QStringLiteral("x")}}));
+        QCOMPARE(result.content().size(), 4);
+        QCOMPARE(result.content().at(1).type(), McpContent::Type::Image);
+        QVERIFY(!result.hasStructuredContent());
+        QVERIFY(result.structuredContent().isUndefined());
+        QVERIFY(!result.isError());
+        const QJsonObject json = result.toJson();
+        QCOMPARE(json.value(QLatin1StringView("content")).toArray(),
+                 (QJsonArray{text.toJson(), image.toJson(), audio.toJson(), link}));
+        QVERIFY(!json.contains(QLatin1StringView("structuredContent")));
+        QVERIFY(!json.contains(QLatin1StringView("isError")));
+
+        // Structured content of any JSON type, with its compact text last.
+        const McpResult list = McpResult::structured(QJsonArray{1, 2});
+        QVERIFY(list.hasStructuredContent());
+        QCOMPARE(list.structuredContent(), QJsonValue(QJsonArray{1, 2}));
+        QCOMPARE(list.toJson().value(QLatin1StringView("structuredContent")), QJsonValue(QJsonArray{1, 2}));
+        QCOMPARE(list.toJson()
+                     .value(QLatin1StringView("content"))
+                     .toArray()
+                     .last()
+                     .toObject()
+                     .value(QLatin1StringView("text")),
+                 QJsonValue(QStringLiteral("[1,2]")));
+        QCOMPARE(McpResult::structured(QJsonValue(3)).toJson().value(QLatin1StringView("content")).toArray(),
+                 (QJsonArray{McpContent::text(QStringLiteral("3")).toJson()}));
+        // An object, as most tools give.
+        McpResult object = McpResult::structured(QJsonObject{{QLatin1StringView("n"), 1}});
+        QCOMPARE(object.structuredContent(), QJsonValue(QJsonObject{{QLatin1StringView("n"), 1}}));
+        object.setStructuredContent(QJsonValue(QJsonValue::Undefined));
+        QVERIFY(!object.hasStructuredContent());
+        QVERIFY(McpResult::error(QStringLiteral("no")).toJson().value(QLatin1StringView("isError")).toBool());
+    }
+
+    void structuredContentAgainstAnOutputSchema()
+    {
+        Fixture f;
+        // Any root type for an output schema.
+        const QJsonObject integers{
+            {QLatin1StringView("type"), QStringLiteral("array")},
+            {QLatin1StringView("items"), typed("integer")},
+        };
+        QString error;
+        QVERIFY2(f.server->addTool(
+                     McpTool(QStringLiteral("list")).setInputSchema(typed("object")).setOutputSchema(integers),
+                     [](McpCall call) {
+                         const QJsonValue value = call.arguments().value(QLatin1StringView("value"));
+                         call.finish(McpResult::structured(value));
+                     },
+                     &error),
+                 qPrintable(error));
+        QJsonObject counted = typed("object");
+        counted.insert(QLatin1StringView("properties"), QJsonObject{{QLatin1StringView("count"), typed("number")}});
+        QVERIFY(f.server->addTool(McpTool(QStringLiteral("count")).setOutputSchema(counted), [&f](McpCall call) {
+            f.jobs.insert_or_assign(QStringLiteral("count"), std::move(call));
+        }));
+        QVERIFY(f.server->addTool(McpTool(QStringLiteral("free")), [&f](McpCall call) {
+            f.jobs.insert_or_assign(QStringLiteral("free"), std::move(call));
+        }));
+        QVERIFY(f.start());
+
+        const auto callList = [&](int id, const QJsonValue& value) {
+            return f.peer.send(
+                       callRequest(id, QStringLiteral("list"), QJsonObject{{QLatin1StringView("value"), value}}))
+                ? f.peer.readOne()
+                : QJsonObject();
+        };
+        QJsonObject reply = callList(1, QJsonArray{1, 2});
+        QCOMPARE(resultOf(reply).value(QLatin1StringView("structuredContent")), QJsonValue(QJsonArray{1, 2}));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("does not match its output schema")));
+        reply = callList(2, QJsonArray{QStringLiteral("x")});
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+
+        const auto callCount = [&](int id) {
+            return f.peer.send(callRequest(id, QStringLiteral("count"))) && spinUntil([&] {
+                       return f.jobs.count(QStringLiteral("count")) == 1;
+                   });
+        };
+        // A failed result is checked too when it has structured content.
+        QVERIFY(callCount(3));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("does not match its output schema")));
+        QVERIFY(!f.jobs.at(QStringLiteral("count"))
+                     .finish(McpResult::error(QStringLiteral("bad"))
+                                 .setStructuredContent(QJsonObject{{QLatin1StringView("count"), true}})));
+        reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(3));
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+        f.jobs.erase(QStringLiteral("count"));
+        // A failed result without structured content need not have it.
+        QVERIFY(callCount(4));
+        QVERIFY(f.jobs.at(QStringLiteral("count")).fail(QStringLiteral("no count")));
+        reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(4));
+        QVERIFY(resultOf(reply).value(QLatin1StringView("isError")).toBool());
+        f.jobs.erase(QStringLiteral("count"));
+
+        // A number that is not finite matches "number" for the validator,
+        // and would go out as null: refused, with its place.
+        QVERIFY(callCount(5));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("does not match its output schema")));
+        QVERIFY(!f.jobs.at(QStringLiteral("count"))
+                     .finish(McpResult::structured(
+                         QJsonObject{{QLatin1StringView("count"), std::numeric_limits<double>::infinity()}})));
+        reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(5));
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+        const QJsonArray errors =
+            errorOf(reply).value(QLatin1StringView("data")).toObject().value(QLatin1StringView("errors")).toArray();
+        QVERIFY2(errors.first().toString().startsWith(QLatin1StringView("structuredContent/count: ")),
+                 qPrintable(errors.first().toString()));
+        QVERIFY(errors.first().toString().contains(QLatin1StringView("not finite")));
+        f.jobs.erase(QStringLiteral("count"));
+
+        // Without a schema it goes out, as null, with a warning.
+        QVERIFY(f.peer.send(callRequest(6, QStringLiteral("free"))));
+        QVERIFY(spinUntil([&] {
+            return f.jobs.count(QStringLiteral("free")) == 1;
+        }));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("not finite, which go out as null")));
+        QVERIFY(f.jobs.at(QStringLiteral("free"))
+                    .finish(McpResult::structured(QJsonObject{{QLatin1StringView("a~/b"), QJsonArray{std::nan("")}}})));
+        reply = f.peer.readOne();
+        QCOMPARE(reply.value(QLatin1StringView("id")), QJsonValue(6));
+        QCOMPARE(resultOf(reply).value(QLatin1StringView("structuredContent")).toObject(),
+                 (QJsonObject{{QLatin1StringView("a~/b"), QJsonArray{QJsonValue::Null}}}));
+    }
+
+    void loneSurrogatesBecomeReplacementCharacters()
+    {
+        // A lone surrogate has no UTF-8 form. It goes out as U+FFFD, not as
+        // an escape that strict parsers refuse. A backslash followed by the
+        // text of such an escape is text, and stays.
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        QString text;
+        text += QChar(0xD83D);
+        text += QStringLiteral("x\\ud83d");
+        text += QChar(0xDE00);
+        text += QString::fromUtf8("\xF0\x9F\x98\x80");
+        QVERIFY(f.jobs.at(QStringLiteral("a")).finish(McpResult::text(text)));
+        QString expected;
+        expected += QChar(0xFFFD);
+        expected += QStringLiteral("x\\ud83d");
+        expected += QChar(0xFFFD);
+        expected += QString::fromUtf8("\xF0\x9F\x98\x80");
+        QCOMPARE(firstText(f.peer.readOne()), expected);
+    }
+
+    void offTheServersThreadACallDoesNothing()
+    {
+#ifndef QT_NO_DEBUG
+        QSKIP("In a debug build, a call used off the server's thread asserts");
+#else
+        Fixture f;
+        QVERIFY(f.start());
+        QVERIFY(f.callJob(1, QStringLiteral("a")));
+        McpCall& call = f.jobs.at(QStringLiteral("a"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("off the server's thread")));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("off the server's thread")));
+        bool finished = true;
+        bool valid = true;
+        std::thread([&] {
+            finished = call.finish(McpResult::text(QStringLiteral("off")));
+            valid = call.isValid();
+        }).join();
+        QVERIFY(!finished);
+        QVERIFY(!valid);
         QVERIFY(f.peer.readFor(100).isEmpty());
+        // On its thread the call still answers.
+        QVERIFY(call.finish(McpResult::text(QStringLiteral("on"))));
+        QCOMPARE(firstText(f.peer.readOne()), QStringLiteral("on"));
+#endif
     }
 };
 
