@@ -186,8 +186,9 @@ void McpTerminationSignals::onReadable()
     if (got <= 0 || m_released) {
         return;
     }
-    // The first signal ends the server. One after it finds the server
-    // ending already, until the server's finish releases the signals.
+    // The first signal ends the server, which releases the signals before
+    // its cancel callbacks run. A signal while the replies drain, after the
+    // end of the input, cuts that wait short.
     m_callback(bytes[0]);
 }
 

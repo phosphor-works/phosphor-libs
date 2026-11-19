@@ -266,11 +266,6 @@ bool isHexDigitFrom8(char c)
     return (c >= '8' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-// Qt's JSON writer encodes a surrogate pair as UTF-8, and a lone surrogate,
-// which UTF-8 cannot hold, as a \uD800 to \uDFFF escape that strict parsers
-// refuse. Each such escape becomes U+FFFD, as a UTF-8 decoder does with
-// bytes that are not UTF-8. The escape has the length of the one it
-// replaces, so the line changes in place.
 // True when the JSON may hold a lone surrogate escape. The text "\ud" after
 // an escaped backslash matches too, which only costs a closer look.
 bool hasSurrogateEscape(const QByteArray& json)
@@ -278,6 +273,11 @@ bool hasSurrogateEscape(const QByteArray& json)
     return json.contains("\\ud") || json.contains("\\uD");
 }
 
+// Qt's JSON writer encodes a surrogate pair as UTF-8, and a lone surrogate,
+// which UTF-8 cannot hold, as a \uD800 to \uDFFF escape that strict parsers
+// refuse. Each such escape becomes U+FFFD, as a UTF-8 decoder does with
+// bytes that are not UTF-8. The escape has the length of the one it
+// replaces, so the line changes in place.
 void replaceLoneSurrogates(QByteArray& json)
 {
     if (!hasSurrogateEscape(json)) {
@@ -961,6 +961,13 @@ void McpServer::end(FinishReason reason, bool drain)
     d->ending = true;
     if (d->transport) {
         d->transport->stopReading();
+    }
+    // An end that does not wait (the signal itself, the output gone) has no
+    // drain for a signal to cut short. The signals go back now, before the
+    // callbacks run, so that a second one during a callback that hangs has
+    // its usual effect. An end that drains keeps them until it finishes.
+    if (!drain && d->terminationSignals) {
+        d->terminationSignals->release();
     }
 
     // Every running call is cancelled, as if the client had cancelled it, so

@@ -335,9 +335,12 @@ writes nothing more either.
 
 `handleTerminationSignals()` installs handlers for SIGTERM and SIGHUP that
 write to a self-pipe. Signal dispositions are global to the process, so the
-application asks for it, and one server at a time holds them. The server's
-finish (at the latest its destruction) puts back what it found, unless
-another handler was installed since. A signal that the process ignores
+application asks for it, and one server at a time holds them. The server puts
+back what it found as soon as it ends without waiting for its replies (a
+signal, a closed output), before the cancel callbacks run, and otherwise at
+its finish (at the latest its destruction), unless another handler was
+installed since. A second signal during a slow callback or teardown so has
+its usual effect. A signal that the process ignores
 (SIGHUP under `nohup`) stays ignored. `handleTerminationSignals()` returns
 false, with a warning, before the `QCoreApplication` exists and after the
 server ended. A child

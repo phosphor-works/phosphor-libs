@@ -182,6 +182,41 @@ private Q_SLOTS:
         QVERIFY(restored());
     }
 
+    void signalReleasesBeforeItsCallbacks()
+    {
+        // SIGTERM itself starts the end. The dispositions are back before the
+        // cancel callbacks run, so that a second SIGTERM, during a callback
+        // that hangs, would end the process. (It is not sent: here that
+        // would be QtTest's fatal handler.)
+        Peer peer;
+        McpServer server;
+        QSignalSpy finished(&server, &McpServer::finished);
+        std::vector<McpCall> calls;
+        QVERIFY(server.addTool(McpTool(QStringLiteral("hold")), [&calls](McpCall call) {
+            calls.push_back(std::move(call));
+        }));
+        QVERIFY(server.handleTerminationSignals());
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("hold"))));
+        QVERIFY(spinUntil([&] {
+            return calls.size() == 1;
+        }));
+        bool ran = false;
+        bool restoredInTheCallback = false;
+        calls.front().onCancelled([&] {
+            ran = true;
+            restoredInTheCallback = restored();
+        });
+        QVERIFY(hasServerHandler(SIGTERM));
+        QCOMPARE(::kill(::getpid(), SIGTERM), 0);
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QVERIFY(ran);
+        QVERIFY(restoredInTheCallback);
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::Terminated);
+    }
+
     void signalDuringTheDrainEndsAtOnce()
     {
         // The end of the input started a drain to a client that reads

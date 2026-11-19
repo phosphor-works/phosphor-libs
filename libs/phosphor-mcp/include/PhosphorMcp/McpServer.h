@@ -146,9 +146,11 @@ public:
     // finished(HangUp)). Signal dispositions are global to the process, so
     // this is the application's choice. A signal that the process ignores
     // when this runs (nohup ignores SIGHUP) stays ignored. The old
-    // dispositions come back when the server finishes, so a second signal
-    // during a slow teardown has its usual effect, and at the latest when
-    // the server is destroyed. A handler that someone else installed since
+    // dispositions come back as soon as the server ends without waiting for
+    // its replies (a signal, a closed output), before the cancel callbacks
+    // run, and otherwise when it finishes, at the latest when it is
+    // destroyed. So a second signal during a slow callback or teardown has
+    // its usual effect. A handler that someone else installed since
     // stays. Call it after QCoreApplication exists, and before the server
     // ends.
     //
