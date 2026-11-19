@@ -175,6 +175,7 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/Enums.h
     include/PhosphorEngineRuntime/GeometryUtils.h
     include/PhosphorEngineRuntime/IHostApps.h
+    include/PhosphorEngineRuntime/IIdleSource.h
     include/PhosphorEngineRuntime/IOverlayService.h
     include/PhosphorEngineRuntime/ISettings.h
     include/PhosphorEngineRuntime/IShellCheatsheet.h
