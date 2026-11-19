@@ -4,7 +4,8 @@ The placement engine runtime a host embeds: the snap, tile and scroll engines' h
 and its settings. PlasmaZones' daemon (`plasmazonesd`) hosts it beside KWin today, and the Phosphor compositor
 will host it in process.
 
-It arrives here area by area from PlasmaZones. So far: the **settings model**, the **core** the runtime is built on, and **window tracking and drag**.
+It arrives here area by area from PlasmaZones. So far: the **settings model**, the **core** the runtime is built on, **window tracking and drag**, and the **services** with the host
+interfaces.
 
 ## Responsibility
 
@@ -22,6 +23,11 @@ It arrives here area by area from PlasmaZones. So far: the **settings model**, t
 - Window tracking (`WindowTracker`): every managed window's placement, its per-mode float state, persistence
   across restarts, evacuation when an output leaves, and the rules applied as windows open. The drag resolver
   (`DragResolver`): what a drag with a trigger held does, from zone highlighting to the drop, and the drop proxy.
+- The services a host binds to its transport (plasmazonesd binds them to D-Bus): layouts, settings, snapping,
+  tiling, autotile, scrolling, rules, shaders, overlays, zone queries and the convenience control API. And the
+  host interfaces the runtime asks the host through: `IWorkspaceHost` (per-output desktops and the compositor's
+  desktop shortcuts), `ISystemOsd` (the desktop's own text OSD) and `IHostApps` (the host's settings app and
+  layout editor).
 
 ## Key types
 
@@ -42,6 +48,8 @@ It arrives here area by area from PlasmaZones. So far: the **settings model**, t
 | `WindowTracker` | `WindowTracker.h` | Window placement tracking, float state, persistence and evacuation |
 | `DragResolver` | `DragResolver.h` | A drag's activation, zone highlight and drop |
 | `WindowLifecycleRelay` | `WindowLifecycleRelay.h` | The window lifecycle signals the services listen to |
+| `LayoutService`, `SettingsService`, `SnapService`, ... | `<Name>Service.h` | The services a host binds to its transport |
+| `IWorkspaceHost`, `ISystemOsd`, `IHostApps` | `IWorkspaceHost.h`, `ISystemOsd.h`, `IHostApps.h` | What the runtime needs from its host |
 
 ## Typical use
 
