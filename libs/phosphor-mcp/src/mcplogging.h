@@ -5,7 +5,9 @@
 #include <QLoggingCategory>
 
 namespace PhosphorMcp {
-// Diagnostics only ever go here, and so to stderr: stdout carries the
-// protocol and nothing else.
+// Diagnostics only ever go here, never to stdout, which carries the protocol
+// and nothing else. Qt writes them to stderr when the process has a terminal
+// or QT_FORCE_STDERR_LOGGING=1 is set, and otherwise to the systemd journal
+// when Qt is built with it.
 Q_DECLARE_LOGGING_CATEGORY(lcMcp)
 } // namespace PhosphorMcp

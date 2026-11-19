@@ -25,7 +25,8 @@ function(phosphormcp_add_test name)
     add_test(NAME ${name} COMMAND ${name} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
     phosphor_apply_test_isolation(${name})
     # QTEST_GUILESS_MAIN everywhere: a QCoreApplication, no display. The
-    # transports are socket pairs and pipes inside the test process.
+    # library's own tests give the server socket pairs and pipes inside the
+    # test process. test_phosphor_mcp_example runs the example as a child.
     set_tests_properties(${name} PROPERTIES
         TIMEOUT 60
         LABELS "phosphormcp"
@@ -38,10 +39,15 @@ phosphormcp_add_test(test_phosphor_mcp_tools)
 phosphormcp_add_test(test_phosphor_mcp_calls)
 phosphormcp_add_test(test_phosphor_mcp_signals)
 
-# The example server, driven as a client would drive it.
+# The example server, driven as a client would drive it. The example is built
+# whenever the tests are, unless BUILD_PHOSPHOR_MCP_EXAMPLES was turned off.
 if(TARGET phosphor-mcp-example)
     phosphormcp_add_test(test_phosphor_mcp_example)
     target_compile_definitions(test_phosphor_mcp_example
-        PRIVATE PHOSPHOR_MCP_EXAMPLE_PATH="$<TARGET_FILE:phosphor-mcp-example>")
+        PRIVATE
+            PHOSPHOR_MCP_EXAMPLE_PATH="$<TARGET_FILE:phosphor-mcp-example>"
+            PHOSPHORMCP_VERSION="${PHOSPHORMCP_VERSION}")
     add_dependencies(test_phosphor_mcp_example phosphor-mcp-example)
+else()
+    message(STATUS "phosphor-mcp: test_phosphor_mcp_example is not built, because BUILD_PHOSPHOR_MCP_EXAMPLES is OFF")
 endif()

@@ -28,7 +28,7 @@ class McpTransport;
 //
 //     PhosphorMcp::McpServer server;
 //     server.setServerInfo(QStringLiteral("example"), QStringLiteral("1.0"));
-//     server.setCache(60000, PhosphorMcp::McpServer::CacheScope::Public);
+//     server.setCache(60 * 60 * 1000, PhosphorMcp::McpServer::CacheScope::Public);
 //     server.addTool(tool, [](PhosphorMcp::McpCall call) { call.finish(...); });
 //     server.handleTerminationSignals();
 //     using Reason = PhosphorMcp::McpServer::FinishReason;
@@ -47,11 +47,17 @@ class McpTransport;
 // client capabilities a tool needs, the arguments against the tool's input
 // schema. It keeps nothing from one request for the next. It offers no
 // resources, prompts, logging or subscriptions, and sends no requests to the
-// client. It writes nothing to stdout but protocol messages, and its
-// diagnostics go to the logging category "phosphormcp", on stderr.
+// client. It writes nothing to stdout but protocol messages. Its diagnostics
+// go to the logging category "phosphormcp", which Qt writes to stderr when
+// the process has a terminal or QT_FORCE_STDERR_LOGGING=1 is set, and
+// otherwise to the systemd journal when Qt is built with it. A server that
+// an MCP client starts has no terminal (see the README, "Wire protocol").
 //
 // Single-threaded: use it on the thread that owns it. Never destroy it from
-// inside a handler or a cancel callback, but deleteLater() is fine.
+// inside a handler or a cancel callback, but deleteLater() is fine. A
+// handler that runs a nested event loop holds back every request after its
+// own until it returns, a cancel of its own call and the end of stdin
+// included. Answer later through the McpCall instead.
 // Handlers and cancel callbacks must not throw. The library is built
 // without exceptions, and an exception that leaves a callback is undefined
 // behavior.

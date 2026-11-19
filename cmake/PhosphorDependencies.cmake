@@ -24,8 +24,16 @@
 #      so -DCPM_luau_SOURCE=<dir> builds a local Luau checkout instead.
 #
 # A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU,
-# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, PHOSPHORMCP_USE_SYSTEM_VALIJSON) checks
-# that option before calling in here, so a system build reaches neither path.
+# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, PHOSPHORMCP_USE_SYSTEM_VALIJSON, whose
+# default is phosphor-fsloader's option) checks that option before calling in
+# here, so it fetches no archive for a system copy. A standalone configure of
+# such a library with its system option on never includes this file. The
+# tree's root includes it on every configure, though, and CPM.cmake is loaded
+# (and downloaded, the first time) when this file is included. So an offline
+# configure of the whole tree sets PHOSPHOR_DEPS_ARCHIVES, or has a filled
+# CPM_SOURCE_CACHE, even when every library uses a system copy. The directory
+# then needs only the archives of the test suite (PHOSPHOR_TEST_DEPS), when
+# the tests are built.
 #
 # Script mode, for packagers and CI:
 #

@@ -2,44 +2,119 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // The example server, run as an MCP client runs it: a child process with
-// pipes for stdin and stdout. A smoke test of the whole path, from the
-// command line to the exit.
+// pipes for stdin and stdout, in a session of its own without a terminal. A
+// smoke test of the whole path, from the command line to the exit code, that
+// checks each thing the example gives the library.
 
 #include "mcptesthelpers.h"
 
 #include <PhosphorMcp/McpProtocol.h>
 
+#include <QDeadlineTimer>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTest>
+
+#include <cerrno>
+#include <cstdlib>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 using namespace PhosphorMcp;
 using namespace PhosphorMcpTests;
 
 namespace {
 
-QList<QJsonObject> readReplies(QProcess& process, int count)
+// The example's process. Its stderr goes to the test's output when a check
+// fails, and the process is killed if it still runs at the end.
+class Example
 {
-    QList<QJsonObject> replies;
-    QByteArray buffer;
-    QDeadlineTimer deadline(10000);
-    while (replies.size() < count && !deadline.hasExpired()) {
-        if (!process.canReadLine() && !process.waitForReadyRead(100)) {
-            continue;
+public:
+    Example()
+    {
+        // Without a terminal and without QT_FORCE_STDERR_LOGGING, as a client
+        // starts it. The example's diagnostics then reach stderr only because
+        // it asks Qt for that itself.
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.remove(QStringLiteral("QT_FORCE_STDERR_LOGGING"));
+        process.setProcessEnvironment(environment);
+        process.setUnixProcessParameters(QProcess::UnixProcessFlag::CreateNewSession);
+    }
+    ~Example()
+    {
+        if (process.state() != QProcess::NotRunning) {
+            process.kill();
+            process.waitForFinished(5000);
         }
-        while (process.canReadLine()) {
-            const QByteArray line = process.readLine();
-            replies.append(QJsonDocument::fromJson(line).object());
+        if (QTest::currentTestFailed()) {
+            qWarning().noquote() << "stderr of the example:\n" + QString::fromUtf8(standardError());
         }
     }
-    return replies;
+    Q_DISABLE_COPY_MOVE(Example)
+
+    bool start()
+    {
+        process.start(QStringLiteral(PHOSPHOR_MCP_EXAMPLE_PATH), QStringList());
+        return process.waitForStarted(5000);
+    }
+
+    void write(const QJsonObject& message)
+    {
+        process.write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
+    }
+
+    // Up to `count` replies, fewer when the process ends or 10 s pass first.
+    QList<QJsonObject> readReplies(int count)
+    {
+        QList<QJsonObject> replies;
+        const QDeadlineTimer deadline(10000);
+        while (replies.size() < count) {
+            while (process.canReadLine() && replies.size() < count) {
+                replies.append(QJsonDocument::fromJson(process.readLine()).object());
+            }
+            if (replies.size() == count || deadline.hasExpired()) {
+                break;
+            }
+            // False at once when the process has ended: then no more comes.
+            if (!process.waitForReadyRead(int(qMax<qint64>(1, deadline.remainingTime())))
+                && process.state() == QProcess::NotRunning && !process.canReadLine()) {
+                break;
+            }
+        }
+        return replies;
+    }
+
+    bool waitForExit()
+    {
+        return process.waitForFinished(5000);
+    }
+
+    // Everything the process wrote to stderr so far.
+    QByteArray standardError()
+    {
+        m_standardError += process.readAllStandardError();
+        return m_standardError;
+    }
+
+    QProcess process;
+
+private:
+    QByteArray m_standardError;
+};
+
+QJsonObject parse(const char* json)
+{
+    return QJsonDocument::fromJson(json).object();
 }
 
-void write(QProcess& process, const QJsonObject& message)
+QJsonObject serverInfo(const QJsonObject& reply)
 {
-    process.write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
+    return resultOf(reply).value(QLatin1StringView("_meta")).toObject().value(MetaServerInfo).toObject();
 }
 
 } // namespace
@@ -51,68 +126,165 @@ class TestPhosphorMcpExample : public QObject
 private Q_SLOTS:
     void answersAClient()
     {
-        QProcess server;
-        // Its diagnostics go to stderr, which the test does not read.
-        server.setProcessChannelMode(QProcess::SeparateChannels);
-        server.start(QStringLiteral(PHOSPHOR_MCP_EXAMPLE_PATH), QStringList());
-        QVERIFY2(server.waitForStarted(5000), qPrintable(server.errorString()));
+        Example example;
+        QVERIFY(example.start());
 
-        write(server, request(1, QStringLiteral("server/discover")));
-        write(server, request(2, QStringLiteral("tools/list")));
-        write(server,
-              callRequest(3, QStringLiteral("count_words"),
-                          QJsonObject{{QLatin1StringView("text"), QStringLiteral("one two  three\nfour")}}));
-        write(server, callRequest(4, QStringLiteral("count_words"), QJsonObject{{QLatin1StringView("text"), 5}}));
-        const QList<QJsonObject> replies = readReplies(server, 4);
-        QCOMPARE(replies.size(), 4);
+        example.write(request(1, QStringLiteral("server/discover")));
+        example.write(request(2, QStringLiteral("tools/list")));
+        // Words split at every Unicode space, and a character outside the
+        // BMP (two UTF-16 code units) counts once.
+        example.write(
+            callRequest(3, QStringLiteral("count_words"),
+                        QJsonObject{{QLatin1StringView("text"), QStringLiteral("one two　three \U0001F600 four\n")}}));
+        example.write(callRequest(4, QStringLiteral("count_words"), QJsonObject()));
+        example.write(callRequest(5, QStringLiteral("count_words"),
+                                  QJsonObject{{QLatin1StringView("text"), QStringLiteral("a")},
+                                              {QLatin1StringView("lang"), QStringLiteral("en")}}));
+        example.write(callRequest(6, QStringLiteral("count_words"), QJsonObject{{QLatin1StringView("text"), 5}}));
+        const QList<QJsonObject> replies = example.readReplies(6);
+        QCOMPARE(replies.size(), 6);
 
-        const QJsonObject discover = resultOf(replies.at(0));
-        QCOMPARE(discover.value(QLatin1StringView("resultType")).toString(), QStringLiteral("complete"));
-        QCOMPARE(discover.value(QLatin1StringView("supportedVersions")).toArray(),
-                 QJsonArray{QStringLiteral("2026-07-28")});
-        QCOMPARE(discover.value(QLatin1StringView("cacheScope")).toString(), QStringLiteral("public"));
-        QCOMPARE(discover.value(QLatin1StringView("_meta"))
-                     .toObject()
-                     .value(MetaServerInfo)
-                     .toObject()
-                     .value(QLatin1StringView("name"))
-                     .toString(),
-                 QStringLiteral("phosphor-mcp-example"));
+        // Every result names the server, with the library's version.
+        const QJsonObject info{
+            {QLatin1StringView("name"), QStringLiteral("wordcount")},
+            {QLatin1StringView("version"), QStringLiteral(PHOSPHORMCP_VERSION)},
+        };
+        for (const QJsonObject& reply : replies) {
+            QCOMPARE(serverInfo(reply), info);
+        }
 
-        const QJsonArray tools = resultOf(replies.at(1)).value(QLatin1StringView("tools")).toArray();
-        QCOMPARE(tools.size(), 1);
-        QCOMPARE(tools.first().toObject().value(QLatin1StringView("name")).toString(), QStringLiteral("count_words"));
+        QJsonObject discover = resultOf(replies.at(0));
+        discover.remove(QLatin1StringView("_meta"));
+        QCOMPARE(discover, parse(R"({
+            "resultType": "complete",
+            "supportedVersions": ["2026-07-28"],
+            "capabilities": {"tools": {}},
+            "instructions": "count_words counts the words and characters of a text.",
+            "ttlMs": 3600000,
+            "cacheScope": "public"
+        })"));
 
-        const QJsonObject counted = resultOf(replies.at(2));
+        QJsonObject list = resultOf(replies.at(1));
+        list.remove(QLatin1StringView("_meta"));
+        QCOMPARE(list, parse(R"({
+            "resultType": "complete",
+            "ttlMs": 3600000,
+            "cacheScope": "public",
+            "tools": [{
+                "name": "count_words",
+                "title": "Count words",
+                "description": "Counts the words (runs of characters that are not spaces) and the characters (Unicode code points) of a text.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string", "description": "The text to count", "maxLength": 1000000}},
+                    "required": ["text"],
+                    "additionalProperties": false
+                },
+                "outputSchema": {
+                    "type": "object",
+                    "properties": {"words": {"type": "integer"}, "characters": {"type": "integer"}},
+                    "required": ["words", "characters"]
+                },
+                "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+            }]
+        })"));
+
         QCOMPARE(replies.at(2).value(QLatin1StringView("id")), QJsonValue(3));
+        const QJsonObject counted = resultOf(replies.at(2));
         QCOMPARE(counted.value(QLatin1StringView("structuredContent")).toObject(),
-                 (QJsonObject{{QLatin1StringView("words"), 4}, {QLatin1StringView("characters"), 19}}));
+                 (QJsonObject{{QLatin1StringView("words"), 5}, {QLatin1StringView("characters"), 21}}));
+        QCOMPARE(firstText(replies.at(2)), QStringLiteral("{\"characters\":21,\"words\":5}"));
+        QVERIFY(!counted.contains(QLatin1StringView("isError")));
 
-        // A bad argument is a tool error that names it.
-        const QJsonObject refused = resultOf(replies.at(3));
-        QCOMPARE(refused.value(QLatin1StringView("isError")).toBool(), true);
-        QVERIFY(firstText(replies.at(3)).contains(QLatin1StringView("arguments/text")));
+        // Arguments that do not match are a tool error that names each one.
+        const auto refused = [&](qsizetype index) {
+            return resultOf(replies.at(index)).value(QLatin1StringView("isError")).toBool();
+        };
+        QVERIFY(refused(3));
+        QCOMPARE(firstText(replies.at(3)),
+                 QStringLiteral("Invalid arguments for tool count_words:\n- arguments/text: is required"));
+        QVERIFY(refused(4));
+        QCOMPARE(firstText(replies.at(4)),
+                 QStringLiteral("Invalid arguments for tool count_words:\n- arguments/lang: is not a known property"));
+        QVERIFY(refused(5));
+        QCOMPARE(firstText(replies.at(5)),
+                 QStringLiteral("Invalid arguments for tool count_words:\n- arguments/text: must be of type string"));
 
-        // The end of stdin ends it, cleanly.
-        server.closeWriteChannel();
-        QVERIFY(server.waitForFinished(5000));
-        QCOMPARE(server.exitStatus(), QProcess::NormalExit);
-        QCOMPARE(server.exitCode(), 0);
-        QVERIFY(server.readAllStandardOutput().isEmpty());
+        // The end of stdin ends it, cleanly, and stdout carried nothing else.
+        example.process.closeWriteChannel();
+        QVERIFY(example.waitForExit());
+        QCOMPARE(example.process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(example.process.exitCode(), 0);
+        QVERIFY(example.process.readAllStandardOutput().isEmpty());
     }
 
     void endsOnSigterm()
     {
-        QProcess server;
-        server.start(QStringLiteral(PHOSPHOR_MCP_EXAMPLE_PATH), QStringList());
-        QVERIFY(server.waitForStarted(5000));
+        Example example;
+        QVERIFY(example.start());
         // Once it answers, its handler is in place.
-        write(server, request(1, QStringLiteral("server/discover")));
-        QCOMPARE(readReplies(server, 1).size(), 1);
-        server.terminate();
-        QVERIFY(server.waitForFinished(5000));
-        QCOMPARE(server.exitStatus(), QProcess::NormalExit);
-        QCOMPARE(server.exitCode(), 0);
+        example.write(request(1, QStringLiteral("server/discover")));
+        QCOMPARE(example.readReplies(1).size(), 1);
+        example.process.terminate();
+        QVERIFY(example.waitForExit());
+        QCOMPARE(example.process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(example.process.exitCode(), 0);
+    }
+
+    // A write that fails for another reason than a closed reader is an
+    // error: exit code 1, and the reason on stderr.
+    void exitsWithOneWhenOutputFails()
+    {
+        Example example;
+        // Every write to /dev/full fails with ENOSPC.
+        example.process.setStandardOutputFile(QStringLiteral("/dev/full"));
+        QVERIFY(example.start());
+        example.write(request(1, QStringLiteral("server/discover")));
+        QVERIFY(example.waitForExit());
+        QCOMPARE(example.process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(example.process.exitCode(), 1);
+        QVERIFY(example.standardError().contains("writing the output failed"));
+    }
+
+    // A read that fails is an error too.
+    void exitsWithOneWhenInputFails()
+    {
+        // A pseudo-terminal's master whose other end is closed: each read
+        // fails with EIO.
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+        QVERIFY(master >= 0);
+        char name[128];
+        QVERIFY(::grantpt(master) == 0 && ::unlockpt(master) == 0 && ::ptsname_r(master, name, sizeof name) == 0);
+        const int peer = ::open(name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+        QVERIFY(peer >= 0);
+        ::close(peer);
+
+        Example example;
+        example.process.setChildProcessModifier([&example, master] {
+            if (::dup2(master, STDIN_FILENO) < 0) {
+                example.process.failChildProcessModifier("dup2", errno);
+            }
+        });
+        const bool started = example.start();
+        ::close(master);
+        QVERIFY(started);
+        QVERIFY(example.waitForExit());
+        QCOMPARE(example.process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(example.process.exitCode(), 1);
+        QVERIFY(example.standardError().contains("reading the input failed"));
+    }
+
+    // A server that cannot start exits with 1 at once. A directory is no
+    // stdin for it.
+    void exitsWithOneWhenItCannotStart()
+    {
+        Example example;
+        example.process.setStandardInputFile(QDir::currentPath());
+        QVERIFY(example.start());
+        QVERIFY(example.waitForExit());
+        QCOMPARE(example.process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(example.process.exitCode(), 1);
+        QVERIFY(example.standardError().contains("is not a pipe"));
     }
 };
 

@@ -10,6 +10,8 @@
 #
 # Depends on Qt6::Core and the header-only valijson only. No Gui, no Qml, no
 # Network: a server that runs inside a CLI command pulls in nothing more.
+# Linux only: the transport writes a terminal through /proc/self/fd and
+# sockets with MSG_NOSIGNAL, and takes back SIGPIPE with sigtimedwait.
 
 # 3.21 floor: PROJECT_IS_TOP_LEVEL gates the example below. The valijson
 # acquisition needs 3.18 (file(ARCHIVE_EXTRACT)).
@@ -36,6 +38,10 @@ if(NOT PROJECT_VERSION)
     set(CMAKE_AUTOMOC ON)
 endif()
 
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "PhosphorMcp needs Linux (pipe2, sigtimedwait, MSG_NOSIGNAL, /proc/self/fd)")
+endif()
+
 include(GenerateExportHeader)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -50,19 +56,63 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # it; system headers opt-in. Used only inside src/mcpschema.cpp, so it is a
 # PRIVATE SYSTEM include: its warnings stay out of our build, and it never
 # reaches the public ABI.
+#
+# phosphor-fsloader takes the same valijson, and a packager who switches it to
+# the system's headers means the tree's valijson. So this option defaults to
+# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON whenever that is set (on the command
+# line it is, whichever library configures first), and both look for the
+# headers through one cache variable, VALIJSON_INCLUDE_DIR.
+if(DEFINED PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
+    set(_phosphormcp_system_valijson_default ${PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON})
+else()
+    set(_phosphormcp_system_valijson_default OFF)
+endif()
 option(PHOSPHORMCP_USE_SYSTEM_VALIJSON
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins" OFF)
+    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins (default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)"
+    ${_phosphormcp_system_valijson_default})
 
 if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
-    find_path(PHOSPHORMCP_VALIJSON_INCLUDE_DIR
+    find_path(VALIJSON_INCLUDE_DIR
         NAMES valijson/validator.hpp
         DOC "Directory containing valijson/validator.hpp")
-    if(NOT PHOSPHORMCP_VALIJSON_INCLUDE_DIR)
+    if(NOT VALIJSON_INCLUDE_DIR)
         message(FATAL_ERROR
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON=ON but valijson headers "
-            "(valijson/validator.hpp) were not found. Install valijson dev files "
-            "or unset the option to use the pinned archive.")
+            "PHOSPHORMCP_USE_SYSTEM_VALIJSON is ON (its default is PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON), but "
+            "valijson/validator.hpp was not found. Install valijson's headers and point VALIJSON_INCLUDE_DIR at "
+            "them, or set PHOSPHORMCP_USE_SYSTEM_VALIJSON and PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON to OFF to "
+            "use the pinned archive.")
     endif()
+    # valijson 1.1.0 is the first whose errors carry jsonPointer, which
+    # src/mcpschema.cpp reads. A header-only install has no version file
+    # worth trusting, so the check compiles against the headers. Its result
+    # is kept for the directory it was made with, and a failure is not kept.
+    if(NOT "${VALIJSON_INCLUDE_DIR}" STREQUAL "${_PHOSPHORMCP_VALIJSON_CHECKED_DIR}")
+        unset(PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER CACHE)
+        set(_PHOSPHORMCP_VALIJSON_CHECKED_DIR "${VALIJSON_INCLUDE_DIR}" CACHE INTERNAL
+            "The valijson headers that PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER was checked with")
+    endif()
+    include(CheckCXXSourceCompiles)
+    include(CMakePushCheckState)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_INCLUDES "${VALIJSON_INCLUDE_DIR}")
+    check_cxx_source_compiles([=[
+#include <valijson/validation_results.hpp>
+int main()
+{
+    valijson::ValidationResults::Error error;
+    error.jsonPointer = "/text";
+    return error.jsonPointer.empty() ? 1 : 0;
+}
+]=] PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER)
+    cmake_pop_check_state()
+    if(NOT PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER)
+        unset(PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER CACHE)
+        message(FATAL_ERROR
+            "The valijson headers in ${VALIJSON_INCLUDE_DIR} are older than 1.1.0, which phosphor-mcp needs "
+            "(ValidationResults::Error::jsonPointer). Install valijson 1.1.0 or later, or set "
+            "PHOSPHORMCP_USE_SYSTEM_VALIJSON to OFF to use the pinned archive.")
+    endif()
+    set(_phosphormcp_valijson_include "${VALIJSON_INCLUDE_DIR}")
 else()
     # In-tree the root CMakeLists has already included the module at the top
     # scope, which is where it has to be (it explains why). A standalone
@@ -72,7 +122,7 @@ else()
     endif()
     phosphor_fetch_dependency(valijson)
     set(_phosphormcp_valijson_root "${valijson_SOURCE_DIR}")
-    set(PHOSPHORMCP_VALIJSON_INCLUDE_DIR "${_phosphormcp_valijson_root}/include")
+    set(_phosphormcp_valijson_include "${_phosphormcp_valijson_root}/include")
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -141,14 +191,14 @@ target_include_directories(PhosphorMcp
         $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}>
 )
 
-target_include_directories(PhosphorMcp SYSTEM PRIVATE "${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}")
+target_include_directories(PhosphorMcp SYSTEM PRIVATE "${_phosphormcp_valijson_include}")
 
 target_compile_features(PhosphorMcp PUBLIC cxx_std_20)
 
-# valijson's schema parser throws on a schema it cannot compile, and
-# std::regex throws while it validates. KDECompilerSettings turns exceptions
-# off, so they come back on for the one translation unit that includes
-# valijson, which catches everything before it returns. VALIJSON_USE_EXCEPTIONS
+# valijson's schema parser throws on a schema it cannot compile, and its
+# validator can throw on a value it cannot check. KDECompilerSettings turns
+# exceptions off, so they come back on for the one translation unit that
+# includes valijson, which catches everything before it returns. VALIJSON_USE_EXCEPTIONS
 # travels with the flag, as in phosphor-fsloader.
 set_source_files_properties(src/mcpschema.cpp PROPERTIES
     COMPILE_OPTIONS "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fexceptions>"
@@ -164,8 +214,11 @@ set_target_properties(PhosphorMcp PROPERTIES
     SOVERSION 0
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-    # mcpschema.cpp alone is built with exceptions: a unity batch would
-    # carry the flag to its neighbours, or drop it.
+    # CMake keeps mcpschema.cpp, which has compile options of its own, out of
+    # any unity batch already. A batch of the other sources makes GCC warn
+    # (-Wsubobject-linkage) that McpServer::Private has fields whose types
+    # come from an anonymous namespace, which it accepts only in the main
+    # file.
     UNITY_BUILD OFF
 )
 
@@ -228,10 +281,15 @@ install(FILES
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ON when this tree is the outermost project (phosphor-libs on its own, or
-# this library standalone), OFF inside an app that adds the tree. Never
-# installed: it is source for authors of other servers, and the subject of the
-# smoke test.
-option(BUILD_PHOSPHOR_MCP_EXAMPLES "Build the phosphor-mcp example server" ${PROJECT_IS_TOP_LEVEL})
+# this library standalone), and when the tests are built, whose smoke test
+# runs it. OFF inside an app that adds the tree without tests. Never
+# installed: it is source for authors of other servers.
+if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
+    set(_phosphormcp_examples_default ON)
+else()
+    set(_phosphormcp_examples_default OFF)
+endif()
+option(BUILD_PHOSPHOR_MCP_EXAMPLES "Build the phosphor-mcp example server" ${_phosphormcp_examples_default})
 if(BUILD_PHOSPHOR_MCP_EXAMPLES)
     add_subdirectory(examples)
 endif()
