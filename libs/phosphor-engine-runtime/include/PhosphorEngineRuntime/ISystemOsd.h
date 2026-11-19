@@ -19,7 +19,11 @@ class ISystemOsd
 public:
     virtual ~ISystemOsd() = default;
 
-    /// Show @p text with the icon named @p iconName.
+    /// Show @p text with the icon named @p iconName, a theme icon the runtime
+    /// picks for what the notice says (dialog-cancel, object-locked). An empty
+    /// @p iconName asks for the host's own icon: the runtime does not know the
+    /// host's name, so a notice about the placement mode itself leaves the
+    /// choice to the host.
     virtual void showText(const QString& iconName, const QString& text) = 0;
 };
 
