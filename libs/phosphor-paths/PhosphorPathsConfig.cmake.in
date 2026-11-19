@@ -8,4 +8,8 @@ find_dependency(Qt6 @PHOSPHORPATHS_QT_MIN@ COMPONENTS Core)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PhosphorPathsTargets.cmake")
 
+# The suite folder's name, for a project's install destinations
+# (${KDE_INSTALL_DATADIR}/${PHOSPHOR_SUITE_DIRECTORY_NAME}/<tree>).
+set(PHOSPHOR_SUITE_DIRECTORY_NAME "@PHOSPHOR_SUITE_DIRECTORY_NAME@")
+
 check_required_components(PhosphorPaths)

@@ -35,6 +35,13 @@ include(GenerateExportHeader)
 
 find_package(Qt6 ${PHOSPHORPATHS_QT_MIN} REQUIRED COMPONENTS Core)
 
+# The suite folder's name, defined here once. The C++ API is compiled from it,
+# and a project builds its install destinations from it: in-tree through this
+# cache entry, installed through PhosphorPathsConfig.cmake, which sets the same
+# variable. Never spell the folder in an install rule.
+set(PHOSPHOR_SUITE_DIRECTORY_NAME "phosphor-works" CACHE INTERNAL
+    "The folder every Phosphor app's files live under in each XDG root")
+
 set(phosphorpaths_public_HDRS
     include/PhosphorPaths/SuiteDirectories.h
     include/PhosphorPaths/TreeMove.h
@@ -86,6 +93,11 @@ target_compile_features(PhosphorPaths PUBLIC cxx_std_20)
 target_link_libraries(PhosphorPaths
     PUBLIC
         Qt6::Core
+)
+
+target_compile_definitions(PhosphorPaths
+    PRIVATE
+        PHOSPHORPATHS_SUITE_DIRECTORY_NAME="${PHOSPHOR_SUITE_DIRECTORY_NAME}"
 )
 
 set_target_properties(PhosphorPaths PROPERTIES

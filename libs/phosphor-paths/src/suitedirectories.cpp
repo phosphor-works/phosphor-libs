@@ -27,7 +27,7 @@ QString genericLocation(QStandardPaths::StandardLocation location, const char* h
 
 QString suiteDirectoryName()
 {
-    return QStringLiteral("phosphor-works");
+    return QStringLiteral(PHOSPHORPATHS_SUITE_DIRECTORY_NAME);
 }
 
 QString commonDataSubdir(const QString& tree)
