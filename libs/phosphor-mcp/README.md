@@ -165,16 +165,20 @@ The text lists at most ten errors, and then a line such as
 `- arguments: and 3 more errors`. Arguments of more than 1000 JSON values,
 or whose paths come to more than 64 Ki UTF-16 code units together, get one
 line instead, which says that they do not match and are too large for the
-server to list each error. Where valijson gives no reason for a failure (a
-`false` subschema, for one), the line names the place and says that it does
-not match the schema. A string or a member name with an unpaired UTF-16
-surrogate, and an integral number outside the range of a 64-bit integer
-(1e19, 2^63, 1e300), are refused whatever the schema says, since valijson
-would read them differently from the handler. The range is checked on the
-number as Qt's JSON parser reads it, and the parser rounds a number outside
-it, and one written with a fraction or an exponent, to the nearest double.
-So -9223372036854775809, down to -9223372036854776832, passes as
--9223372036854775808, the value that the handler reads, and
+server to list each error. Smaller arguments get that line too when the
+schema would make the list slow to build. The server multiplies the size of
+the arguments by a cost of the schema, which grows with its size and with
+each anyOf or oneOf nested in another, and lists the errors only when the
+product keeps the work to a fraction of a second. Where valijson gives no
+reason for a failure (a `false` subschema, for one), the line names the
+place and says that it does not match the schema. A string or a member name
+with an unpaired UTF-16 surrogate, and an integral number outside the range
+of a 64-bit integer (1e19, 2^63, 1e300), are refused whatever the schema
+says, since valijson would read them differently from the handler. The range
+is checked on the number as Qt's JSON parser reads it, and the parser rounds
+a number outside it, and one written with a fraction or an exponent, to the
+nearest double. So -9223372036854775809, down to -9223372036854776832,
+passes as -9223372036854775808, the value that the handler reads, and
 9223372036854775807.0 is refused as 2^63.
 
 A notification (a message with a method and no id) is never answered, not

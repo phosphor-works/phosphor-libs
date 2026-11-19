@@ -55,7 +55,10 @@ public:
     //
     // The list is short whatever the size of `value`, with at most ten
     // errors and a last line that counts the rest. A value too large to list
-    // its errors cheaply gets one line that says so.
+    // its errors cheaply gets one line that says so. The schema counts as
+    // well as the value. Each subschema adds work for each part of the value
+    // that it applies to, and more inside an anyOf or a oneOf, so a schema
+    // with many of them nested lists the errors of small values only.
     [[nodiscard]] QStringList validate(const QJsonValue& value) const;
 
 private:

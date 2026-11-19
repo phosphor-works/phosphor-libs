@@ -695,6 +695,115 @@ private Q_SLOTS:
                                                   "- arguments: and 399990 more errors");
     }
 
+    void combinatorSchemasAnswerFast()
+    {
+        // Listing the errors does work for each subschema that applies to
+        // each part of the arguments, and more for each anyOf or oneOf
+        // around it. So the schema counts as well as the size of the
+        // arguments, which here are under 1000 values.
+        QFETCH(QJsonObject, schema);
+        QFETCH(QJsonObject, arguments);
+        QFETCH(QString, expected);
+        Peer peer;
+        McpServer server;
+        int calls = 0;
+        QString error;
+        QVERIFY2(server.addTool(
+                     McpTool(QStringLiteral("heavy")).setInputSchema(schema),
+                     [&](McpCall call) {
+                         ++calls;
+                         call.finish(McpResult::text(QStringLiteral("ran")));
+                     },
+                     &error),
+                 qPrintable(error));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("heavy"), arguments)));
+        // Each answer takes milliseconds, and took from seconds to minutes
+        // with every error listed (44 s for the first in a release build).
+        const int bound = 30000;
+        const QJsonObject reply = peer.readOne(bound);
+        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
+        QCOMPARE(errorLines(reply), expected);
+        QCOMPARE(calls, 0);
+    }
+
+    void combinatorSchemasAnswerFast_data()
+    {
+        QTest::addColumn<QJsonObject>("schema");
+        QTest::addColumn<QJsonObject>("arguments");
+        QTest::addColumn<QString>("expected");
+        const QString tooLarge = QStringLiteral(
+            "- arguments: does not match the schema, and is too large for the server to list each error");
+        const auto object = [](const QString& name, const QJsonObject& property) {
+            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
+                               {QLatin1StringView("properties"), QJsonObject{{name, property}}}};
+        };
+        const auto items = [](const QJsonValue& item, int count) {
+            QJsonArray array;
+            for (int i = 0; i < count; ++i) {
+                array.append(item);
+            }
+            return array;
+        };
+
+        // A oneOf of 15 arrays, each with items that are an anyOf of 15
+        // objects, and items that match none of them.
+        QJsonArray objects;
+        QJsonArray arrays;
+        for (int i = 0; i < 15; ++i) {
+            QJsonObject inner = object(QStringLiteral("x"), QJsonObject{{QLatin1StringView("maximum"), i}});
+            inner.insert(QLatin1StringView("required"), QJsonArray{QStringLiteral("y%1").arg(i)});
+            objects.append(inner);
+        }
+        for (int i = 0; i < 15; ++i) {
+            arrays.append(
+                QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
+                            {QLatin1StringView("maxItems"), i},
+                            {QLatin1StringView("items"), QJsonObject{{QLatin1StringView("anyOf"), objects}}}});
+        }
+        const QJsonObject nested = object(QStringLiteral("v"), QJsonObject{{QLatin1StringView("oneOf"), arrays}});
+        const QJsonObject wrongItem{{QLatin1StringView("x"), 1000}};
+        QTest::newRow("oneOf of anyOf, 400 items")
+            << nested << QJsonObject{{QLatin1StringView("v"), items(wrongItem, 400)}} << tooLarge;
+        // The same schema lists the errors of a small value.
+        QTest::newRow("oneOf of anyOf, 1 item")
+            << nested << QJsonObject{{QLatin1StringView("v"), items(wrongItem, 1)}}
+            << QStringLiteral(
+                   "- arguments/v/0/x: must be at most 0\n- arguments/v/0/x: must be at most 1\n"
+                   "- arguments/v/0/x: must be at most 2\n- arguments/v/0/x: must be at most 3\n"
+                   "- arguments/v/0/x: must be at most 4\n- arguments/v/0/x: must be at most 5\n"
+                   "- arguments/v/0/x: must be at most 6\n- arguments/v/0/x: must be at most 7\n"
+                   "- arguments/v/0/x: must be at most 8\n- arguments/v/0/x: must be at most 9\n"
+                   "- arguments: and 23 more errors");
+
+        // anyOf in anyOf, 50 deep, for each of 990 items.
+        QJsonObject chain{{QLatin1StringView("type"), QStringLiteral("integer")}, {QLatin1StringView("maximum"), 0}};
+        for (int i = 0; i < 50; ++i) {
+            const QJsonObject other{{QLatin1StringView("type"), QStringLiteral("string")},
+                                    {QLatin1StringView("maxLength"), 0}};
+            chain = QJsonObject{{QLatin1StringView("anyOf"), QJsonArray{chain, other}}};
+        }
+        QTest::newRow("anyOf 50 deep, 990 items") << object(
+            QStringLiteral("v"),
+            QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")}, {QLatin1StringView("items"), chain}})
+                                                  << QJsonObject{{QLatin1StringView("v"), items(5, 990)}} << tooLarge;
+
+        // An allOf of 200 anyOfs for each of 990 items.
+        QJsonArray all;
+        for (int i = 0; i < 200; ++i) {
+            all.append(QJsonObject{{QLatin1StringView("anyOf"),
+                                    QJsonArray{QJsonObject{{QLatin1StringView("maximum"), i}},
+                                               QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")}}}}});
+        }
+        QTest::newRow("allOf of 200 anyOfs, 990 items")
+            << object(QStringLiteral("v"),
+                      QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
+                                  {QLatin1StringView("items"), QJsonObject{{QLatin1StringView("allOf"), all}}}})
+            << QJsonObject{{QLatin1StringView("v"), items(1000, 990)}} << tooLarge;
+    }
+
     void longNamesAreShortInErrors()
     {
         // The model reads its errors back: a name of any length is cut.
