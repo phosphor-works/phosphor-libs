@@ -7,6 +7,8 @@
 
 #include <PhosphorZoneRendering/ZoneShaderItem.h>
 
+#include <PhosphorEngineRuntime/AppDirectoryName.h>
+
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QTest>
@@ -31,6 +33,13 @@ private:
     }
 
 private Q_SLOTS:
+    void initTestCase()
+    {
+        // A host names its app directory at the top of main(); the item's
+        // trusted shader roots live under it.
+        PhosphorEngineRuntime::setAppDirectoryName(QStringLiteral("zonerenderingtest"));
+    }
+
     void zoneShaderItemIsTheLibraryClass()
     {
         QQmlEngine engine;
