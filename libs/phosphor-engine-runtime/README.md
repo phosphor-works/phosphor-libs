@@ -47,7 +47,7 @@ interfaces.
 | `HostSettingsExtension` | `SettingsSchema.h` | A host's own keys, machine-scoped keys and labels |
 | `ConfigMigration` | `ConfigMigration.h` | The schema-version migration chain run at startup |
 | `PerScreenResolver` | `PerScreenResolver.h` | Per-screen overrides resolved over the global values |
-| `setAppDirectoryName` | `AppDirectoryName.h` | The host's directory under the XDG config and data roots |
+| `setAppDirectoryName`, `appConfigDir`, `commonDataSubdir` | `AppDirectoryName.h` | The host's folder in `phosphor-works` and the trees every app shares |
 | `IOverlayService` | `IOverlayService.h` | The overlays, zone selector, snap assist, OSDs and pickers the runtime shows |
 | `ScreenModeRouter` | `ScreenModeRouter.h` | Which placement mode each screen runs, per desktop and activity |
 | `AnimationBootstrap` | `AnimationBootstrap.h` | Loads the curve and motion-profile registries the overlays animate with |
@@ -81,8 +81,17 @@ however it came about. PlasmaZones serves its KWin choices and its rendering pin
 
 ## Design notes
 
+- **Everything lives under `phosphor-works`.** The data the apps share is in common trees in each XDG data root
+  (`phosphor-works/layouts`, `/algorithms`, `/scrolling-templates`, `/animations`, `/overlays`, `/pointer`,
+  `/curves`, `/profiles`, `/shader-presets`, and the motion, decoration and overlay sets), and the runtime's
+  translations in `share/phosphor-works/translations`. What is one app's own is in its folder,
+  `phosphor-works/<app>`: config files (`~/.config/phosphor-works/<app>/config.json`), state (workspaces) and
+  cache.
 - **No default directory name.** Reading the app directory name before a host sets it aborts, rather than handing
-  out a path at the root of the user's config directory.
+  out a path every app shares.
+- **3.x's config and data move once.** The first start that finds no `config.json` in the app's folder moves 3.x's
+  `<config root>/<app>/` and the user's data trees under `<data root>/<app>/` into the new places, and the
+  migration chain then brings the config up to date. The old places are not read again.
 - **Install the extension first.** A store built without it deletes the host's keys as undeclared on its next
   save, so the host installs it before the first `Settings`.
 - **Logging** is under `phosphor.engineruntime.*`: `.config` for the model, `.core`, `.daemon` and its `.overlay` and

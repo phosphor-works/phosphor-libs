@@ -3,6 +3,8 @@
 
 #include <PhosphorEngineRuntime/WorkspaceController.h>
 
+#include <PhosphorEngineRuntime/AppDirectoryName.h>
+
 #include <PhosphorEngine/WindowRegistry.h>
 #include <PhosphorIdentity/VirtualScreenId.h>
 #include <PhosphorScreens/Manager.h>
@@ -377,8 +379,8 @@ QString WorkspaceController::stateFilePath()
     // Runtime state, deliberately NOT config.json and not GenericDataLocation
     // (that tree is user-visible assets). Reconstructible by definition, so a
     // version mismatch or parse failure just falls back to fresh adoption.
-    // StateLocation is already app-scoped (~/.local/state/<org>/<app>).
-    return QStandardPaths::writableLocation(QStandardPaths::StateLocation) + QStringLiteral("/workspaces.json");
+    // The app's state directory (~/.local/state/phosphor-works/<app>).
+    return appStateDir() + QStringLiteral("/workspaces.json");
 }
 
 void WorkspaceController::loadStateFile()

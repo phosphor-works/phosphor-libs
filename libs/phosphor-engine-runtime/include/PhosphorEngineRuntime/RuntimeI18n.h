@@ -21,7 +21,7 @@ class RuntimeI18n
 namespace PhosphorEngineRuntime {
 
 /// Install the runtime's catalog for the current locale on @p app, from the
-/// installed share/phosphor-engine-runtime/translations or the build tree.
+/// installed share/phosphor-works/translations or the build tree.
 /// Call after the QCoreApplication exists.
 PHOSPHORENGINERUNTIME_EXPORT void loadRuntimeTranslations(QCoreApplication* app);
 

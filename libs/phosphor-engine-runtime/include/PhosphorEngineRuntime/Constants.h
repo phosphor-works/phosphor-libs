@@ -120,7 +120,7 @@ constexpr int MinimumZoneDisplaySizePx = 10; // Minimum zone size for display (c
  */
 inline QString scriptedAlgorithmSubdir()
 {
-    return appDirectoryName() + QStringLiteral("/algorithms");
+    return commonDataSubdir(QStringLiteral("algorithms"));
 }
 
 /**

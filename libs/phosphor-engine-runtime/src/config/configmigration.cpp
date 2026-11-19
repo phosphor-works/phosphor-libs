@@ -3,6 +3,10 @@
 
 #include <PhosphorEngineRuntime/ConfigMigration.h>
 
+#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorEngineRuntime/ConfigKeys.h>
+#include <PhosphorEngineRuntime/Constants.h>
+
 #include <PhosphorEngineRuntime/ConfigBackends.h>
 #include <PhosphorEngineRuntime/ConfigDefaults.h>
 #include <PhosphorEngineRuntime/PerScreenResolver.h>
@@ -24,8 +28,12 @@
 #include <PhosphorRules/RuleSet.h>
 #include <PhosphorZones/LayoutRegistry.h>
 
+#include <algorithm>
+#include <utility>
+
 #include <QColor>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -33,6 +41,7 @@
 #include <QJsonObject>
 #include <QLatin1String>
 #include <QLockFile>
+#include <QStandardPaths>
 #include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
@@ -101,11 +110,96 @@ std::atomic<ConfigMigration::CorruptConfigHandling> s_corruptHandling{
     ConfigMigration::CorruptConfigHandling::Quarantine};
 } // namespace
 
+namespace {
+
+/// Move every file under @p from into the same place under @p to, leaving a
+/// file that already exists there alone, then remove what is left empty of
+/// @p from. A rename where the two share a filesystem, a copy otherwise.
+void moveTreeContents(const QString& from, const QString& to)
+{
+    if (from.isEmpty() || !QFileInfo(from).isDir()) {
+        return;
+    }
+    QDirIterator it(from, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString source = it.next();
+        if (source.endsWith(QLatin1String(".migrate.lock"))) {
+            continue;
+        }
+        const QString target = to + QLatin1Char('/') + QDir(from).relativeFilePath(source);
+        if (QFileInfo::exists(target)) {
+            continue;
+        }
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        if (!QFile::rename(source, target) && QFile::copy(source, target)) {
+            QFile::remove(source);
+        }
+    }
+    // Empty directories, deepest first; a directory something stayed in
+    // refuses to go.
+    QDirIterator dirs(from, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    QStringList found;
+    while (dirs.hasNext()) {
+        found.append(dirs.next());
+    }
+    std::sort(found.begin(), found.end(), [](const QString& a, const QString& b) {
+        return a.size() > b.size();
+    });
+    for (const QString& dir : std::as_const(found)) {
+        QDir().rmdir(dir);
+    }
+    QDir().rmdir(from);
+}
+
+/// 3.x kept the app's config in <config root>/<app>/ and the user's own data
+/// trees in <data root>/<app>/<tree>. 4.0 keeps the config in the app's folder
+/// under phosphor-works and the data trees in the common ones every Phosphor
+/// app shares. The first start that finds no config.json in the new place
+/// moves the old ones over, once; the migration chain then brings the moved
+/// config.json up to date. The old places are not read again, and a later
+/// start without a config.json has nothing left there to find.
+void adoptPreviousLocations()
+{
+    if (QFileInfo::exists(ConfigDefaults::configFilePath())) {
+        return;
+    }
+    const QString configRoot = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    if (!configRoot.isEmpty()) {
+        moveTreeContents(configRoot + QLatin1Char('/') + appDirectoryName(), appConfigDir());
+    }
+    const QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (dataRoot.isEmpty()) {
+        return;
+    }
+    const QString oldData = dataRoot + QLatin1Char('/') + appDirectoryName();
+    const QStringList trees = {
+        ConfigKeys::layoutsSubdir(),
+        ConfigKeys::animationsSubdir(),
+        ConfigKeys::overlaysSubdir(),
+        ConfigKeys::profilesSubdir(),
+        ConfigKeys::pointerSubdir(),
+        ConfigKeys::curvesSubdir(),
+        ConfigKeys::shaderPresetsSubdir(),
+        ConfigKeys::scrollingTemplatesSubdir(),
+        scriptedAlgorithmSubdir(),
+        ConfigDefaults::userMotionSetsSubdir().mid(1),
+        ConfigDefaults::userDecorationSetsSubdir().mid(1),
+        ConfigDefaults::userOverlaySetsSubdir().mid(1),
+    };
+    for (const QString& tree : trees) {
+        const QString name = tree.section(QLatin1Char('/'), -1);
+        moveTreeContents(oldData + QLatin1Char('/') + name, dataRoot + QLatin1Char('/') + tree);
+    }
+    QDir().rmdir(oldData);
+}
+
+} // namespace
+
 /// The legacy assignments.json path. rules.json supersedes it in v4 —
 /// migrateV1ToV2 still writes it (a v2 artifact) and finalizeV4Conversion
 /// reads then deletes it; no live runtime code touches it, so the path lives
 /// here rather than on the public ConfigDefaults surface. It sits beside
-/// rules.json (the same plasmazones config directory).
+/// rules.json (the same app config directory).
 QString legacyAssignmentsFilePath()
 {
     return QFileInfo(ConfigDefaults::rulesFilePath()).absolutePath() + QStringLiteral("/assignments.json");
@@ -400,6 +494,7 @@ bool ConfigMigration::ensureJsonConfig()
     // waiting on the lock. The s_migrated flag at the top of this
     // function only catches the same-process case; cross-process
     // peers reach the version-check inside Impl.
+    adoptPreviousLocations();
     const bool ok = ensureJsonConfigImpl();
     if (ok) {
         s_migrated.store(true, std::memory_order_release);
