@@ -1043,6 +1043,95 @@ private Q_SLOTS:
             << QStringLiteral("- arguments/text: must be at most 1048576 characters long");
     }
 
+    void checksHaveABound()
+    {
+        // A check whose work the server cannot bound is not made: a value
+        // nested deeper under a recursive schema than jsoncons can walk
+        // without growing its memory with the square of the depth, a schema
+        // whose references double the work at each level, and a large value
+        // under a schema of many checks. A number that multipleOf cannot
+        // check is refused by name.
+        QFETCH(QJsonObject, schema);
+        QFETCH(QJsonValue, arguments);
+        QFETCH(QString, expected);
+        Peer peer;
+        McpServer server;
+        QString error;
+        QVERIFY2(server.addTool(McpTool(QStringLiteral("bound")).setInputSchema(schema), noop(), &error),
+                 qPrintable(error));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("bound"), arguments.toObject())));
+        const int bound = 30000;
+        const QJsonObject reply = peer.readOne(bound);
+        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
+        if (expected.isEmpty()) {
+            QCOMPARE(firstText(reply), QStringLiteral("ok"));
+        } else {
+            QCOMPARE(errorLines(reply), expected);
+        }
+    }
+
+    void checksHaveABound_data()
+    {
+        QTest::addColumn<QJsonObject>("schema");
+        QTest::addColumn<QJsonValue>("arguments");
+        // Empty: the handler runs.
+        QTest::addColumn<QString>("expected");
+        const auto nest = [](int depth, const QString& key) {
+            QJsonValue value = 1;
+            for (int i = 0; i < depth; ++i) {
+                value = key.isEmpty() ? QJsonValue(QJsonArray{value}) : QJsonValue(QJsonObject{{key, value}});
+            }
+            return value;
+        };
+        // A list of lists, which recurses through items and $ref: two tokens
+        // of path for each level of the value.
+        const QJsonObject lists = parse(
+            "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'type': ['array', "
+            "'integer'], 'items': {'$ref': '#/$defs/n'}}}}");
+        QTest::newRow("lists 300 deep") << lists << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(300, {})}})
+                                        << QString();
+        QTest::newRow("lists 600 deep") << lists << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(600, {})}})
+                                        << TooLargeToCheck;
+        // Two references to the schema at each level: 2^depth checks.
+        const QJsonObject doubling = parse(
+            "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'properties': {'x': "
+            "{'allOf': [{'$ref': '#/$defs/n'}, {'$ref': '#/$defs/n'}]}}}}}");
+        QTest::newRow("doubling 5 deep") << doubling
+                                         << QJsonValue(
+                                                QJsonObject{{QLatin1StringView("a"), nest(5, QStringLiteral("x"))}})
+                                         << QString();
+        QTest::newRow("doubling 40 deep")
+            << doubling << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(40, QStringLiteral("x"))}})
+            << TooLargeToCheck;
+        // Three million integers, which jsoncons would check in about a
+        // second, refused, and a hundred thousand checked.
+        const QJsonObject integers =
+            parse("{'type': 'object', 'properties': {'a': {'type': 'array', 'items': {'type': 'integer'}}}}");
+        QJsonArray many;
+        for (int i = 0; i < 3000000; ++i) {
+            many.append(1);
+        }
+        QTest::newRow("3000000 integers")
+            << integers << QJsonValue(QJsonObject{{QLatin1StringView("a"), many}}) << TooLargeToCheck;
+        QTest::newRow("100000 integers")
+            << integers
+            << QJsonValue(QJsonObject{{QLatin1StringView("a"), QJsonArray::fromVariantList(QVariantList(100000, 1))}})
+            << QString();
+        // jsoncons checks multipleOf with doubles, which do not tell 10^17
+        // from a multiple of 3.
+        const QJsonObject multiple = parse("{'type': 'object', 'properties': {'a': {'multipleOf': 3}}}");
+        QTest::newRow("multipleOf past 2^53")
+            << multiple << QJsonValue(parse("{'a': 100000000000000000}"))
+            << QStringLiteral(
+                   "- arguments/a: must be less than 2^53 in magnitude, because the server checks "
+                   "multipleOf with doubles");
+        QTest::newRow("multipleOf below 2^53") << multiple << QJsonValue(parse("{'a': 9007199254740989}"))
+                                               << QStringLiteral("- arguments/a: must be a multiple of 3");
+    }
+
     void longNamesAreShortInErrors()
     {
         // The model reads its errors back: a name of any length is cut.
@@ -1687,6 +1776,37 @@ private Q_SLOTS:
         QCOMPARE(resultOf(reply).value(QLatin1StringView("isError")).toBool(), true);
         QCOMPARE(firstText(reply), QStringLiteral("could not count"));
         QCOMPARE(finished, (QList<bool>{false, false, true}));
+    }
+
+    void deepStructuredContentIsRefused()
+    {
+        // A handler can build a value nested deeper than Qt's parser takes
+        // from the wire (1024 levels). The checks walk it recursively, so it
+        // is refused before them.
+        Peer peer;
+        McpServer server;
+        McpTool tool(QStringLiteral("deep"));
+        tool.setOutputSchema(parse("{'type': 'array'}"));
+        QVERIFY(server.addTool(tool, [](McpCall call) {
+            QJsonValue value = QJsonArray();
+            for (int i = 0; i < 1100; ++i) {
+                value = QJsonArray{value};
+            }
+            call.finish(McpResult::structured(value));
+        }));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("does not match its output schema")));
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("deep"))));
+        const QJsonObject reply = peer.readOne();
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+        QString pointer;
+        for (int i = 0; i <= 1024; ++i) {
+            pointer += QStringLiteral("/0");
+        }
+        const QString expected = QStringLiteral("structuredContent") + pointer
+            + QStringLiteral(": is nested more than 1024 levels deep, which the server does not check");
+        QVERIFY2(QJsonDocument(reply).toJson().contains(expected.toUtf8()),
+                 QJsonDocument(reply).toJson().left(400).constData());
     }
 
     void outputPropertyNamesSkipArrays()
