@@ -28,6 +28,14 @@ endif()
 include(GenerateExportHeader)
 
 find_package(Qt6 ${PHOSPHORZONERENDERING_QT_MIN} REQUIRED COMPONENTS Core Gui Quick)
+# PhosphorRendering's ShaderCompiler.h includes QShaderBaker (rhi/), which
+# lives in these private modules.
+if(NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6GuiPrivate CONFIG REQUIRED)
+endif()
+if(NOT TARGET Qt6::ShaderToolsPrivate)
+    find_package(Qt6ShaderToolsPrivate CONFIG REQUIRED)
+endif()
 set(CMAKE_AUTOMOC ON)
 
 if(NOT TARGET PhosphorEngineRuntime::PhosphorEngineRuntime)
@@ -100,6 +108,10 @@ target_link_libraries(PhosphorZoneRendering
         PhosphorShaders::PhosphorShaders
     PRIVATE
         PhosphorZones::PhosphorZones
+        # The warm bake compiles through PhosphorRendering's ShaderCompiler,
+        # whose header includes QShaderBaker.
+        Qt6::GuiPrivate
+        Qt6::ShaderToolsPrivate
 )
 
 set_target_properties(PhosphorZoneRendering PROPERTIES
