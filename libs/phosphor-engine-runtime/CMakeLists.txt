@@ -6,8 +6,9 @@
 # The settings model (the schema and its host extension, the store-backed
 # Settings and its interfaces, the defaults, keys and migrations) and the core
 # the runtime is built on (its interfaces, types, resolvers, geometry and
-# layout helpers, logging and translation catalog), and window tracking and
-# the drag resolver. The runtime's services,
+# layout helpers, logging and translation catalog), window tracking and the
+# drag resolver, and the services a host binds to its transport with the host
+# interfaces it implements. The runtime's
 # controllers and overlays follow it here area by area. Built standalone or as a subdirectory
 # of Phosphor.
 
@@ -116,6 +117,7 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/AnimationBootstrap.h
     include/PhosphorEngineRuntime/AnimationShaderSupportedPaths.h
     include/PhosphorEngineRuntime/AppDirectoryName.h
+    include/PhosphorEngineRuntime/AutotileService.h
     include/PhosphorEngineRuntime/CavaOptions.h
     include/PhosphorEngineRuntime/ConfigBackends.h
     include/PhosphorEngineRuntime/ConfigDefaults.h
@@ -137,6 +139,7 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/ConfigMigration.h
     include/PhosphorEngineRuntime/ConfigMigrationUtil.h
     include/PhosphorEngineRuntime/Constants.h
+    include/PhosphorEngineRuntime/ControlService.h
     include/PhosphorEngineRuntime/CrossSurfaceResolver.h
     include/PhosphorEngineRuntime/DaemonGeometryResolver.h
     include/PhosphorEngineRuntime/DmabufThumbnail.h
@@ -145,33 +148,46 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/DropProxy.h
     include/PhosphorEngineRuntime/Enums.h
     include/PhosphorEngineRuntime/GeometryUtils.h
+    include/PhosphorEngineRuntime/IHostApps.h
     include/PhosphorEngineRuntime/IOverlayService.h
     include/PhosphorEngineRuntime/ISettings.h
+    include/PhosphorEngineRuntime/ISystemOsd.h
+    include/PhosphorEngineRuntime/IWorkspaceHost.h
     include/PhosphorEngineRuntime/Interfaces.h
     include/PhosphorEngineRuntime/LayoutBundleBuilder.h
     include/PhosphorEngineRuntime/LayoutPreviewSerialize.h
+    include/PhosphorEngineRuntime/LayoutService.h
     include/PhosphorEngineRuntime/Logging.h
+    include/PhosphorEngineRuntime/Lookups.h
+    include/PhosphorEngineRuntime/OverlayControlService.h
     include/PhosphorEngineRuntime/OverlayShaderTree.h
     include/PhosphorEngineRuntime/PerScreenResolver.h
+    include/PhosphorEngineRuntime/RuleService.h
     include/PhosphorEngineRuntime/RuntimeI18n.h
     include/PhosphorEngineRuntime/ScreenIdResolver.h
     include/PhosphorEngineRuntime/ScreenModeRouter.h
     include/PhosphorEngineRuntime/ScreenScale.h
+    include/PhosphorEngineRuntime/ScrollingService.h
     include/PhosphorEngineRuntime/Settings.h
     include/PhosphorEngineRuntime/SettingsConfigStore.h
     include/PhosphorEngineRuntime/SettingsInterfaces.h
     include/PhosphorEngineRuntime/SettingsSchema.h
     include/PhosphorEngineRuntime/SettingsSchemaChoices.h
+    include/PhosphorEngineRuntime/SettingsService.h
     include/PhosphorEngineRuntime/ShaderRegistry.h
+    include/PhosphorEngineRuntime/ShaderService.h
+    include/PhosphorEngineRuntime/SnapService.h
     include/PhosphorEngineRuntime/SpatialAdjacency.h
     include/PhosphorEngineRuntime/StripCardSerialize.h
     include/PhosphorEngineRuntime/StripSelectorHitTest.h
+    include/PhosphorEngineRuntime/TilingService.h
     include/PhosphorEngineRuntime/Types.h
     include/PhosphorEngineRuntime/UnifiedLayoutList.h
     include/PhosphorEngineRuntime/Utils.h
     include/PhosphorEngineRuntime/WindowLifecycleRelay.h
     include/PhosphorEngineRuntime/WindowTracker.h
     include/PhosphorEngineRuntime/WindowTrackerInternal.h
+    include/PhosphorEngineRuntime/ZoneQueryService.h
     include/PhosphorEngineRuntime/ZoneSelectorLayout.h
 )
 
@@ -236,6 +252,7 @@ set(phosphorengineruntime_SRCS
     src/core/utils/geometryutils.cpp
     src/core/utils/unifiedlayoutlist.cpp
     src/core/utils/utils.cpp
+    src/runtime/common/lookups.cpp
     src/runtime/common/runtimei18n.cpp
     src/runtime/dragresolver/drag.cpp
     src/runtime/dragresolver/drag_protocol.cpp
@@ -246,6 +263,34 @@ set(phosphorengineruntime_SRCS
     src/runtime/dragresolver/drop.cpp
     src/runtime/dragresolver/dropproxy.cpp
     src/runtime/dragresolver/selector_gate.cpp
+    src/runtime/services/autotileservice/autotileservice.cpp
+    src/runtime/services/autotileservice/config.cpp
+    src/runtime/services/controlservice.cpp
+    src/runtime/services/controlservice_shortcuts.cpp
+    src/runtime/services/layoutservice/assignment.cpp
+    src/runtime/services/layoutservice/assignment_batch.cpp
+    src/runtime/services/layoutservice/editor.cpp
+    src/runtime/services/layoutservice/layoutservice.cpp
+    src/runtime/services/overlaycontrolservice.cpp
+    src/runtime/services/ruleservice.cpp
+    src/runtime/services/scrollingservice/scrollingservice.cpp
+    src/runtime/services/settingsservice/settingsservice.cpp
+    src/runtime/services/settingsservice/settingsservice_batch.cpp
+    src/runtime/services/settingsservice/settingsservice_registry.cpp
+    src/runtime/services/settingsservice/settingsservice_registry_autotile.cpp
+    src/runtime/services/settingsservice/settingsservice_registry_scrolling.cpp
+    src/runtime/services/settingsservice/settingsservice_registry_snapping.cpp
+    src/runtime/services/shaderservice.cpp
+    src/runtime/services/snapservice/busgate.cpp
+    src/runtime/services/snapservice/commit.cpp
+    src/runtime/services/snapservice/navigation.cpp
+    src/runtime/services/snapservice/snaprestore.cpp
+    src/runtime/services/snapservice/snapservice.cpp
+    src/runtime/services/tilingservice/desktopreconcile.cpp
+    src/runtime/services/tilingservice/mapmodel.cpp
+    src/runtime/services/tilingservice/relay.cpp
+    src/runtime/services/tilingservice/tilingservice.cpp
+    src/runtime/services/zonequeryservice.cpp
     src/runtime/windowtracker/activation.cpp
     src/runtime/windowtracker/convenience.cpp
     src/runtime/windowtracker/crossmode.cpp
