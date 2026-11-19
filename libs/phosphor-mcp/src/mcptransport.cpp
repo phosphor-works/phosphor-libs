@@ -5,6 +5,8 @@
 
 #include "mcplogging.h"
 
+#include <QAbstractEventDispatcher>
+#include <QByteArray>
 #include <QMetaObject>
 #include <QPointer>
 #include <QSocketNotifier>
@@ -16,7 +18,12 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+// The library is Linux-only (sigtimedwait, MSG_NOSIGNAL, /proc/self/fd).
+// There EWOULDBLOCK is EAGAIN, so the code tests EAGAIN alone.
 
 namespace PhosphorMcp {
 
@@ -26,45 +33,96 @@ namespace {
 // event loop in this function, so replies and timers run between reads.
 constexpr qint64 ReadChunkBytes = 64 * 1024;
 
-// write() with SIGPIPE blocked in this thread. A write to a pipe or socket
-// whose reader has gone raises SIGPIPE in the writing thread, and the default
-// action ends the process. Blocked, the signal stays pending and the write
-// fails with EPIPE; the pending signal is then taken off, unless one was
-// pending before the write, which belongs to someone else.
-ssize_t writeWithoutSigpipe(int fd, const char* data, size_t size)
+// Blocks SIGPIPE in this thread around a write to a pipe, and takes back a
+// SIGPIPE that the write raised, so that a reader that went away is an
+// EPIPE and not the end of the process. The signal disposition, which the
+// whole process shares, stays as it is.
+//
+// Whether the write raised it is decided by the pending set, not by what
+// write() returned. A blocking write that copied part of its data before the
+// reader went away returns a count and still raises SIGPIPE. A SIGPIPE that
+// was pending before the write belongs to someone else and stays.
+//
+// A copy of phosphor-channel's SigpipeBlock (libs/phosphor-channel/src/
+// Stream.cpp). The two libraries do not depend on each other, so each has
+// its own. Keep the two in step.
+class SigpipeBlock
 {
-    sigset_t pipeSet;
-    sigemptyset(&pipeSet);
-    sigaddset(&pipeSet, SIGPIPE);
-
-    sigset_t pending;
-    sigemptyset(&pending);
-    sigpending(&pending);
-    const bool pendingBefore = sigismember(&pending, SIGPIPE) == 1;
-
-    sigset_t oldMask;
-    pthread_sigmask(SIG_BLOCK, &pipeSet, &oldMask);
-    const ssize_t written = ::write(fd, data, size);
-    const int writeError = errno;
-    if (written < 0 && writeError == EPIPE && !pendingBefore) {
-        const timespec noWait{0, 0};
-        while (sigtimedwait(&pipeSet, nullptr, &noWait) < 0 && errno == EINTR) { }
+public:
+    SigpipeBlock()
+    {
+        sigemptyset(&m_pipe);
+        sigaddset(&m_pipe, SIGPIPE);
+        sigset_t pending;
+        sigpending(&pending);
+        m_wasPending = sigismember(&pending, SIGPIPE) == 1;
+        m_blocked = pthread_sigmask(SIG_BLOCK, &m_pipe, &m_old) == 0;
     }
-    pthread_sigmask(SIG_SETMASK, &oldMask, nullptr);
-    errno = writeError;
+    ~SigpipeBlock()
+    {
+        if (!m_blocked) {
+            return;
+        }
+        if (!m_wasPending) {
+            sigset_t pending;
+            sigpending(&pending);
+            if (sigismember(&pending, SIGPIPE) == 1) {
+                const timespec now{0, 0};
+                while (sigtimedwait(&m_pipe, nullptr, &now) < 0 && errno == EINTR) { }
+            }
+        }
+        pthread_sigmask(SIG_SETMASK, &m_old, nullptr);
+    }
+    Q_DISABLE_COPY_MOVE(SigpipeBlock)
+
+private:
+    sigset_t m_pipe;
+    sigset_t m_old;
+    bool m_wasPending = false;
+    bool m_blocked = false;
+};
+
+// Writes without blocking and without SIGPIPE. errno is write()'s.
+ssize_t writeOut(int fd, bool isSocket, const char* data, size_t size)
+{
+    if (isSocket) {
+        return ::send(fd, data, size, MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
+    ssize_t written = -1;
+    int error = 0;
+    {
+        const SigpipeBlock block;
+        written = ::write(fd, data, size);
+        error = errno;
+    }
+    errno = error;
     return written;
 }
 
-// EWOULDBLOCK is EAGAIN on Linux and the BSDs, and comparing with both trips
-// -Wlogical-op there.
-bool wouldBlock(int error)
+// What a line of the input can be read from, and its replies written to.
+// The file type of an eventfd or another anonymous inode is 0. One takes the
+// number of stdin or stdout when the application started with that closed:
+// QCoreApplication's own eventfd, which would never give a line and would
+// take the replies.
+bool isStreamType(mode_t mode)
 {
-#if EWOULDBLOCK != EAGAIN
-    if (error == EWOULDBLOCK) {
-        return true;
+    return S_ISFIFO(mode) || S_ISSOCK(mode) || S_ISCHR(mode) || S_ISREG(mode);
+}
+
+// Checks one descriptor for open(). False, with a warning, when it is not
+// open or cannot carry lines.
+bool checkDescriptor(int fd, const char* role, struct stat* info)
+{
+    if (fd < 0 || ::fstat(fd, info) < 0) {
+        qCWarning(lcMcp).nospace() << "McpTransport::open: the " << role << " descriptor " << fd << " is not open";
+        return false;
     }
-#endif
-    return error == EAGAIN;
+    if (!isStreamType(info->st_mode)) {
+        qCWarning(lcMcp).nospace() << "McpTransport::open: the " << role << " descriptor " << fd
+                                   << " is not a pipe, a socket, a character device or a regular file";
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -84,34 +142,70 @@ McpTransport::~McpTransport()
 bool McpTransport::open()
 {
     if (m_opened) {
-        qCWarning(lcMcp, "McpTransport::open: opened before");
+        qCWarning(lcMcp) << "McpTransport::open: opened before";
         return false;
     }
-    if (fcntl(m_readFd, F_GETFL) < 0) {
-        qCWarning(lcMcp, "McpTransport::open: the read descriptor %d is not open", m_readFd);
+    // The notifiers are dead without one: the transport would never read,
+    // and a queued write would never go out.
+    if (!QAbstractEventDispatcher::instance(thread())) {
+        qCWarning(lcMcp) << "McpTransport::open: the thread has no event dispatcher (create the "
+                            "QCoreApplication first)";
         return false;
     }
-    const int flags = fcntl(m_writeFd, F_GETFL);
-    if (flags < 0) {
-        qCWarning(lcMcp, "McpTransport::open: the write descriptor %d is not open", m_writeFd);
+    struct stat readInfo{};
+    struct stat writeInfo{};
+    if (!checkDescriptor(m_readFd, "read", &readInfo) || !checkDescriptor(m_writeFd, "write", &writeInfo)) {
         return false;
     }
-    if ((flags & O_NONBLOCK) == 0 && fcntl(m_writeFd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        qCWarning(lcMcp, "McpTransport::open: cannot make the write descriptor non-blocking");
+    m_outputIsSocket = S_ISSOCK(writeInfo.st_mode);
+    if (!openOutput()) {
         return false;
     }
-    // Restored at close: the flag belongs to the open file description,
-    // which the process that started this one may share (a terminal).
-    m_savedWriteFlags = flags;
     m_opened = true;
 
     // The read descriptor stays as it is. Each wake-up reads once, and the
     // notifier says that a read will not block.
     m_readNotifier = new QSocketNotifier(m_readFd, QSocketNotifier::Read, this);
     connect(m_readNotifier, &QSocketNotifier::activated, this, &McpTransport::onReadable);
-    m_writeNotifier = new QSocketNotifier(m_writeFd, QSocketNotifier::Write, this);
+    // A stopReading() before open() holds.
+    updateReadNotifier();
+    m_writeNotifier = new QSocketNotifier(m_outputFd, QSocketNotifier::Write, this);
     m_writeNotifier->setEnabled(false);
-    connect(m_writeNotifier, &QSocketNotifier::activated, this, &McpTransport::onWritable);
+    connect(m_writeNotifier, &QSocketNotifier::activated, this, &McpTransport::flush);
+    return true;
+}
+
+bool McpTransport::openOutput()
+{
+    // send() takes MSG_DONTWAIT, so the socket's flags never change.
+    if (m_outputIsSocket) {
+        m_outputFd = m_writeFd;
+        return true;
+    }
+    // A terminal's file description is shared with the shell that started
+    // the program and with stdin and stderr. O_NONBLOCK there would stay
+    // after the program is killed, and break the shell's next reads. A
+    // description of the transport's own leaves it alone.
+    if (::isatty(m_writeFd)) {
+        const QByteArray path = "/proc/self/fd/" + QByteArray::number(m_writeFd);
+        const int fd = ::open(path.constData(), O_WRONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) {
+            qCWarning(lcMcp).nospace() << "McpTransport::open: cannot open the terminal " << m_writeFd
+                                       << " again for writes that do not block (" << strerror(errno) << ")";
+            return false;
+        }
+        m_outputFd = fd;
+        m_ownsOutputFd = true;
+        return true;
+    }
+    const int flags = ::fcntl(m_writeFd, F_GETFL);
+    if (flags < 0 || ((flags & O_NONBLOCK) == 0 && ::fcntl(m_writeFd, F_SETFL, flags | O_NONBLOCK) < 0)) {
+        qCWarning(lcMcp).nospace() << "McpTransport::open: cannot make the write descriptor " << m_writeFd
+                                   << " non-blocking (" << strerror(errno) << ")";
+        return false;
+    }
+    m_outputFd = m_writeFd;
+    m_clearNonBlock = (flags & O_NONBLOCK) == 0;
     return true;
 }
 
@@ -129,10 +223,19 @@ void McpTransport::close()
     m_queueOffset = 0;
     m_queuedBytes = 0;
     m_input.clear();
-    if (m_savedWriteFlags >= 0) {
-        fcntl(m_writeFd, F_SETFL, m_savedWriteFlags);
-        m_savedWriteFlags = -1;
+    if (m_ownsOutputFd) {
+        ::close(m_outputFd);
+        m_ownsOutputFd = false;
+    } else if (m_clearNonBlock) {
+        // Only the bit that open() set: whatever else changed on the shared
+        // description since then is someone else's.
+        const int flags = ::fcntl(m_writeFd, F_GETFL);
+        if (flags >= 0 && (flags & O_NONBLOCK) != 0) {
+            ::fcntl(m_writeFd, F_SETFL, flags & ~O_NONBLOCK);
+        }
+        m_clearNonBlock = false;
     }
+    m_outputFd = -1;
 }
 
 bool McpTransport::isOpen() const
@@ -169,19 +272,17 @@ qint64 McpTransport::maxPendingWriteBytes() const
 void McpTransport::setMaxPendingWriteBytes(qint64 bytes)
 {
     m_maxPendingWriteBytes = qMax<qint64>(1, bytes);
+    updateReadPause();
 }
 
-bool McpTransport::writeLine(const QByteArray& line)
+bool McpTransport::writeLine(QByteArray line)
 {
     if (!isOpen() || m_outputFailed || line.contains('\n')) {
         return false;
     }
-    QByteArray framed;
-    framed.reserve(line.size() + 1);
-    framed.append(line);
-    framed.append('\n');
-    m_queuedBytes += framed.size();
-    m_queue.append(std::move(framed));
+    line.append('\n');
+    m_queuedBytes += line.size();
+    m_queue.append(std::move(line));
     // Behind a queue that waits for the reader, a write now would only
     // fail with EAGAIN.
     if (!m_writeNotifier->isEnabled()) {
@@ -190,10 +291,7 @@ bool McpTransport::writeLine(const QByteArray& line)
     // A client that sends requests and never reads the replies would grow
     // the queue without end. Past the mark, the requests wait in the pipe,
     // unread, until the client takes its replies. No reply is dropped.
-    if (!m_readPaused && m_queuedBytes > m_maxPendingWriteBytes) {
-        m_readPaused = true;
-        updateReadNotifier();
-    }
+    updateReadPause();
     return true;
 }
 
@@ -209,7 +307,29 @@ void McpTransport::updateReadNotifier()
     }
     // Off while lines go out, too: a slot that runs a nested event loop must
     // not read and dispatch more lines inside the outer dispatch.
-    m_readNotifier->setEnabled(isOpen() && !m_readStopped && !m_readPaused && !m_dispatching && !m_inputEnded);
+    m_readNotifier->setEnabled(canDispatch() && !m_dispatching && !m_inputEnded);
+}
+
+bool McpTransport::canDispatch() const
+{
+    // After a failed write, a line would only run a handler whose reply
+    // cannot go out.
+    return isOpen() && !m_readStopped && !m_readPaused && !m_outputFailed;
+}
+
+void McpTransport::updateReadPause()
+{
+    if (!m_readPaused && m_queuedBytes > m_maxPendingWriteBytes) {
+        m_readPaused = true;
+        updateReadNotifier();
+    } else if (m_readPaused && m_queuedBytes <= m_maxPendingWriteBytes / 2) {
+        // Half the mark: reading does not flap on and off at each reply.
+        m_readPaused = false;
+        updateReadNotifier();
+        // The lines read before the pause and not yet dispatched. Queued:
+        // this runs inside flush() or a setter, which may run inside a slot.
+        scheduleDispatch();
+    }
 }
 
 void McpTransport::onReadable()
@@ -240,7 +360,7 @@ void McpTransport::onReadable()
         return;
     }
     const int error = errno;
-    if (error == EINTR || wouldBlock(error)) {
+    if (error == EINTR || error == EAGAIN) {
         return;
     }
     stopReading();
@@ -270,9 +390,6 @@ void McpTransport::dispatchLines()
     const QPointer<McpTransport> self(this);
     m_dispatching = true;
     updateReadNotifier();
-    const auto canDispatch = [this] {
-        return isOpen() && !m_readStopped && !m_readPaused;
-    };
 
     // Every line leaves m_input before its signal goes out, so the state is
     // whole whenever a slot runs, whatever the slot does.
@@ -280,9 +397,13 @@ void McpTransport::dispatchLines()
         // m_scanned carries over the part of a long line already searched,
         // so a line of many chunks is searched once.
         const qint64 newline = m_input.indexOf('\n', m_scanned);
+        qint64 taken = newline + 1;
         if (newline < 0) {
             m_scanned = m_input.size();
-            if (m_input.size() > m_maxLineBytes) {
+            // A carriage return at the end may be the start of the line's
+            // CR LF, and does not count against the limit.
+            const qint64 length = m_input.size() - (m_input.endsWith('\r') ? 1 : 0);
+            if (length > m_maxLineBytes) {
                 // No newline yet and already over: drop it now rather than
                 // keep growing the buffer, and the rest up to the newline.
                 m_input.clear();
@@ -292,15 +413,22 @@ void McpTransport::dispatchLines()
                 if (!self) {
                     return;
                 }
+                continue;
             }
-            break;
+            // At the end of the input, a last line without its newline still
+            // counts, as a client that writes one request and closes would
+            // expect.
+            if (!m_inputEnded || m_input.isEmpty()) {
+                break;
+            }
+            taken = m_input.size();
         }
-        qint64 end = newline;
+        qint64 end = newline < 0 ? taken : newline;
         if (end > 0 && m_input.at(end - 1) == '\r') {
             --end;
         }
         const QByteArray line = m_input.left(end);
-        m_input.remove(0, newline + 1);
+        m_input.remove(0, taken);
         m_scanned = 0;
         if (line.size() > m_maxLineBytes) {
             Q_EMIT lineTooLong();
@@ -312,32 +440,14 @@ void McpTransport::dispatchLines()
         }
     }
 
-    // The end of the input comes after every line before it: a last line
-    // without its newline still counts, as a client that writes one request
-    // and closes would expect.
+    // The end of the input comes after every line before it, and only when
+    // a slot of the last one did not stop or pause reading. A pause that
+    // ends dispatches again, and the end comes then.
     if (m_inputEnded && !m_endReported && canDispatch()) {
         m_endReported = true;
-        if (!m_discarding && !m_input.isEmpty()) {
-            QByteArray line = m_input;
-            m_input.clear();
-            m_scanned = 0;
-            if (line.endsWith('\r')) {
-                line.chop(1);
-            }
-            if (line.size() > m_maxLineBytes) {
-                Q_EMIT lineTooLong();
-            } else {
-                Q_EMIT lineReceived(line);
-            }
-            if (!self) {
-                return;
-            }
-        }
-        if (isOpen()) {
-            Q_EMIT endOfInput();
-            if (!self) {
-                return;
-            }
+        Q_EMIT endOfInput();
+        if (!self) {
+            return;
         }
     }
 
@@ -345,56 +455,54 @@ void McpTransport::dispatchLines()
     updateReadNotifier();
 }
 
-void McpTransport::onWritable()
-{
-    flush();
-}
-
 void McpTransport::flush()
 {
-    // Only a queue that had to wait for the reader drains: a line written
-    // whole inside writeLine() was never pending for anyone.
+    // A queue that had to wait for the reader has the write notifier on, and
+    // this runs from the notifier. From writeLine() the notifier is off, and
+    // a line written whole there was never pending for anyone.
     const bool waited = m_writeNotifier->isEnabled();
+    bool blocked = false;
+    qint64 progress = 0;
     while (!m_queue.isEmpty()) {
         const QByteArray& head = m_queue.first();
-        const ssize_t written =
-            writeWithoutSigpipe(m_writeFd, head.constData() + m_queueOffset, size_t(head.size() - m_queueOffset));
+        const ssize_t written = writeOut(m_outputFd, m_outputIsSocket, head.constData() + m_queueOffset,
+                                         size_t(head.size() - m_queueOffset));
         if (written < 0) {
             const int error = errno;
             if (error == EINTR) {
                 continue;
             }
-            if (wouldBlock(error)) {
-                m_writeNotifier->setEnabled(true);
-                return;
+            if (error == EAGAIN) {
+                blocked = true;
+                break;
             }
             failOutput(error);
             return;
         }
+        progress += written;
         m_queueOffset += written;
         m_queuedBytes -= written;
         if (m_queueOffset == head.size()) {
             m_queue.removeFirst();
             m_queueOffset = 0;
         }
-        resumeReadingIfDrained();
+        updateReadPause();
     }
-    m_writeNotifier->setEnabled(false);
-    if (waited) {
-        // From the write notifier, so from the event loop.
+    m_writeNotifier->setEnabled(blocked);
+    if (!waited) {
+        return;
+    }
+    // From the write notifier, so from the event loop. A slot may write
+    // more lines, close the transport or destroy it.
+    const QPointer<McpTransport> self(this);
+    if (progress > 0) {
+        Q_EMIT bytesWritten(progress);
+        if (!self || !isOpen()) {
+            return;
+        }
+    }
+    if (m_queue.isEmpty()) {
         Q_EMIT drained();
-    }
-}
-
-void McpTransport::resumeReadingIfDrained()
-{
-    // Half the mark: reading does not flap on and off at each reply.
-    if (m_readPaused && m_queuedBytes <= m_maxPendingWriteBytes / 2) {
-        m_readPaused = false;
-        updateReadNotifier();
-        // The lines read before the pause and not yet dispatched. Queued:
-        // this runs inside flush(), which may run inside a slot.
-        scheduleDispatch();
     }
 }
 
@@ -405,7 +513,9 @@ void McpTransport::failOutput(int error)
     m_queue.clear();
     m_queueOffset = 0;
     m_queuedBytes = 0;
-    resumeReadingIfDrained();
+    m_input.clear();
+    m_scanned = 0;
+    updateReadNotifier();
     QMetaObject::invokeMethod(
         this,
         [this, error] {

@@ -28,6 +28,7 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -61,14 +62,27 @@ inline void spinFor(int ms)
 class Peer
 {
 public:
+    // The send buffer of the server's end, fixed so that what the socket
+    // takes before a write would block does not depend on the machine's
+    // net.core.wmem_default. The kernel doubles it, and a reply of a few
+    // hundred kilobytes already waits in the server's queue.
+    static constexpr int ServerSendBufferBytes = 64 * 1024;
+
     Peer()
     {
         int fds[2];
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == 0) {
-            m_server = fds[0];
-            m_client = fds[1];
-            ::fcntl(m_client, F_SETFL, ::fcntl(m_client, F_GETFL) | O_NONBLOCK);
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0) {
+            return;
         }
+        const int sendBuffer = ServerSendBufferBytes;
+        if (::setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &sendBuffer, sizeof sendBuffer) != 0) {
+            ::close(fds[0]);
+            ::close(fds[1]);
+            return;
+        }
+        m_server = fds[0];
+        m_client = fds[1];
+        ::fcntl(m_client, F_SETFL, ::fcntl(m_client, F_GETFL) | O_NONBLOCK);
     }
     ~Peer()
     {
@@ -125,6 +139,9 @@ public:
     {
         ::shutdown(m_client, SHUT_WR);
     }
+    // Closes the client's end, as a client that went away does. The server
+    // then reads the end of its input, or ECONNRESET when replies were left
+    // unread, and its writes fail with EPIPE.
     void closeClient()
     {
         if (m_client >= 0) {
@@ -133,8 +150,21 @@ public:
         }
     }
 
-    // Takes what has come, without waiting. Returns the bytes read, 0 at
-    // the end of the stream.
+    // Runs the event loop until the server has read everything sent so far,
+    // which the socket no longer holds. False after `ms` without that.
+    bool waitUntilServerRead(int ms = 5000)
+    {
+        return spinUntil(
+            [this] {
+                int unread = 0;
+                return ::ioctl(m_server, FIONREAD, &unread) == 0 && unread == 0;
+            },
+            ms);
+    }
+
+    // Takes up to `maxBytes` of what has come, without waiting. Returns the
+    // bytes read. It is 0 both when nothing has come yet and at the end of
+    // the stream, which ended() then tells.
     qint64 pump(qint64 maxBytes = 1 << 20)
     {
         QByteArray chunk(maxBytes, Qt::Uninitialized);
@@ -190,6 +220,8 @@ public:
     {
         return m_bytesRead;
     }
+    // The server's end of the stream came: its descriptor was closed or
+    // shut down for writing.
     [[nodiscard]] bool ended() const
     {
         return m_ended;
