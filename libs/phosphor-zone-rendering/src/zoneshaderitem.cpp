@@ -136,9 +136,8 @@ void ZoneShaderItem::setUniformExtension(std::shared_ptr<PhosphorShaders::IUnifo
     // Log loudly at the point of misuse instead of inheriting the base
     // class's silent-store behaviour.
     Q_UNUSED(extension);
-    qCWarning(lcZoneRendering)
-        << "ZoneShaderItem::setUniformExtension: ignored: zone rendering owns its own"
-        << "IUniformExtension (ZoneUniformExtension) and cannot accept a replacement.";
+    qCWarning(lcZoneRendering) << "ZoneShaderItem::setUniformExtension: ignored: zone rendering owns its own"
+                               << "IUniformExtension (ZoneUniformExtension) and cannot accept a replacement.";
 }
 
 // ============================================================================
@@ -245,9 +244,9 @@ void ZoneShaderItem::updateHoveredHighlightOnly()
 {
     // Precondition: m_zoneData must be populated by a prior setZones/parseZoneData call.
     if (m_zoneData.rects.size() != static_cast<qsizetype>(m_zones.size())) {
-        qCWarning(lcZoneRendering)
-            << "updateHoveredHighlightOnly: zone data out of sync (rects=" << m_zoneData.rects.size()
-            << "zones=" << m_zones.size() << ") - setZones must be called first";
+        qCWarning(lcZoneRendering) << "updateHoveredHighlightOnly: zone data out of sync (rects="
+                                   << m_zoneData.rects.size() << "zones=" << m_zones.size()
+                                   << ") - setZones must be called first";
         return;
     }
     // Pre-compute highlight flags outside the mutex to avoid blocking the render
@@ -329,8 +328,7 @@ QSGNode* ZoneShaderItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* 
         // right node type for free.
         node = static_cast<PhosphorRendering::ZoneShaderNodeRhi*>(createShaderNode());
         freshNode = true;
-        qCDebug(lcZoneRendering)
-            << "updatePaintNode: created NEW ZoneShaderNodeRhi (oldNode was null)";
+        qCDebug(lcZoneRendering) << "updatePaintNode: created NEW ZoneShaderNodeRhi (oldNode was null)";
     }
     // REGISTER the node with the base, on every frame rather than only the
     // fresh-node path: this override replaces the base updatePaintNode that
@@ -418,8 +416,7 @@ QSGNode* ZoneShaderItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* 
             // Empty when the pack declares no params, or for a pack not yet
             // migrated to p_ names — a no-op either way.
             node->setParamPreamble(paramPreamble());
-            qCDebug(lcZoneRendering)
-                << "Shader include paths:" << shaderIncludePaths() << "vertPath:" << vertPath;
+            qCDebug(lcZoneRendering) << "Shader include paths:" << shaderIncludePaths() << "vertPath:" << vertPath;
 
             node->setVertexShaderSource(QString());
             node->setFragmentShaderSource(QString());
@@ -437,8 +434,7 @@ QSGNode* ZoneShaderItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* 
             // shader's compile error as its reason.
             QString failureReason;
             if (fragPath.isEmpty()) {
-                qCWarning(lcZoneRendering)
-                    << "Shader URL resolved to no usable path:" << shaderSource();
+                qCWarning(lcZoneRendering) << "Shader URL resolved to no usable path:" << shaderSource();
                 failureReason = QStringLiteral("Shader URL resolved to no usable path: ") + shaderSource().toString();
                 loaded = false;
             }
@@ -449,9 +445,8 @@ QSGNode* ZoneShaderItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* 
                     loaded = false;
                 }
             } else if (loaded) {
-                qCWarning(lcZoneRendering)
-                    << "No vertex shader found for" << fragPath
-                    << "(expected zone.vert in the shader dir or a search path)";
+                qCWarning(lcZoneRendering) << "No vertex shader found for" << fragPath
+                                           << "(expected zone.vert in the shader dir or a search path)";
                 // Carries the journal line's parenthetical BYTE FOR BYTE, so a user comparing the
                 // on-screen text against the journal reads one sentence rather than two. The text
                 // is what matters here: it reaches the live overlay's own inline card
