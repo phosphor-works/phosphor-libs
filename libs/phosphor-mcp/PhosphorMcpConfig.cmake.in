@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Core only. valijson is header-only and private to the library, so a
+# consumer needs nothing of it.
+find_dependency(Qt6 @PHOSPHORMCP_QT_MIN@ COMPONENTS Core)
+
+include("${CMAKE_CURRENT_LIST_DIR}/PhosphorMcpTargets.cmake")
+
+check_required_components(PhosphorMcp)

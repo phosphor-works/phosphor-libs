@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+find_package(Qt6 REQUIRED COMPONENTS Test)
+
+# The repo-root isolation module, with stand-ins for an extracted subtree.
+# phosphor-ipc's tests/CMakeLists.txt explains each case.
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/PhosphorTestIsolation.cmake)
+else()
+    function(phosphor_apply_test_isolation _target)
+    endfunction()
+    function(phosphor_append_test_environment _test_name)
+        set_property(TEST ${_test_name} APPEND PROPERTY ENVIRONMENT ${ARGN})
+    endfunction()
+endif()
+
+function(phosphormcp_add_test name)
+    add_executable(${name} ${name}.cpp mcptesthelpers.h)
+    target_link_libraries(${name}
+        PRIVATE
+            PhosphorMcp::PhosphorMcp
+            Qt6::Test
+    )
+    # A unity build wraps even a single source in a generated file that
+    # includes it. The test is then not GCC's main file, and its
+    # anonymous-namespace fixtures captured in lambdas trip
+    # -Wsubobject-linkage, as phosphor-control's tests avoid the same way.
+    set_target_properties(${name} PROPERTIES UNITY_BUILD OFF)
+    add_test(NAME ${name} COMMAND ${name} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    phosphor_apply_test_isolation(${name})
+    # QTEST_GUILESS_MAIN everywhere: a QCoreApplication, no display. The
+    # library's own tests give the server socket pairs and pipes inside the
+    # test process. test_phosphor_mcp_example runs the example as a child.
+    set_tests_properties(${name} PROPERTIES
+        TIMEOUT 60
+        LABELS "phosphormcp"
+    )
+endfunction()
+
+phosphormcp_add_test(test_phosphor_mcp_transport)
+phosphormcp_add_test(test_phosphor_mcp_protocol)
+phosphormcp_add_test(test_phosphor_mcp_tools)
+phosphormcp_add_test(test_phosphor_mcp_calls)
+phosphormcp_add_test(test_phosphor_mcp_signals)
+
+# The example server, driven as a client would drive it. The example is built
+# whenever the tests are, unless BUILD_PHOSPHOR_MCP_EXAMPLES was turned off.
+if(TARGET phosphor-mcp-example)
+    phosphormcp_add_test(test_phosphor_mcp_example)
+    target_compile_definitions(test_phosphor_mcp_example
+        PRIVATE
+            PHOSPHOR_MCP_EXAMPLE_PATH="$<TARGET_FILE:phosphor-mcp-example>"
+            PHOSPHORMCP_VERSION="${PHOSPHORMCP_VERSION}")
+    add_dependencies(test_phosphor_mcp_example phosphor-mcp-example)
+else()
+    message(STATUS "phosphor-mcp: test_phosphor_mcp_example is not built, because BUILD_PHOSPHOR_MCP_EXAMPLES is OFF")
+endif()
