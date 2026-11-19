@@ -57,7 +57,7 @@ interfaces.
 | `DragResolver` | `DragResolver.h` | A drag's activation, zone highlight and drop |
 | `WindowLifecycleRelay` | `WindowLifecycleRelay.h` | The window lifecycle signals the services listen to |
 | `LayoutService`, `SettingsService`, `SnapService`, ... | `<Name>Service.h` | The services a host binds to its transport |
-| `IWorkspaceHost`, `ISystemOsd`, `IHostApps` | `IWorkspaceHost.h`, `ISystemOsd.h`, `IHostApps.h` | What the runtime needs from its host |
+| `IWorkspaceHost`, `ISystemOsd`, `IHostApps`, `IShellCheatsheet` | `IWorkspaceHost.h`, `ISystemOsd.h`, `IHostApps.h`, `IShellCheatsheet.h` | What the runtime needs from its host |
 | `OverlayService` | `OverlayService.h` | The overlays, their surfaces, animation and QML |
 | `ISurfacePresentationHost` | `ISurfacePresentationHost.h` | The host's render backend and GPU thumbnail import |
 | `ShortcutManager` | `ShortcutManager.h` | The runtime's global shortcuts and the cheatsheet model |

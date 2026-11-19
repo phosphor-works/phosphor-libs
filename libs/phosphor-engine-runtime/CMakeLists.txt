@@ -177,6 +177,7 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/IHostApps.h
     include/PhosphorEngineRuntime/IOverlayService.h
     include/PhosphorEngineRuntime/ISettings.h
+    include/PhosphorEngineRuntime/IShellCheatsheet.h
     include/PhosphorEngineRuntime/ISurfacePresentationHost.h
     include/PhosphorEngineRuntime/ISystemOsd.h
     include/PhosphorEngineRuntime/IWorkspaceHost.h
