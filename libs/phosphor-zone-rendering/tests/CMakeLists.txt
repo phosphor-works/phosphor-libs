@@ -55,3 +55,6 @@ target_link_libraries(test_zone_rendering_qml_module
         Qt6::Qml
         Qt6::Quick
 )
+
+# The trusted overlay roots follow the app's overlay pack directory.
+phosphorzonerendering_add_test(test_overlay_pack_location)

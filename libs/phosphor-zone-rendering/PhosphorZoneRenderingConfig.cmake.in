@@ -6,7 +6,12 @@
 include(CMakeFindDependencyMacro)
 
 find_dependency(Qt6 @PHOSPHORZONERENDERING_QT_MIN@ COMPONENTS Core Gui Quick)
-find_dependency(PhosphorEngineRuntime)
+# The public headers reach <rhi/qrhi.h>, which lives in Qt6::GuiPrivate. Some
+# distros ship it as its own package (Arch, openSUSE), others define it inside
+# Qt6GuiConfig.cmake (Fedora), the way PhosphorRenderingConfig handles it.
+if(NOT TARGET Qt6::GuiPrivate)
+    find_dependency(Qt6GuiPrivate @PHOSPHORZONERENDERING_QT_MIN@)
+endif()
 find_dependency(PhosphorRendering)
 find_dependency(PhosphorShaders)
 find_dependency(PhosphorZones)

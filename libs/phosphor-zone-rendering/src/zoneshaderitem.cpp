@@ -5,9 +5,9 @@
 #include <PhosphorZoneRendering/ZoneEntryScaffold.h>
 #include <PhosphorZoneRendering/ZoneShaderNodeRhi.h>
 
-#include <PhosphorEngineRuntime/ConfigDefaults.h>
 #include "zonerenderinglogging.h"
 
+#include <PhosphorZones/ZoneDefaults.h>
 #include <PhosphorZones/ZoneJsonKeys.h>
 
 #include <PhosphorRendering/ShaderEffect.h>
@@ -97,11 +97,12 @@ ZoneShaderItem::ZoneShaderItem(QQuickItem* parent)
     const QStringList includePaths = expandShaderIncludePaths();
     setShaderIncludePaths(includePaths);
 
-    // Set PlasmaZones-specific default colors from ConfigDefaults
-    // (the library defaults are all-transparent).
-    setCustomColor1(PhosphorEngineRuntime::ConfigDefaults::highlightFallbackColor());
-    setCustomColor2(PhosphorEngineRuntime::ConfigDefaults::inactiveFallbackColor());
-    setCustomColor3(PhosphorEngineRuntime::ConfigDefaults::borderFallbackColor());
+    // Zone default colours (the shader effect's own defaults are all
+    // transparent). PhosphorZones' defaults are the ones the engine's settings
+    // fall back to as well.
+    setCustomColor1(::PhosphorZones::ZoneDefaults::HighlightColor);
+    setCustomColor2(::PhosphorZones::ZoneDefaults::InactiveColor);
+    setCustomColor3(::PhosphorZones::ZoneDefaults::BorderColor);
 }
 
 ZoneShaderItem::~ZoneShaderItem()
@@ -184,14 +185,15 @@ void ZoneShaderItem::parseZoneData()
             || (m_hoveredZoneIndex >= 0 && index == m_hoveredZoneIndex);
 
         // Extract shader border properties (stored in snapshot for thread-safe access).
-        // Defaults mirror ConfigDefaults so the shader path picks up the same
-        // fallback values as the non-shader path when a zone doesn't override them.
+        // PhosphorZones' defaults, which the engine's settings fall back to
+        // too, so the shader path picks up the same values as the non-shader
+        // path when a zone doesn't override them.
         rect.borderRadius = z.value(ZoneSnapshotKeys::ShaderBorderRadius,
-                                    static_cast<float>(PhosphorEngineRuntime::ConfigDefaults::borderRadius()))
+                                    static_cast<float>(::PhosphorZones::ZoneDefaults::BorderRadius))
                                 .toFloat();
-        rect.borderWidth = z.value(ZoneSnapshotKeys::ShaderBorderWidth,
-                                   static_cast<float>(PhosphorEngineRuntime::ConfigDefaults::borderWidth()))
-                               .toFloat();
+        rect.borderWidth =
+            z.value(ZoneSnapshotKeys::ShaderBorderWidth, static_cast<float>(::PhosphorZones::ZoneDefaults::BorderWidth))
+                .toFloat();
 
         if (rect.highlighted) {
             ++highlightedCount;
