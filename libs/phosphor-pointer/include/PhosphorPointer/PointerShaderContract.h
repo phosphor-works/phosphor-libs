@@ -18,7 +18,7 @@ namespace PhosphorPointerShaders {
 ///
 ///   • **Compositor execution** — the kwin-effect paints the chain as a
 ///     screen-space pass over the composited scene of the output under the
-///     pointer. Classic GL, loose uniforms (the `#ifdef PLASMAZONES_KWIN`
+///     pointer. Classic GL, loose uniforms (the `#ifdef PHOSPHOR_KWIN`
 ///     branch of `data/pointer/shared/pointer_uniforms.glsl`).
 ///
 ///   • **Preview execution** — the settings app drives the same source on

@@ -364,7 +364,7 @@ PHOSPHORANIMATION_EXPORT bool shaderEffectAppliesToEventPath(const AnimationShad
 /// Consequences carried by this predicate (single source of truth):
 ///   • such packs author their shaders against the classic-GL kwin dialect
 ///     directly (default-block uniforms, unguarded — no
-///     `#ifdef PLASMAZONES_KWIN` branching);
+///     `#ifdef PHOSPHOR_KWIN` branching);
 ///   • the daemon never warm-bakes them and `SurfaceAnimator` refuses to
 ///     attach them (their source no longer compiles on the strict SPIR-V
 ///     qsb target);

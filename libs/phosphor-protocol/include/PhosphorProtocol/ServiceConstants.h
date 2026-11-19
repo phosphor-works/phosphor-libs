@@ -1049,7 +1049,7 @@ inline bool envSwitchEnabledByDefault(const char* name)
 // callers may cache the result freely.
 //
 // Default-on: the dma-buf path is the normal transport, and
-// PLASMAZONES_DMABUF_THUMBNAILS=0 is the kill switch for a driver or session
+// PHOSPHOR_DMABUF_THUMBNAILS=0 is the kill switch for a driver or session
 // where it misbehaves. The raw-pixel path stays in place as the automatic
 // fallback for every case the gate cannot predict — a software or otherwise
 // unsupported RHI backend in the daemon, a cross-GPU import the driver
@@ -1059,7 +1059,7 @@ inline bool envSwitchEnabledByDefault(const char* name)
 // the effect back to pixels.
 inline bool snapAssistDmabufThumbnailsEnabled()
 {
-    return envSwitchEnabledByDefault("PLASMAZONES_DMABUF_THUMBNAILS");
+    return envSwitchEnabledByDefault("PHOSPHOR_DMABUF_THUMBNAILS");
 }
 
 // Diagnostic switch for the snap-assist thumbnail pipeline. When set, both
@@ -1072,7 +1072,7 @@ inline bool snapAssistDmabufThumbnailsEnabled()
 // and it follows the same "=0 disables" rule.
 inline bool snapAssistThumbnailTraceEnabled()
 {
-    return envSwitchEnabled("PLASMAZONES_THUMBNAIL_TRACE");
+    return envSwitchEnabled("PHOSPHOR_THUMBNAIL_TRACE");
 }
 
 } // namespace PhosphorProtocol::Service

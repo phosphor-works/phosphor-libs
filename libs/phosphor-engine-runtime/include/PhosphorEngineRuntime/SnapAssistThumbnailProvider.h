@@ -35,7 +35,7 @@ namespace PhosphorEngineRuntime {
  *     thread.
  *
  * QML references thumbnails via the URL scheme
- * `image://plasmazones-snapassist/<compositorHandle>/<generation>`. The
+ * `image://phosphor-snapassist/<compositorHandle>/<generation>`. The
  * generation token is bumped from a single monotonic counter on every
  * @ref insert so QML's own QQuickPixmap cache re-fetches when a fresh capture
  * arrives. Handles arrive from KWin in braced form
@@ -133,7 +133,7 @@ private:
 
     mutable QMutex m_mutex;
     QCache<QString, Entry> m_cache;
-    /// PLASMAZONES_THUMBNAIL_TRACE: per-insert and per-fetch timings to the
+    /// PHOSPHOR_THUMBNAIL_TRACE: per-insert and per-fetch timings to the
     /// plasmazones.daemon.snapassist.trace category. Process-constant.
     const bool m_traceEnabled;
     /// Monotonic across the daemon's lifetime; never wraps in any realistic

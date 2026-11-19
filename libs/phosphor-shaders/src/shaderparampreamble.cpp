@@ -135,7 +135,7 @@ QString kwinDefineBlock(const QString& eol)
 {
     return QStringLiteral("#ifndef GL_ES") + eol + QStringLiteral("#extension GL_ARB_explicit_attrib_location : enable")
         + eol + QStringLiteral("#extension GL_ARB_separate_shader_objects : enable") + eol + QStringLiteral("#endif")
-        + eol + QStringLiteral("#define PLASMAZONES_KWIN") + eol;
+        + eol + QStringLiteral("#define PHOSPHOR_KWIN") + eol;
 }
 
 QString stripVaryingLocations(const QString& source, ShaderStage stage)

@@ -115,7 +115,7 @@ static_assert(sizeof(BaseUniforms) == 672, "BaseUniforms must be exactly 672 byt
 // depends on — that GLSL declaration is a byte-for-byte std140 prefix of
 // `BaseUniforms`, which is what lets a single animation `effect.frag`
 // source produce identical visuals on both runtimes (compositor classic
-// GL via the canonical header's `#ifdef PLASMAZONES_KWIN` default-block
+// GL via the canonical header's `#ifdef PHOSPHOR_KWIN` default-block
 // branch, daemon Qt RHI via the `binding=0` UBO upload). If anyone
 // reorders or inserts a field above any of these, the corresponding
 // assert fails at compile time and the canonical GLSL header MUST be

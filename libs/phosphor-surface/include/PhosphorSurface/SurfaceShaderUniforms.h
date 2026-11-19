@@ -10,7 +10,7 @@
 namespace PhosphorSurfaceShaders {
 
 /// C++ mirror of the SURFACE shader contract's daemon UBO block — the
-/// `#else` (non-PLASMAZONES_KWIN) branch of `data/surface/shared/
+/// `#else` (non-PHOSPHOR_KWIN) branch of `data/surface/shared/
 /// surface_uniforms.glsl`, a std140 `layout(std140, binding = 0) uniform
 /// SurfaceUniforms { … }`. The daemon's Qt-RHI surface-shader runtime
 /// uploads this struct byte-for-byte to binding 0; the compositor takes the

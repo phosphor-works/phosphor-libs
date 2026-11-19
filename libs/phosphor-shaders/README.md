@@ -41,7 +41,7 @@ Phosphor overlay (hosts `ShaderEffect` items in QML).
 | `PhosphorShaders::versionDirectiveEnd`    | Comment- and BOM-aware locator for a source's `#version` directive, shared by every splice |
 | `PhosphorShaders::lineDirective`          | A `#line` re-anchor that numbers correctly under pre-330 and 330+ GLSL alike |
 | `PhosphorShaders::kwinCompositorSource`   | A pack stage as the KWin effect compiles it: the compositor define block spliced in and varying locations stripped |
-| `PhosphorShaders::kwinDefineBlock`        | The `PLASMAZONES_KWIN` define block, with its desktop-only extension guard |
+| `PhosphorShaders::kwinDefineBlock`        | The `PHOSPHOR_KWIN` define block, with its desktop-only extension guard |
 | `PhosphorShaders::kwinTopDownTexcoordsDefine` | The define KWin 6.8's per-window path adds for its top-down offscreen texcoords |
 | `PhosphorShaders::ShaderStage` / `stripVaryingLocations` | Drops `layout(location)` from a stage's varyings, which KWin's GLSL ES 300 compile rejects on Mesa |
 | `PhosphorShaders::kwinGlesDialect` / `kwinDesktopDialect` | KWin's own top-level rewrite on a GLES and a desktop context, for offline gates |

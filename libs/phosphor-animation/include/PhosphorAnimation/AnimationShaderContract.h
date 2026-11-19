@@ -76,15 +76,15 @@ namespace PhosphorAnimationShaders {
 ///     total 1344),
 ///     populated by Qt-RHI's binding=0 upload.
 ///
-///   • `#ifdef PLASMAZONES_KWIN` branch (compositor path): plain
+///   • `#ifdef PHOSPHOR_KWIN` branch (compositor path): plain
 ///     default-block `uniform float iTime;`-style declarations. The
-///     kwin-effect prepends `#define PLASMAZONES_KWIN` after the
+///     kwin-effect prepends `#define PHOSPHOR_KWIN` after the
 ///     shader's `#version` line before passing the source to
 ///     `KWin::ShaderManager::generateCustomShader`, which selects this
 ///     branch. KWin's `KWin::GLShader::setUniform(loc, val)` API
 ///     addresses default-block uniforms only and never binds UBOs.
 ///
-/// Shader authors do NOT need their own `#ifdef PLASMAZONES_KWIN` blocks
+/// Shader authors do NOT need their own `#ifdef PHOSPHOR_KWIN` blocks
 /// — both branches expose the same identifiers (`iTime`, `iResolution`,
 /// `customParams[N]`, `uTexture0`, etc.). The macro switch describes the
 /// uniform-binding ABI, not the runtime feature set.
@@ -175,7 +175,7 @@ namespace PhosphorAnimationShaders {
 ///
 ///   • `iChannelResolution[]` — auto-populated when multipass buffer
 ///     shaders are bound. NOT declared by the canonical header's
-///     `#ifdef PLASMAZONES_KWIN` branch (the compositor is single-pass,
+///     `#ifdef PHOSPHOR_KWIN` branch (the compositor is single-pass,
 ///     no buffer FBOs), so reaching for it there is a COMPILE error,
 ///     not a zero read.
 ///   • `iTimeHi` — auto-computed wrap counterpart of `iTime`. Declared
@@ -187,7 +187,7 @@ namespace PhosphorAnimationShaders {
 /// texture / FBO the shader renders into. Both runtimes populate all
 /// four — KWin via classic-GL `setUniform`, the daemon via
 /// `AnimationUniformExtension` — so none are guarded by
-/// `#ifdef PLASMAZONES_KWIN`. They matter because neither runtime
+/// `#ifdef PHOSPHOR_KWIN`. They matter because neither runtime
 /// captures the bare card: KWin redirects the EXPANDED window geometry
 /// (frame + decoration + shadow); the daemon captures the shader
 /// anchor, which a PopupFrame enlarges past the card by a glow margin
@@ -212,7 +212,7 @@ namespace PhosphorAnimationShaders {
 ///
 /// `iFlipBufferY`, `qt_Matrix`, `qt_Opacity`, `_appField0` /
 /// `_appField1` are daemon-only and absent from the canonical header's
-/// `#ifdef PLASMAZONES_KWIN` branch entirely.
+/// `#ifdef PHOSPHOR_KWIN` branch entirely.
 namespace AnimationShaderContract {
 
 /// `float iTime` — transition progress, normally in [0.0, 1.0].
@@ -400,7 +400,7 @@ inline constexpr const char* kIAnchorRectInTexture = "iAnchorRectInTexture";
 /// preview's UBO branch carries both as block members (the settings
 /// preview stages every class, geometry included), so a geometry pack
 /// declares the pair as default-block uniforms inside its own
-/// `#ifdef PLASMAZONES_KWIN` block and reads the UBO members otherwise.
+/// `#ifdef PHOSPHOR_KWIN` block and reads the UBO members otherwise.
 /// The daemon never attaches such packs (`shaderEffectIsCompositorOnly`
 /// gates the warm-bake and SurfaceAnimator); the offline validator bakes
 /// every pack on both branches and so needs the guard to hold.
@@ -424,7 +424,7 @@ inline constexpr const char* kIToRect = "iToRect";
 /// canonical shared header's kwin branch. Like `iFromRect` / `iToRect`
 /// it is a UBO member on the preview branch, so the packs that read it
 /// (genie, phosphor-siphon) declare it inside their own
-/// `#ifdef PLASMAZONES_KWIN` block — that guard is what keeps the
+/// `#ifdef PHOSPHOR_KWIN` block — that guard is what keeps the
 /// strict SPIR-V bake of these dual-runtime packs away from the loose
 /// declaration.
 inline constexpr const char* kIIconRect = "iIconRect";
@@ -443,7 +443,7 @@ inline constexpr const char* kIIconRect = "iIconRect";
 /// declared by the canonical header — only the `iHasOldWindow` gate int
 /// is; packs that sample old content opt in via
 /// `data/animations/shared/old_content.glsl`, which declares the sampler
-/// under `PLASMAZONES_KWIN` and aliases it onto `uTexture3` on the
+/// under `PHOSPHOR_KWIN` and aliases it onto `uTexture3` on the
 /// preview branch, so a tab pack compiles on both.
 inline constexpr const char* kUOldWindow = "uOldWindow";
 
@@ -547,7 +547,7 @@ inline constexpr const char* kILayerRectInTexture = "iLayerRectInTexture";
 /// Absent on the daemon path: overlay-surface animations have no
 /// window-rule opacity (`SetOpacity` is a compositor window-rule feature),
 /// so the canonical header declares this uniform — and folds it into
-/// `surfaceColor()` — only inside the `#ifdef PLASMAZONES_KWIN` branch.
+/// `surfaceColor()` — only inside the `#ifdef PHOSPHOR_KWIN` branch.
 inline constexpr const char* kIWindowOpacity = "iWindowOpacity";
 
 /// Maximum number of user-declared textures per animation effect.
@@ -614,7 +614,7 @@ inline constexpr const char* kIMouse = "iMouse";
 /// `vec4 customParams[N]` — per-effect declared parameter slots.
 /// Cross-runtime element-name lookup constant: mirrored by (not consumed from) the kwin-effect's
 /// `glGetUniformLocation("customParams[N]")` calls (the canonical header's
-/// `#ifdef PLASMAZONES_KWIN` branch declares them as default-block uniforms
+/// `#ifdef PHOSPHOR_KWIN` branch declares them as default-block uniforms
 /// `customParams[0]..customParams[7]`) and as a documentation anchor for
 /// shader authors. Symmetric with `kCustomColorsArray` below.
 inline constexpr const char* kCustomParamsArray = "customParams";
@@ -661,7 +661,7 @@ inline QString slotKey(int slot)
 /// Cross-runtime element-name lookup constant, symmetric with
 /// `kCustomParamsArray` above: mirrored by (not consumed from) the kwin-effect's
 /// `glGetUniformLocation("customColors[N]")` calls (the canonical
-/// header's `#ifdef PLASMAZONES_KWIN` branch declares them as
+/// header's `#ifdef PHOSPHOR_KWIN` branch declares them as
 /// default-block uniforms `customColors[0]..customColors[15]`) and as
 /// a documentation anchor for shader authors.
 ///

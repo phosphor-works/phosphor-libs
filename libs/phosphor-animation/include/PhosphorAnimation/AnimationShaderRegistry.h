@@ -193,7 +193,7 @@ public:
     /// the `animation_uniforms.glsl` include (uniforms + `legProgress()` /
     /// `p_reversed` / `surfaceColor()`), and the `vTexCoord` in / `fragColor`
     /// out. Prepended to an entry-only pack before include expansion; identical
-    /// on both runtimes (the include's `#ifdef PLASMAZONES_KWIN` branch handles
+    /// on both runtimes (the include's `#ifdef PHOSPHOR_KWIN` branch handles
     /// the binding difference).
     static QString animationEntryPrologue();
 
