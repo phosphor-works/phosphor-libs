@@ -66,7 +66,8 @@ private Q_SLOTS:
         const QByteArray config =
             QByteArrayLiteral("{\"_version\": ") + QByteArray::number(ConfigSchemaVersion) + QByteArrayLiteral("}");
         QVERIFY(writeFile(m_configRoot + QStringLiteral("/adopttest/config.json"), config));
-        QVERIFY(writeFile(m_configRoot + QStringLiteral("/adopttest/rules.json"), QByteArrayLiteral("{}")));
+        // A file the migration does not interpret: what moves is the whole directory.
+        QVERIFY(writeFile(m_configRoot + QStringLiteral("/adopttest/notes.txt"), QByteArrayLiteral("kept")));
         QVERIFY(
             writeFile(m_dataRoot + QStringLiteral("/adopttest/layouts/mine.json"), QByteArrayLiteral("{\"id\":1}")));
 
@@ -75,7 +76,7 @@ private Q_SLOTS:
         QVERIFY(QFileInfo::exists(ConfigDefaults::configFilePath()));
         QCOMPARE(ConfigDefaults::configFilePath(),
                  m_configRoot + QStringLiteral("/phosphor-works/adopttest/config.json"));
-        QVERIFY(QFileInfo::exists(ConfigDefaults::rulesFilePath()));
+        QCOMPARE(readFile(appConfigDir() + QStringLiteral("/notes.txt")), QByteArrayLiteral("kept"));
         const QString movedLayout =
             m_dataRoot + QLatin1Char('/') + ConfigKeys::layoutsSubdir() + QStringLiteral("/mine.json");
         QCOMPARE(readFile(movedLayout), QByteArrayLiteral("{\"id\":1}"));
