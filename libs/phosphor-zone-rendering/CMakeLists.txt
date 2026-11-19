@@ -8,6 +8,10 @@
 # scaffold, the include-path and vertex-stage resolution shared with the warm
 # bake, and the zone-label texture. The engine runtime's overlays draw with it,
 # and so do a settings app's previews and the pack tooling.
+#
+# The org.phosphor.zonerendering QML module (STATIC, PhosphorZoneRenderingQml)
+# registers the item and ships ZoneShaderRenderer.qml, the wrapper the overlay
+# and the previews share.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -27,7 +31,7 @@ endif()
 
 include(GenerateExportHeader)
 
-find_package(Qt6 ${PHOSPHORZONERENDERING_QT_MIN} REQUIRED COMPONENTS Core Gui Quick)
+find_package(Qt6 ${PHOSPHORZONERENDERING_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
 # PhosphorRendering's ShaderCompiler.h includes QShaderBaker (rhi/), which
 # lives in these private modules.
 if(NOT TARGET Qt6::GuiPrivate)
@@ -162,6 +166,54 @@ install(DIRECTORY include/PhosphorZoneRendering
 )
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorzonerendering_export.h"
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorZoneRendering
+)
+
+# ===============================================================================
+# QML module org.phosphor.zonerendering (STATIC)
+# ===============================================================================
+#
+# ZoneShaderItem, named as a foreign type so the class is compiled once, in the
+# shared library above, and ZoneShaderRenderer.qml. A consumer links
+# PhosphorZoneRendering::PhosphorZoneRenderingQml plus the generated
+# PhosphorZoneRenderingQmlplugin and imports it with
+# Q_IMPORT_QML_PLUGIN(org_phosphor_zonerenderingPlugin). STATIC modules cannot
+# go into an export set, so the target only resolves inside this tree, like
+# PhosphorSurfaceQuickQml.
+
+# The targets qt_add_qml_module generates add an empty or missing
+# `<target>_autogen/include` to their -I list (see phosphor-surface-quick).
+set_property(DIRECTORY APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-include-dirs")
+
+qt_add_qml_module(PhosphorZoneRenderingQml
+    URI org.phosphor.zonerendering
+    VERSION 1.0
+    STATIC
+    RESOURCE_PREFIX /qt/qml
+    SOURCES
+        src/qml/zoneshaderitemforeign.h
+    QML_FILES
+        qml/ZoneShaderRenderer.qml
+    OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/org/phosphor/zonerendering
+)
+add_library(PhosphorZoneRendering::PhosphorZoneRenderingQml ALIAS PhosphorZoneRenderingQml)
+
+set_target_properties(PhosphorZoneRenderingQml PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(TARGET PhosphorZoneRenderingQmlplugin)
+    set_target_properties(PhosphorZoneRenderingQmlplugin PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+target_include_directories(PhosphorZoneRenderingQml
+    PRIVATE
+        # The generated type registration guards each type with
+        # `#if __has_include(<zoneshaderitemforeign.h>)`, using the bare name.
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qml>
+)
+
+target_link_libraries(PhosphorZoneRenderingQml
+    PUBLIC
+        PhosphorZoneRendering::PhosphorZoneRendering
+        Qt6::Qml
+        Qt6::Quick
 )
 
 if(CMAKE_PROJECT_NAME STREQUAL "PhosphorZoneRendering" OR BUILD_TESTING)
