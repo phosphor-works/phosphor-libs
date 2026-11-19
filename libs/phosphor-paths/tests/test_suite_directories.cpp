@@ -17,6 +17,25 @@ private Q_SLOTS:
         PhosphorPaths::setAppDirectoryName(QStringLiteral("pathstest"));
     }
 
+    void onlyOneDirectoryNameIsValid()
+    {
+        QVERIFY(PhosphorPaths::isValidDirectoryName(QStringLiteral("plasmazones")));
+        QVERIFY(PhosphorPaths::isValidDirectoryName(QStringLiteral("my app.v2")));
+        const QStringList refused{QString(),
+                                  QStringLiteral("   "),
+                                  QStringLiteral("."),
+                                  QStringLiteral(".."),
+                                  QStringLiteral("../etc/passwd"),
+                                  QStringLiteral("foo/bar"),
+                                  QStringLiteral("/etc"),
+                                  QStringLiteral("a\\b"),
+                                  QStringLiteral("line\nbreak"),
+                                  QString(QStringLiteral("nul")) + QChar(0)};
+        for (const QString& name : refused) {
+            QVERIFY2(!PhosphorPaths::isValidDirectoryName(name), qPrintable(name));
+        }
+    }
+
     void sharedTreesSitUnderTheSuiteFolder()
     {
         QCOMPARE(PhosphorPaths::suiteDirectoryName(), QStringLiteral("phosphor-works"));

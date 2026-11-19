@@ -26,7 +26,7 @@ It depends on Qt6::Core only.
 |----------|--------|---------|
 | `suiteDirectoryName()` | `SuiteDirectories.h` | `phosphor-works` |
 | `commonDataSubdir(tree)` | `SuiteDirectories.h` | A shared tree relative to the data roots, `phosphor-works/<tree>` |
-| `setAppDirectoryName(name)`, `appDirectoryName()` | `SuiteDirectories.h` | The app's folder name; set once at the top of `main()`, aborts when read unset |
+| `setAppDirectoryName(name)`, `appDirectoryName()` | `SuiteDirectories.h` | The app's folder name; set once at the top of `main()`, aborts when read unset or given a name `isValidDirectoryName()` refuses |
 | `appSubdir()` | `SuiteDirectories.h` | `phosphor-works/<app>`, relative to any XDG root |
 | `appConfigDir()`, `appDataDir()`, `appStateDir()`, `appCacheDir()` | `SuiteDirectories.h` | The app's writable config, data, state and cache directories |
 | `moveTreeContents(from, to)` | `TreeMove.h` | Move a tree's files into a new place, keeping what is already there |

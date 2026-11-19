@@ -22,11 +22,16 @@ PHOSPHORPATHS_EXPORT QString suiteDirectoryName();
 /// `phosphor-works/<tree>`, the form QStandardPaths::locate takes.
 PHOSPHORPATHS_EXPORT QString commonDataSubdir(const QString& tree);
 
+/// Whether @p name is one directory name that cannot leave the folder it is
+/// joined to: not empty or only whitespace, not `.` or `..`, and with no
+/// slash, backslash or control character.
+PHOSPHORPATHS_EXPORT bool isValidDirectoryName(const QString& name);
+
 /// The application's own folder name inside `phosphor-works` (PlasmaZones:
 /// `plasmazones`). Set once, at the top of main(), before anything reads a
 /// path. Nothing here supplies a default: reading it unset is a programming
 /// error and aborts, rather than handing out a path every app shares. A name
-/// that is not a single directory name aborts too.
+/// that isValidDirectoryName() refuses aborts too.
 PHOSPHORPATHS_EXPORT void setAppDirectoryName(const QString& name);
 PHOSPHORPATHS_EXPORT QString appDirectoryName();
 
