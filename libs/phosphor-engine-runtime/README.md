@@ -28,6 +28,14 @@ interfaces.
   host interfaces the runtime asks the host through: `IWorkspaceHost` (per-output desktops and the compositor's
   desktop shortcuts), `ISystemOsd` (the desktop's own text OSD) and `IHostApps` (the host's settings app and
   layout editor).
+- The overlays (`OverlayService`): the zone overlay, the zone selector, snap assist, the layout picker, the OSDs, the
+  cheatsheet and the scroll drop indicator, as slots of one passive layer-shell surface per screen, with their QML
+  (`qrc:/phosphor-engine-runtime/overlay/`). The host presents them through a layer-shell transport and an
+  `ISurfacePresentationHost` (the render backend and any GPU thumbnail import). Their layer-shell namespaces are
+  the host's app directory name and the overlay family (`<app>-osd`).
+- The controllers: global shortcuts (`ShortcutManager`, over the host's PhosphorShortcuts backend), dynamic
+  per-monitor workspaces (`WorkspaceController`), the unified layout list and mode toggle
+  (`UnifiedLayoutController`), the engines' construction (`createEngines`) and the context resolver's adapters.
 
 ## Key types
 
@@ -50,6 +58,11 @@ interfaces.
 | `WindowLifecycleRelay` | `WindowLifecycleRelay.h` | The window lifecycle signals the services listen to |
 | `LayoutService`, `SettingsService`, `SnapService`, ... | `<Name>Service.h` | The services a host binds to its transport |
 | `IWorkspaceHost`, `ISystemOsd`, `IHostApps` | `IWorkspaceHost.h`, `ISystemOsd.h`, `IHostApps.h` | What the runtime needs from its host |
+| `OverlayService` | `OverlayService.h` | The overlays, their surfaces, animation and QML |
+| `ISurfacePresentationHost` | `ISurfacePresentationHost.h` | The host's render backend and GPU thumbnail import |
+| `ShortcutManager` | `ShortcutManager.h` | The runtime's global shortcuts and the cheatsheet model |
+| `WorkspaceController` | `WorkspaceController.h` | Dynamic per-monitor workspaces |
+| `UnifiedLayoutController` | `UnifiedLayoutController.h` | The unified layout list and the mode toggle |
 
 ## Typical use
 
@@ -77,9 +90,12 @@ however it came about. PlasmaZones serves its KWin choices and its rendering pin
 
 ## Dependencies
 
-Qt Core and Gui, and PhosphorConfig (the store), PhosphorAnimation (motion profiles), PhosphorSurface and
+Qt Core, Gui, Qml and Quick, and PhosphorConfig (the store), PhosphorAnimation (motion profiles), PhosphorSurface and
 PhosphorRegistry (decoration and overlay trees), PhosphorRules (per-mode disable rules), PhosphorZones,
 PhosphorScreens, PhosphorEngine and the three engines' settings interfaces, PhosphorTiles, PhosphorShaders,
 PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose;
 PhosphorGeometry, PhosphorPlacement, PhosphorWorkspaces and PhosphorAudio for the core; PhosphorContextResolver and
-PhosphorShortcuts (privately) for tracking and drag.
+PhosphorShortcuts for tracking, drag and the shortcuts; PhosphorLayer, PhosphorShellPatterns, PhosphorOverlay and,
+privately, PhosphorSurfaces, PhosphorRendering and PhosphorZoneRendering for the overlays. The overlay QML also
+imports org.phosphor.zonerendering, org.phosphor.animation, org.phosphor.surface, Phosphor.Components
+(phosphor-components) and Kirigami at run time, which the host process provides.
