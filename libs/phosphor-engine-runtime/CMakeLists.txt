@@ -7,10 +7,11 @@
 # Settings and its interfaces, the defaults, keys and migrations) and the core
 # the runtime is built on (its interfaces, types, resolvers, geometry and
 # layout helpers, logging and translation catalog), window tracking and the
-# drag resolver, and the services a host binds to its transport with the host
-# interfaces it implements. The runtime's
-# controllers and overlays follow it here area by area. Built standalone or as a subdirectory
-# of Phosphor.
+# drag resolver, the services a host binds to its transport with the host
+# interfaces it implements, and the controllers and overlays with the overlay
+# QML (shortcuts, workspaces, the layout controller, the OSDs, snap assist, the
+# zone selector and the cheatsheet). The EngineRuntime hub that wires them
+# follows. Built standalone or as a subdirectory of Phosphor.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -36,7 +37,12 @@ include(GenerateExportHeader)
 # Dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
 
-find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui)
+find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
+# The overlay settings warm-bake through PhosphorRendering's ShaderCompiler,
+# whose header includes QShaderBaker (rhi/), in this private module.
+if(NOT TARGET Qt6::ShaderToolsPrivate)
+    find_package(Qt6ShaderToolsPrivate CONFIG REQUIRED)
+endif()
 set(CMAKE_AUTOMOC ON)
 
 if(NOT TARGET PhosphorAnimation::PhosphorAnimation)
@@ -108,6 +114,24 @@ endif()
 if(NOT TARGET PhosphorZones::PhosphorZones)
     find_package(PhosphorZones CONFIG REQUIRED)
 endif()
+if(NOT TARGET PhosphorLayer::PhosphorLayer)
+    find_package(PhosphorLayer CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorOverlay::PhosphorOverlay)
+    find_package(PhosphorOverlay CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorRendering::PhosphorRendering)
+    find_package(PhosphorRendering CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorShellPatterns::PhosphorShellPatterns)
+    find_package(PhosphorShellPatterns CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorSurfaces::PhosphorSurfaces)
+    find_package(PhosphorSurfaces CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorZoneRendering::PhosphorZoneRendering)
+    find_package(PhosphorZoneRendering CONFIG REQUIRED)
+endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Library
@@ -139,6 +163,7 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/ConfigMigration.h
     include/PhosphorEngineRuntime/ConfigMigrationUtil.h
     include/PhosphorEngineRuntime/Constants.h
+    include/PhosphorEngineRuntime/ContextResolverWiring.h
     include/PhosphorEngineRuntime/ControlService.h
     include/PhosphorEngineRuntime/CrossSurfaceResolver.h
     include/PhosphorEngineRuntime/DaemonGeometryResolver.h
@@ -146,11 +171,13 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/DragActivation.h
     include/PhosphorEngineRuntime/DragResolver.h
     include/PhosphorEngineRuntime/DropProxy.h
+    include/PhosphorEngineRuntime/EngineFactory.h
     include/PhosphorEngineRuntime/Enums.h
     include/PhosphorEngineRuntime/GeometryUtils.h
     include/PhosphorEngineRuntime/IHostApps.h
     include/PhosphorEngineRuntime/IOverlayService.h
     include/PhosphorEngineRuntime/ISettings.h
+    include/PhosphorEngineRuntime/ISurfacePresentationHost.h
     include/PhosphorEngineRuntime/ISystemOsd.h
     include/PhosphorEngineRuntime/IWorkspaceHost.h
     include/PhosphorEngineRuntime/Interfaces.h
@@ -160,6 +187,12 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/Logging.h
     include/PhosphorEngineRuntime/Lookups.h
     include/PhosphorEngineRuntime/OverlayControlService.h
+    include/PhosphorEngineRuntime/OverlayHelpers.h
+    include/PhosphorEngineRuntime/OverlayInternal.h
+    include/PhosphorEngineRuntime/OverlayQmlPropertyNames.h
+    include/PhosphorEngineRuntime/OverlayRoles.h
+    include/PhosphorEngineRuntime/OverlayService.h
+    include/PhosphorEngineRuntime/OverlayServiceTypes.h
     include/PhosphorEngineRuntime/OverlayShaderTree.h
     include/PhosphorEngineRuntime/PerScreenResolver.h
     include/PhosphorEngineRuntime/RuleService.h
@@ -176,17 +209,23 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/SettingsService.h
     include/PhosphorEngineRuntime/ShaderRegistry.h
     include/PhosphorEngineRuntime/ShaderService.h
+    include/PhosphorEngineRuntime/ShortcutManager.h
+    include/PhosphorEngineRuntime/ShortcutManagerIds.h
+    include/PhosphorEngineRuntime/SnapAssistThumbnailProvider.h
     include/PhosphorEngineRuntime/SnapService.h
     include/PhosphorEngineRuntime/SpatialAdjacency.h
     include/PhosphorEngineRuntime/StripCardSerialize.h
     include/PhosphorEngineRuntime/StripSelectorHitTest.h
+    include/PhosphorEngineRuntime/ThumbnailUrl.h
     include/PhosphorEngineRuntime/TilingService.h
     include/PhosphorEngineRuntime/Types.h
+    include/PhosphorEngineRuntime/UnifiedLayoutController.h
     include/PhosphorEngineRuntime/UnifiedLayoutList.h
     include/PhosphorEngineRuntime/Utils.h
     include/PhosphorEngineRuntime/WindowLifecycleRelay.h
     include/PhosphorEngineRuntime/WindowTracker.h
     include/PhosphorEngineRuntime/WindowTrackerInternal.h
+    include/PhosphorEngineRuntime/WorkspaceController.h
     include/PhosphorEngineRuntime/ZoneQueryService.h
     include/PhosphorEngineRuntime/ZoneSelectorLayout.h
 )
@@ -254,6 +293,18 @@ set(phosphorengineruntime_SRCS
     src/core/utils/utils.cpp
     src/runtime/common/lookups.cpp
     src/runtime/common/runtimei18n.cpp
+    src/runtime/controllers/contextresolverwiring.cpp
+    src/runtime/controllers/enginefactory.cpp
+    src/runtime/controllers/shortcutmanager.cpp
+    src/runtime/controllers/shortcutmanager_adhoc.cpp
+    src/runtime/controllers/shortcutmanager_catalog.cpp
+    src/runtime/controllers/shortcutmanager_table.cpp
+    src/runtime/controllers/shortcutmanager_table.h
+    src/runtime/controllers/unifiedlayoutcontroller.cpp
+    src/runtime/controllers/workspacecontroller.cpp
+    src/runtime/controllers/workspacecontroller_verbs.cpp
+    src/runtime/controllers/zoneselectorcontroller.cpp
+    src/runtime/controllers/zoneselectorcontroller.h
     src/runtime/dragresolver/drag.cpp
     src/runtime/dragresolver/drag_protocol.cpp
     src/runtime/dragresolver/dragactivation.cpp
@@ -263,6 +314,27 @@ set(phosphorengineruntime_SRCS
     src/runtime/dragresolver/drop.cpp
     src/runtime/dragresolver/dropproxy.cpp
     src/runtime/dragresolver/selector_gate.cpp
+    src/runtime/overlay/animation_config.cpp
+    src/runtime/overlay/cheatsheet.cpp
+    src/runtime/overlay/decoration.cpp
+    src/runtime/overlay/lifecycle.cpp
+    src/runtime/overlay/osd.cpp
+    src/runtime/overlay/overlay.cpp
+    src/runtime/overlay/overlay_data.cpp
+    src/runtime/overlay/overlayservice.cpp
+    src/runtime/overlay/phosphor_slot_keys.h
+    src/runtime/overlay/priming.cpp
+    src/runtime/overlay/rekey.cpp
+    src/runtime/overlay/screens.cpp
+    src/runtime/overlay/scrolldropindicator.cpp
+    src/runtime/overlay/selector.cpp
+    src/runtime/overlay/selector_strip.cpp
+    src/runtime/overlay/selector_update.cpp
+    src/runtime/overlay/settings.cpp
+    src/runtime/overlay/shader.cpp
+    src/runtime/overlay/shellhost_bridge.cpp
+    src/runtime/overlay/snapassist.cpp
+    src/runtime/rendering/snapassistthumbnailprovider.cpp
     src/runtime/services/autotileservice/autotileservice.cpp
     src/runtime/services/autotileservice/config.cpp
     src/runtime/services/controlservice.cpp
@@ -315,11 +387,44 @@ set(phosphorengineruntime_SRCS
     src/runtime/windowtracker/windowtracker.cpp
 )
 
+# The overlay QML, loaded from qrc:/phosphor-engine-runtime/overlay/. The
+# files reach each other as types of that one directory, so they need no QML
+# module of their own. They import org.phosphor.zonerendering, org.phosphor.
+# animation, org.phosphor.surface, Phosphor.Components and Kirigami at run
+# time, from the plugins the host process links.
+set(phosphorengineruntime_overlay_QML
+    qml/overlay/CheatsheetContent.qml
+    qml/overlay/CheatsheetGroup.qml
+    qml/overlay/CheatsheetRow.qml
+    qml/overlay/CheatsheetSearchField.qml
+    qml/overlay/KeyChip.qml
+    qml/overlay/LayoutOsdContent.qml
+    qml/overlay/LayoutPickerContent.qml
+    qml/overlay/NavigationOsdContent.qml
+    qml/overlay/OsdDismissable.qml
+    qml/overlay/PassiveOverlayModalSlots.qml
+    qml/overlay/PassiveOverlayShell.qml
+    qml/overlay/PopupCardTitle.qml
+    qml/overlay/RenderNodeOverlayContent.qml
+    qml/overlay/ScrollDropIndicatorContent.qml
+    qml/overlay/SnapAssistContent.qml
+    qml/overlay/ZoneItem.qml
+    qml/overlay/ZoneOverlayContent.qml
+    qml/overlay/ZoneSelectorContent.qml
+    qml/overlay/ZoneSelectorStripCard.qml
+)
+
 add_library(PhosphorEngineRuntime SHARED
     ${phosphorengineruntime_public_HDRS}
     ${phosphorengineruntime_SRCS}
 )
 add_library(PhosphorEngineRuntime::PhosphorEngineRuntime ALIAS PhosphorEngineRuntime)
+
+qt_add_resources(PhosphorEngineRuntime "phosphorengineruntime_overlay_qml"
+    PREFIX "/phosphor-engine-runtime/overlay"
+    BASE qml/overlay
+    FILES ${phosphorengineruntime_overlay_QML}
+)
 
 # Out of the unity build, as they were in PlasmaZones: the drag resolver's
 # translation units each declare file-local helpers under the same names,
@@ -362,6 +467,8 @@ target_link_libraries(PhosphorEngineRuntime
     PUBLIC
         Qt6::Core
         Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
         PhosphorAnimation::PhosphorAnimation
         PhosphorCompositor::PhosphorCompositor
         PhosphorConfig::PhosphorConfig
@@ -385,9 +492,23 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorZones::PhosphorZones
         # WindowTracker and DragResolver hold the context resolver their hosts give them.
         PhosphorContextResolver::PhosphorContextResolver
-    PRIVATE
-        # DragResolver binds its Escape cancel through the host's ad-hoc registrar.
+        # OverlayService.h and the overlay roles hand out PhosphorLayer roles
+        # and PhosphorOverlay shell state; ShortcutManager is a
+        # PhosphorShortcuts ad-hoc registrar.
+        PhosphorLayer::PhosphorLayer
+        PhosphorOverlay::PhosphorOverlay
+        PhosphorShellPatterns::PhosphorShellPatterns
         PhosphorShortcuts::PhosphorShortcuts
+    PRIVATE
+        # The overlays' surface manager, and the zone labels they build with
+        # ZoneLabelTextureBuilder into a PhosphorRendering texture. The overlay
+        # QML imports org.phosphor.zonerendering at run time from the host's
+        # link.
+        PhosphorRendering::PhosphorRendering
+        PhosphorSurfaces::PhosphorSurfaces
+        PhosphorZoneRendering::PhosphorZoneRendering
+        # overlay/settings.cpp reaches PhosphorRendering's ShaderCompiler.h.
+        Qt6::ShaderToolsPrivate
 )
 
 set_target_properties(PhosphorEngineRuntime PROPERTIES

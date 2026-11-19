@@ -237,8 +237,8 @@ add_subdirectory(libs/phosphor-scroll-engine) # niri-style scrolling placement e
 add_subdirectory(libs/phosphor-placement)   # window placement state tracking
 add_subdirectory(libs/phosphor-compositor)  # compositor-plugin SDK
 add_subdirectory(libs/phosphor-control) # reusable Qt6/QML/Kirigami settings-app framework (page controllers, registry, chrome)
-add_subdirectory(libs/phosphor-engine-runtime) # the placement engine runtime a host embeds (settings model first) - depends on the engines, zones, screens, config, animation
-add_subdirectory(libs/phosphor-zone-rendering) # zone overlays drawn with shader packs (ZoneShaderItem) - depends on phosphor-engine-runtime/rendering/shaders
+add_subdirectory(libs/phosphor-zone-rendering) # zone overlays drawn with shader packs (ZoneShaderItem) - depends on rendering/shaders/zones
+add_subdirectory(libs/phosphor-engine-runtime) # the placement engine runtime a host embeds - depends on the engines, zones, screens, config, animation, layer/overlay/surfaces and zone rendering
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Engine QML firewall
