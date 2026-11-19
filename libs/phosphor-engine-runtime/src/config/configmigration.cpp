@@ -181,6 +181,7 @@ void adoptPreviousLocations()
         {QStringLiteral("overlays"), ConfigKeys::overlaysSubdir()},
         {QStringLiteral("pointer"), ConfigKeys::pointerSubdir()},
         {QStringLiteral("shader-presets"), ConfigKeys::shaderPresetsSubdir()},
+        {QStringLiteral("surface"), ConfigKeys::surfacePacksSubdir()},
         {QStringLiteral("profiles"), ConfigKeys::profilesSubdir()},
         {QStringLiteral("curves"), ConfigKeys::curvesSubdir()},
         {QStringLiteral("motionsets"), ConfigDefaults::userMotionSetsSubdir().mid(1)},
@@ -188,14 +189,10 @@ void adoptPreviousLocations()
         {QStringLiteral("overlaysets"), ConfigDefaults::userOverlaySetsSubdir().mid(1)},
     };
     for (const auto& [oldName, tree] : trees) {
-        moveTreeContents(oldData + QLatin1Char('/') + oldName, dataRoot + QLatin1Char('/') + tree);
-    }
-    // 3.x already kept the user's surface packs in the shared tree, beside
-    // the shader families' new home rather than in it.
-    const QString surfaceTree = ConfigKeys::surfacePacksSubdir();
-    const QString previousSurfaceTree = commonDataSubdir(QStringLiteral("surface"));
-    if (!surfaceTree.isEmpty() && surfaceTree != previousSurfaceTree) {
-        moveTreeContents(dataRoot + QLatin1Char('/') + previousSurfaceTree, dataRoot + QLatin1Char('/') + surfaceTree);
+        // The surface packs' tree is the host's to name, so it may be unset.
+        if (!tree.isEmpty()) {
+            moveTreeContents(oldData + QLatin1Char('/') + oldName, dataRoot + QLatin1Char('/') + tree);
+        }
     }
     QDir().rmdir(oldData);
 }
