@@ -193,7 +193,11 @@ Q_SIGNALS:
     // cancel callback ran). After the end of stdin or a failed read it
     // comes when the replies already queued were written, or when the
     // client read none of them for DrainTimeoutMs. A signal or a closed
-    // output during that wait ends it at once, with its own reason.
+    // output during that wait ends it at once, with its own reason. One
+    // that comes while the cancel callbacks run gives its reason too, but
+    // finished() comes only after the last callback returned. The signals
+    // are put back at once then, so a second signal, during a callback that
+    // hangs, has its usual effect.
     void finished(PhosphorMcp::McpServer::FinishReason reason);
 
 private:

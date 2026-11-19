@@ -224,9 +224,12 @@ private Q_SLOTS:
     void signalInsideACancelCallbackWaitsForTheOtherCallbacks()
     {
         // At the end of the input the server runs the cancel callbacks. Each
-        // here runs a nested event loop, and SIGTERM comes inside it. The
-        // signal decides the reason, but finished() still comes after every
-        // callback, and its slot may delete the server.
+        // here runs a nested event loop, and SIGTERM comes inside the first.
+        // The signal decides the reason, but finished() still comes after
+        // every callback, and its slot may delete the server. The signals
+        // come back at once, while the callbacks still run, so that a second
+        // one would have its usual effect. (It is not sent: here that would
+        // be QtTest's fatal handler.)
         Peer peer;
         auto* server = new McpServer;
         const QPointer<McpServer> alive(server);
@@ -244,16 +247,22 @@ private Q_SLOTS:
         QVERIFY(hasServerHandler(SIGTERM));
         int callbacksRun = 0;
         int callbacksBeforeFinished = -1;
+        bool restoredDuringTheCallbacks = false;
         std::optional<McpServer::FinishReason> reason;
         for (McpCall& call : calls) {
-            call.onCancelled([&callbacksRun] {
-                ++callbacksRun;
+            call.onCancelled([&callbacksRun, &restoredDuringTheCallbacks] {
+                const bool first = callbacksRun++ == 0;
                 QEventLoop loop;
-                QTimer::singleShot(0, [] {
-                    ::kill(::getpid(), SIGTERM);
-                });
+                if (first) {
+                    QTimer::singleShot(0, [] {
+                        ::kill(::getpid(), SIGTERM);
+                    });
+                }
                 QTimer::singleShot(200, &loop, &QEventLoop::quit);
                 loop.exec();
+                if (first) {
+                    restoredDuringTheCallbacks = restored();
+                }
             });
         }
         connect(server, &McpServer::finished, server, [&, server](McpServer::FinishReason finishReason) {
@@ -268,6 +277,7 @@ private Q_SLOTS:
         QCOMPARE(callbacksBeforeFinished, 2);
         QVERIFY(reason.has_value());
         QCOMPARE(*reason, McpServer::FinishReason::Terminated);
+        QVERIFY(restoredDuringTheCallbacks);
         QVERIFY(restored());
     }
 

@@ -1491,9 +1491,12 @@ private Q_SLOTS:
             return raw.contains('\n');
         }));
         // In the structuredContent object the key is written bare. In the
-        // text block, which is a JSON string, its quotes are escaped.
-        const QByteArray key = "\"a" + QString(QChar(QChar::ReplacementCharacter)).toUtf8() + "\":";
-        QCOMPARE(raw.count(key), 1);
+        // text block, which is a JSON string, its quotes are escaped. A key
+        // rebuilt in the object goes out as UTF-8, and one fixed only on the
+        // line as the escape �: both spellings are counted.
+        const QByteArray asUtf8 = "\"a" + QString(QChar(QChar::ReplacementCharacter)).toUtf8() + "\":";
+        const QByteArray asEscape = "\"a\\ufffd\":";
+        QCOMPARE(raw.count(asUtf8) + raw.count(asEscape), 1);
     }
 
     void offTheServersThreadACallDoesNothing()

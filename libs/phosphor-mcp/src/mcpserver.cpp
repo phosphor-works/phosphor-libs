@@ -271,9 +271,16 @@ bool isHexDigitFrom8(char c)
 // refuse. Each such escape becomes U+FFFD, as a UTF-8 decoder does with
 // bytes that are not UTF-8. The escape has the length of the one it
 // replaces, so the line changes in place.
+// True when the JSON may hold a lone surrogate escape. The text "\ud" after
+// an escaped backslash matches too, which only costs a closer look.
+bool hasSurrogateEscape(const QByteArray& json)
+{
+    return json.contains("\\ud") || json.contains("\\uD");
+}
+
 void replaceLoneSurrogates(QByteArray& json)
 {
-    if (!json.contains("\\ud") && !json.contains("\\uD")) {
+    if (!hasSurrogateEscape(json)) {
         return;
     }
     char* data = json.data();
@@ -905,11 +912,14 @@ bool McpServer::sendMessage(const QJsonObject& message)
         return false;
     }
     // Compact JSON escapes every newline inside strings, so one message is
-    // one line. Keys with an unpaired surrogate are rare (a tool's own JSON),
-    // so the object is only rebuilt when one is there.
-    QByteArray line = hasLoneSurrogateKey(message)
-        ? QJsonDocument(withLoneSurrogateKeysReplaced(message).toObject()).toJson(QJsonDocument::Compact)
-        : QJsonDocument(message).toJson(QJsonDocument::Compact);
+    // one line. A lone surrogate is written as a \uD8xx to \uDFxx escape, so
+    // only a line with such an escape can hold a key that has one. Those are
+    // rare (a tool's own JSON), and the object is walked and rebuilt only
+    // then.
+    QByteArray line = QJsonDocument(message).toJson(QJsonDocument::Compact);
+    if (hasSurrogateEscape(line) && hasLoneSurrogateKey(message)) {
+        line = QJsonDocument(withLoneSurrogateKeysReplaced(message).toObject()).toJson(QJsonDocument::Compact);
+    }
     replaceLoneSurrogates(line);
     return d->transport->writeLine(std::move(line));
 }
@@ -926,6 +936,13 @@ void McpServer::end(FinishReason reason, bool drain)
             if (d->cancelling) {
                 if (!d->cutShort) {
                     d->cutShort = reason;
+                }
+                // finished() waits for the callbacks, but the signals need
+                // not: a second one, during a callback that hangs, has its
+                // usual effect again. Released, not destroyed, as in
+                // emitFinished(): this may run inside the signals' callback.
+                if (d->terminationSignals) {
+                    d->terminationSignals->release();
                 }
             } else {
                 finishSoon(reason);
