@@ -312,6 +312,24 @@ private Q_SLOTS:
         QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(1));
     }
 
+    void progressUnderAMarkBelowOne()
+    {
+        // A mark under 1 counts as 1, so progress on an idle server still
+        // goes out.
+        Fixture f;
+        f.server->setMaxPendingWriteBytes(-1);
+        QVERIFY(f.start());
+        QCOMPARE(f.server->transport()->maxPendingWriteBytes(), 1);
+        QVERIFY(f.callJob(1, QStringLiteral("a"), metaWithToken(QStringLiteral("tok"))));
+        McpCall& call = f.jobs.at(QStringLiteral("a"));
+        QCOMPARE(f.server->transport()->pendingWriteBytes(), 0);
+        QVERIFY(call.progress(1));
+        const QJsonObject note = f.peer.readOne();
+        QCOMPARE(note.value(QLatin1StringView("method")).toString(), QStringLiteral("notifications/progress"));
+        QVERIFY(call.finish(McpResult::text(QStringLiteral("done"))));
+        QCOMPARE(f.peer.readOne().value(QLatin1StringView("id")), QJsonValue(1));
+    }
+
     void nestedEventLoopInAHandler_data()
     {
         QTest::addColumn<bool>("duringNestedLoop");

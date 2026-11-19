@@ -346,19 +346,21 @@ bool McpServer::setCache(qint64 ttlMs, CacheScope scope)
     return true;
 }
 
+// The transport clamps both limits to at least 1. The server keeps the value
+// it was given and hands it on at start().
 void McpServer::setMaxLineBytes(qint64 bytes)
 {
-    d->maxLineBytes = qMax<qint64>(1, bytes);
+    d->maxLineBytes = bytes;
     if (d->transport) {
-        d->transport->setMaxLineBytes(d->maxLineBytes);
+        d->transport->setMaxLineBytes(bytes);
     }
 }
 
 void McpServer::setMaxPendingWriteBytes(qint64 bytes)
 {
-    d->maxPendingWriteBytes = qMax<qint64>(1, bytes);
+    d->maxPendingWriteBytes = bytes;
     if (d->transport) {
-        d->transport->setMaxPendingWriteBytes(d->maxPendingWriteBytes);
+        d->transport->setMaxPendingWriteBytes(bytes);
     }
 }
 
@@ -462,8 +464,9 @@ bool McpServer::start(int readFd, int writeFd)
     }
     connect(transport, &McpTransport::lineReceived, this, &McpServer::onLine);
     connect(transport, &McpTransport::lineTooLong, this, [this] {
-        sendError(NoId, ErrorCode::InvalidRequest,
-                  QStringLiteral("Invalid Request: the message is longer than %1 bytes").arg(d->maxLineBytes));
+        sendError(
+            NoId, ErrorCode::InvalidRequest,
+            QStringLiteral("Invalid Request: the message is longer than %1 bytes").arg(d->transport->maxLineBytes()));
     });
     connect(transport, &McpTransport::endOfInput, this, [this] {
         end(FinishReason::EndOfInput, true);
@@ -1000,7 +1003,7 @@ bool McpServer::progressCall(quint64 token, double progress, std::optional<doubl
     }
     // Progress is a hint. While the client leaves more than the high-water
     // mark of replies unread, a notification would only grow the queue.
-    if (!d->transport || d->transport->pendingWriteBytes() > d->maxPendingWriteBytes) {
+    if (!d->transport || d->transport->pendingWriteBytes() > d->transport->maxPendingWriteBytes()) {
         return false;
     }
     QJsonObject params{
