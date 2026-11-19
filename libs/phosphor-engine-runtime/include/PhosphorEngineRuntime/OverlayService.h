@@ -101,6 +101,7 @@ namespace PhosphorContext {
 class IContextResolver;
 }
 class QQuickWindow;
+class QWindow;
 class QQuickItem;
 class QScreen;
 class QTimer;

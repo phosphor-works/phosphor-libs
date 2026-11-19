@@ -38,6 +38,11 @@ include(GenerateExportHeader)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
+# The overlay settings warm-bake through PhosphorRendering's ShaderCompiler,
+# whose header includes QShaderBaker (rhi/), in this private module.
+if(NOT TARGET Qt6::ShaderToolsPrivate)
+    find_package(Qt6ShaderToolsPrivate CONFIG REQUIRED)
+endif()
 set(CMAKE_AUTOMOC ON)
 
 if(NOT TARGET PhosphorAnimation::PhosphorAnimation)
@@ -502,6 +507,8 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorRendering::PhosphorRendering
         PhosphorSurfaces::PhosphorSurfaces
         PhosphorZoneRendering::PhosphorZoneRendering
+        # overlay/settings.cpp reaches PhosphorRendering's ShaderCompiler.h.
+        Qt6::ShaderToolsPrivate
 )
 
 set_target_properties(PhosphorEngineRuntime PROPERTIES
