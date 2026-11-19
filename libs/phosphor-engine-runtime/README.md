@@ -33,6 +33,11 @@ interfaces.
   (`qrc:/phosphor-engine-runtime/overlay/`). The host presents them through a layer-shell transport and an
   `ISurfacePresentationHost` (the render backend and any GPU thumbnail import). Their layer-shell namespaces are
   the runtime's own, `phosphor-<family>` (`phosphor-osd`), under every host.
+- The hub, `EngineRuntime`: it builds the settings, screens, engines, tracker, services, overlays and controllers,
+  routes each window to the engine its screen runs, and wires them together. A host constructs it with an
+  `EngineRuntime::Platform` (the layer-shell transport, panels, desktops, activities, shortcut backends, surface
+  presentation and idle source), hands it its host interfaces, binds the services to its transport, and calls
+  `init()` and `start()`.
 - The controllers: global shortcuts (`ShortcutManager`, over the host's PhosphorShortcuts backend), dynamic
   per-monitor workspaces (`WorkspaceController`), the unified layout list and mode toggle
   (`UnifiedLayoutController`), the engines' construction (`createEngines`) and the context resolver's adapters.
@@ -58,6 +63,7 @@ interfaces.
 | `WindowLifecycleRelay` | `WindowLifecycleRelay.h` | The window lifecycle signals the services listen to |
 | `LayoutService`, `SettingsService`, `SnapService`, ... | `<Name>Service.h` | The services a host binds to its transport |
 | `IWorkspaceHost`, `ISystemOsd`, `IHostApps`, `IShellCheatsheet`, `IIdleSource` | `IWorkspaceHost.h`, `ISystemOsd.h`, `IHostApps.h`, `IShellCheatsheet.h`, `IIdleSource.h` | What the runtime needs from its host |
+| `EngineRuntime` | `EngineRuntime.h` | The hub a host constructs and starts |
 | `OverlayService` | `OverlayService.h` | The overlays, their surfaces, animation and QML |
 | `ISurfacePresentationHost` | `ISurfacePresentationHost.h` | The host's render backend and GPU thumbnail import |
 | `ShortcutManager` | `ShortcutManager.h` | The runtime's global shortcuts and the cheatsheet model |
@@ -106,6 +112,7 @@ PhosphorScreens, PhosphorEngine and the three engines' settings interfaces, Phos
 PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose;
 PhosphorGeometry, PhosphorPlacement, PhosphorWorkspaces and PhosphorAudio for the core; PhosphorContextResolver and
 PhosphorShortcuts for tracking, drag and the shortcuts; PhosphorLayer, PhosphorShellPatterns, PhosphorOverlay and,
-privately, PhosphorSurfaces, PhosphorRendering and PhosphorZoneRendering for the overlays. The overlay QML also
+privately, PhosphorSurfaces, PhosphorRendering and PhosphorZoneRendering for the overlays, and PhosphorSurfaceQuick
+for the hub's shader warm-up. The overlay QML also
 imports org.phosphor.zonerendering, org.phosphor.animation, org.phosphor.surface, Phosphor.Components
 (phosphor-components) and Kirigami at run time, which the host process provides.
