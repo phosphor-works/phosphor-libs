@@ -266,7 +266,7 @@ public:
     ///         render-completion fence signals), so true means "accepted,
     ///         will display", not "already imported". False when the
     ///         dma-buf path is unavailable (kill switch
-    ///         PLASMAZONES_DMABUF_THUMBNAILS=0, driver/RHI backend
+    ///         PHOSPHOR_DMABUF_THUMBNAILS=0, driver/RHI backend
     ///         unsupported, or the descriptor was rejected) — the caller
     ///         MUST then fall back to @ref setSnapAssistThumbnail so a
     ///         preview still appears.

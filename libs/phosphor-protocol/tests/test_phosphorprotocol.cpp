@@ -434,7 +434,7 @@ private Q_SLOTS:
     /// the moment a switch moved from one twin to the other.
     void testEnvSwitchRules()
     {
-        const char* const name = "PLASMAZONES_TEST_ENV_SWITCH";
+        const char* const name = "PHOSPHOR_TEST_ENV_SWITCH";
         const bool wasSet = qEnvironmentVariableIsSet(name);
         const QByteArray previous = qgetenv(name);
         qunsetenv(name);
@@ -463,13 +463,13 @@ private Q_SLOTS:
     }
 
     /// The dma-buf thumbnail transport is the DEFAULT: unset enables it, and
-    /// PLASMAZONES_DMABUF_THUMBNAILS=0 is the only kill switch. Pinned here
+    /// PHOSPHOR_DMABUF_THUMBNAILS=0 is the only kill switch. Pinned here
     /// because both processes read this one accessor, and flipping it back to
     /// opt-in by accident would silently drop every session onto the
     /// raw-pixel fallback.
     void testDmabufThumbnailGateDefaultsOn()
     {
-        const char* const name = "PLASMAZONES_DMABUF_THUMBNAILS";
+        const char* const name = "PHOSPHOR_DMABUF_THUMBNAILS";
         const bool wasSet = qEnvironmentVariableIsSet(name);
         const QByteArray previous = qgetenv(name);
 

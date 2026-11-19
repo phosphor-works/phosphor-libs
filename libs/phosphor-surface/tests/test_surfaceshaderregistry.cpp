@@ -1048,14 +1048,14 @@ private Q_SLOTS:
     // ── Entry scaffold ───────────────────────────────────────────────────
 
     /// The generated main() applies the host's qt_Opacity on the Qt RHI
-    /// branch, and only there: the compositor build defines PLASMAZONES_KWIN
+    /// branch, and only there: the compositor build defines PHOSPHOR_KWIN
     /// and its uniform block has no qt_Opacity to read.
     void entry_main_applies_qt_opacity_outside_the_compositor_only()
     {
         const QList<PhosphorShaders::EntryCandidate> candidates = SurfaceShaderRegistry::surfaceEntryCandidates();
         QCOMPARE(candidates.size(), 1);
         const QString main = candidates.first().generatedMain;
-        const qsizetype guard = main.indexOf(QLatin1String("#ifndef PLASMAZONES_KWIN"));
+        const qsizetype guard = main.indexOf(QLatin1String("#ifndef PHOSPHOR_KWIN"));
         const qsizetype elseArm = main.indexOf(QLatin1String("#else"));
         const qsizetype endif = main.indexOf(QLatin1String("#endif"));
         QVERIFY(guard >= 0 && guard < elseArm && elseArm < endif);

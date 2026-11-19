@@ -828,7 +828,7 @@ private Q_SLOTS:
         QVERIFY(shaderEffectIsCompositorOnly(effectWith({QStringLiteral("strip")})));
         // The tab pin is load-bearing beyond symmetry. NOT because the daemon
         // could not COMPILE a tab pack: old_content.glsl declares uOldWindow
-        // under PLASMAZONES_KWIN and aliases it onto uTexture3 on the other
+        // under PHOSPHOR_KWIN and aliases it onto uTexture3 on the other
         // branch, so it bakes on both ABIs. The daemon never BINDS a tab
         // snapshot, so a tab leg there would blend against nothing. See
         // EventClassTab's contract in ProfilePaths.h.

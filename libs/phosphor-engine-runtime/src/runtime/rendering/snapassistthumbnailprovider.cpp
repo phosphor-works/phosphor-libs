@@ -7,7 +7,7 @@
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 
-// Info-level by default so PLASMAZONES_THUMBNAIL_TRACE alone surfaces the
+// Info-level by default so PHOSPHOR_THUMBNAIL_TRACE alone surfaces the
 // lines; every emit is additionally gated on m_traceEnabled so the category
 // stays silent without the env var. Mirrors the kwin-effect's
 // kwin.effect.plasmazones.snapassist.trace category.
@@ -27,7 +27,7 @@ QImage SnapAssistThumbnailProvider::requestImage(const QString& id, QSize* size,
     // QML strips the `image://<provider>/` prefix and hands us the path
     // segment. Cache keys are normalised to the unbraced UUID form on
     // insert; we apply the same normalisation here so a caller that
-    // hand-builds an `image://plasmazones-snapassist/{uuid}/N` URL still
+    // hand-builds an `image://phosphor-snapassist/{uuid}/N` URL still
     // resolves to the same cache slot.
     const QString handle = ThumbnailUrl::normaliseHandle(id.section(QLatin1Char('/'), 0, 0));
     QElapsedTimer fetchTimer;

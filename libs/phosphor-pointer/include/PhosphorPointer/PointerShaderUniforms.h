@@ -18,7 +18,7 @@ static_assert(sizeof(PhosphorShaders::BaseUniforms) == kPointerTailOffset,
 
 /// C++ mirror of the POINTER contract's UBO tail. The preview runtime's UBO
 /// is `PhosphorShaders::BaseUniforms` (672 bytes, binding 0) followed
-/// byte-for-byte by this struct, matching the `#else` (non-PLASMAZONES_KWIN)
+/// byte-for-byte by this struct, matching the `#else` (non-PHOSPHOR_KWIN)
 /// branch of `data/pointer/shared/pointer_uniforms.glsl`. The compositor
 /// pushes the same fields as loose uniforms and never touches this layout.
 ///
