@@ -17,11 +17,14 @@ namespace PhosphorEngineRuntime {
  * (PhosphorShellCheatsheet). A host with no such shell sets none, and every
  * request shows the runtime's overlay cheatsheet.
  *
- * Each toggle() ends in exactly one handler call, possibly later: accepted
+ * Each toggle() ends in at most one handler call, possibly later: accepted
  * when the shell took the request (the runtime then hides its own cheatsheet
  * and the pickers it would cover), or fallback when the shell cannot (none is
  * running, or it refused), with the screen the runtime should toggle its own
- * cheatsheet on instead. cancel() drops a request that has not answered yet.
+ * cheatsheet on instead. When the answer is lost after the request reached
+ * the shell, neither runs: the shell may have opened its cheatsheet, and the
+ * runtime must not open a second one. cancel() drops a request that has not
+ * answered yet.
  */
 class IShellCheatsheet
 {
