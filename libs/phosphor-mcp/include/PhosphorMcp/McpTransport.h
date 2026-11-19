@@ -77,8 +77,9 @@ public:
     // event dispatcher, when a descriptor is not open, when a descriptor is
     // not a pipe, a socket, a character device (a terminal) or a regular
     // file (an eventfd that took the number of a closed stdin or stdout, a
-    // directory), when a terminal cannot be opened again, and when the write
-    // descriptor cannot be made non-blocking.
+    // directory), and when the write descriptor cannot be made non-blocking.
+    // A terminal that cannot be opened again is written as a pipe instead,
+    // with a warning.
     bool open();
     // Stops reading and writing, drops the unwritten lines and puts the
     // write descriptor's O_NONBLOCK back as open() found it. Signals stop.

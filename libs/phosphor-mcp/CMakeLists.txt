@@ -13,7 +13,7 @@
 # Linux only: the transport writes a terminal through /proc/self/fd and
 # sockets with MSG_NOSIGNAL, and takes back SIGPIPE with sigtimedwait.
 
-# 3.21 floor: PROJECT_IS_TOP_LEVEL gates the example below. The valijson
+# 3.21 floor, as phosphor-control's: the tree's floor. The valijson
 # acquisition needs 3.18 (file(ARCHIVE_EXTRACT)).
 cmake_minimum_required(VERSION 3.21)
 
@@ -64,19 +64,35 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # switch of phosphor-fsloader alone would leave the two libraries on two
 # different copies. ON and OFF choose for this library only. Both libraries
 # look for the headers through one cache variable, VALIJSON_INCLUDE_DIR.
-set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING
+set(_phosphormcp_system_valijson_doc
     "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
+# A build directory from before AUTO holds a BOOL, which the option() wrote
+# with its default unless someone chose ON. Such an OFF becomes AUTO once, so
+# that the directory follows phosphor-fsloader too. An ON stays.
+get_property(_phosphormcp_system_valijson_type CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY TYPE)
+if(_phosphormcp_system_valijson_type STREQUAL "BOOL")
+    if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+        set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ON CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
+    else()
+        set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
+    endif()
+endif()
+set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}")
 set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
-if(PHOSPHORMCP_USE_SYSTEM_VALIJSON STREQUAL "AUTO")
+string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_VALIJSON}" _phosphormcp_system_valijson_mode)
+if(_phosphormcp_system_valijson_mode STREQUAL "AUTO")
     if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
         set(_phosphormcp_system_valijson ON)
     else()
         set(_phosphormcp_system_valijson OFF)
     endif()
-elseif(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+elseif(_phosphormcp_system_valijson_mode MATCHES "^(ON|YES|TRUE|1)$")
     set(_phosphormcp_system_valijson ON)
-else()
+elseif(_phosphormcp_system_valijson_mode MATCHES "^(OFF|NO|FALSE|0)$")
     set(_phosphormcp_system_valijson OFF)
+else()
+    message(FATAL_ERROR
+        "PHOSPHORMCP_USE_SYSTEM_VALIJSON is \"${PHOSPHORMCP_USE_SYSTEM_VALIJSON}\". It takes AUTO, ON or OFF.")
 endif()
 
 if(_phosphormcp_system_valijson)

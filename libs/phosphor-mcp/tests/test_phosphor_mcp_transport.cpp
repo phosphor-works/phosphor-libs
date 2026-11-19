@@ -975,9 +975,6 @@ private Q_SLOTS:
         // A terminal that another user owns cannot be opened again, but the
         // inherited descriptor still writes. The server runs, writing the
         // shared description non-blocking until it closes.
-        if (::geteuid() == 0) {
-            QSKIP("root opens a terminal whatever its mode");
-        }
         const int master = ::posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
         if (master < 0 || ::grantpt(master) != 0 || ::unlockpt(master) != 0) {
             if (master >= 0) {
@@ -997,6 +994,14 @@ private Q_SLOTS:
             ::fchmod(terminal, mode.st_mode & 07777);
             ::close(terminal);
         });
+        // A process that may ignore file modes (root, CAP_DAC_OVERRIDE) opens
+        // it anyway, and then there is nothing to test.
+        const QByteArray path = "/proc/self/fd/" + QByteArray::number(terminal);
+        const int probe = ::open(path.constData(), O_WRONLY | O_NOCTTY | O_CLOEXEC);
+        if (probe >= 0) {
+            ::close(probe);
+            QSKIP("this process opens the terminal whatever its mode");
+        }
         const int before = ::fcntl(terminal, F_GETFL);
         QCOMPARE(before & O_NONBLOCK, 0);
         {

@@ -195,10 +195,14 @@ int McpTransport::reopenTerminal() const
                                    << "), so its shared description is made non-blocking until the transport closes";
         return -1;
     }
-    // Any other device that hands out a new one on open is caught here.
-    struct stat inherited = {};
-    struct stat reopened = {};
-    if (::fstat(m_writeFd, &inherited) != 0 || ::fstat(fd, &reopened) != 0 || inherited.st_rdev != reopened.st_rdev) {
+    // A device that hands out another terminal on open (/dev/tty0 after a
+    // console switch, a master that TIOCGPTN did not name) is caught here.
+    // fstat() would not do: it gives the number of the device node, which
+    // both descriptors share. TIOCGDEV gives the terminal's own.
+    unsigned int inherited = 0;
+    unsigned int reopened = 0;
+    if (::ioctl(m_writeFd, TIOCGDEV, &inherited) != 0 || ::ioctl(fd, TIOCGDEV, &reopened) != 0
+        || inherited != reopened) {
         ::close(fd);
         qCWarning(lcMcp).nospace() << "McpTransport::open: the terminal " << m_writeFd
                                    << " opens as another device, so its shared description is made non-blocking"
