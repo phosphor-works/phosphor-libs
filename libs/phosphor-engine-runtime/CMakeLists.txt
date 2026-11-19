@@ -3,10 +3,11 @@
 #
 # PhosphorEngineRuntime — the placement engine runtime a host embeds
 #
-# The settings model first: the schema and its host extension, the store-backed
-# Settings and its interfaces, the defaults and keys, the versioned migrations,
-# and the per-screen resolver. The runtime's services, controllers and
-# overlays follow it here area by area. Built standalone or as a subdirectory
+# The settings model (the schema and its host extension, the store-backed
+# Settings and its interfaces, the defaults, keys and migrations) and the core
+# the runtime is built on (its interfaces, types, resolvers, geometry and
+# layout helpers, logging and translation catalog). The runtime's services,
+# controllers and overlays follow it here area by area. Built standalone or as a subdirectory
 # of Phosphor.
 
 cmake_minimum_required(VERSION 3.16)
@@ -84,6 +85,18 @@ endif()
 if(NOT TARGET PhosphorTiles::PhosphorTiles)
     find_package(PhosphorTiles CONFIG REQUIRED)
 endif()
+if(NOT TARGET PhosphorAudio::PhosphorAudio)
+    find_package(PhosphorAudio CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorGeometry::PhosphorGeometry)
+    find_package(PhosphorGeometry CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorPlacement::PhosphorPlacement)
+    find_package(PhosphorPlacement CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorWorkspaces::PhosphorWorkspaces)
+    find_package(PhosphorWorkspaces CONFIG REQUIRED)
+endif()
 if(NOT TARGET PhosphorZones::PhosphorZones)
     find_package(PhosphorZones CONFIG REQUIRED)
 endif()
@@ -93,8 +106,10 @@ endif()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set(phosphorengineruntime_public_HDRS
+    include/PhosphorEngineRuntime/AnimationBootstrap.h
     include/PhosphorEngineRuntime/AnimationShaderSupportedPaths.h
     include/PhosphorEngineRuntime/AppDirectoryName.h
+    include/PhosphorEngineRuntime/CavaOptions.h
     include/PhosphorEngineRuntime/ConfigBackends.h
     include/PhosphorEngineRuntime/ConfigDefaults.h
     include/PhosphorEngineRuntime/ConfigDefaultsAppearance.h
@@ -115,18 +130,43 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/ConfigMigration.h
     include/PhosphorEngineRuntime/ConfigMigrationUtil.h
     include/PhosphorEngineRuntime/Constants.h
+    include/PhosphorEngineRuntime/CrossSurfaceResolver.h
+    include/PhosphorEngineRuntime/DaemonGeometryResolver.h
+    include/PhosphorEngineRuntime/DmabufThumbnail.h
     include/PhosphorEngineRuntime/Enums.h
+    include/PhosphorEngineRuntime/GeometryUtils.h
+    include/PhosphorEngineRuntime/IOverlayService.h
     include/PhosphorEngineRuntime/ISettings.h
+    include/PhosphorEngineRuntime/Interfaces.h
+    include/PhosphorEngineRuntime/LayoutBundleBuilder.h
+    include/PhosphorEngineRuntime/LayoutPreviewSerialize.h
+    include/PhosphorEngineRuntime/Logging.h
     include/PhosphorEngineRuntime/OverlayShaderTree.h
     include/PhosphorEngineRuntime/PerScreenResolver.h
+    include/PhosphorEngineRuntime/RuntimeI18n.h
+    include/PhosphorEngineRuntime/ScreenIdResolver.h
+    include/PhosphorEngineRuntime/ScreenModeRouter.h
+    include/PhosphorEngineRuntime/ScreenScale.h
     include/PhosphorEngineRuntime/Settings.h
     include/PhosphorEngineRuntime/SettingsConfigStore.h
     include/PhosphorEngineRuntime/SettingsInterfaces.h
     include/PhosphorEngineRuntime/SettingsSchema.h
     include/PhosphorEngineRuntime/SettingsSchemaChoices.h
+    include/PhosphorEngineRuntime/ShaderRegistry.h
+    include/PhosphorEngineRuntime/SpatialAdjacency.h
+    include/PhosphorEngineRuntime/StripCardSerialize.h
+    include/PhosphorEngineRuntime/StripSelectorHitTest.h
+    include/PhosphorEngineRuntime/Types.h
+    include/PhosphorEngineRuntime/UnifiedLayoutList.h
+    include/PhosphorEngineRuntime/Utils.h
+    include/PhosphorEngineRuntime/ZoneSelectorLayout.h
 )
 
 set(phosphorengineruntime_SRCS
+    src/common/layoutbundlebuilder.cpp
+    src/common/layoutpreviewserialize.cpp
+    src/common/screenidresolver.cpp
+    src/common/stripcardserialize.cpp
     src/config/configbackends.cpp
     src/config/configdefaults.cpp
     src/config/configkeys_disablelabels.h
@@ -171,9 +211,19 @@ set(phosphorengineruntime_SRCS
     src/config/settingsschema_shadertrees.cpp
     src/config/settingsschema_tiling.cpp
     src/config/settingsschema_workspaces.cpp
+    src/core/interfaces/interfaces.cpp
     src/core/interfaces/isettings.cpp
     src/core/platform/appdirectoryname.cpp
+    src/core/platform/logging.cpp
+    src/core/resolve/animationbootstrap.cpp
+    src/core/resolve/crosssurfaceresolver.cpp
+    src/core/resolve/daemongeometryresolver.cpp
+    src/core/resolve/screenmoderouter.cpp
     src/core/types/overlayshadertree.cpp
+    src/core/utils/geometryutils.cpp
+    src/core/utils/unifiedlayoutlist.cpp
+    src/core/utils/utils.cpp
+    src/runtime/common/runtimei18n.cpp
 )
 
 add_library(PhosphorEngineRuntime SHARED
@@ -226,6 +276,10 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorSurface::PhosphorSurface
         PhosphorTileEngine::PhosphorTileEngine
         PhosphorTiles::PhosphorTiles
+        PhosphorAudio::PhosphorAudio
+        PhosphorGeometry::PhosphorGeometry
+        PhosphorPlacement::PhosphorPlacement
+        PhosphorWorkspaces::PhosphorWorkspaces
         PhosphorZones::PhosphorZones
 )
 

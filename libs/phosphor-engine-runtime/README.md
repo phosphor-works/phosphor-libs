@@ -4,7 +4,7 @@ The placement engine runtime a host embeds: the snap, tile and scroll engines' h
 and its settings. PlasmaZones' daemon (`plasmazonesd`) hosts it beside KWin today, and the Phosphor compositor
 will host it in process.
 
-It arrives here area by area from PlasmaZones. This first part is the **settings model**.
+It arrives here area by area from PlasmaZones. So far: the **settings model**, and the **core** the runtime is built on.
 
 ## Responsibility
 
@@ -15,6 +15,10 @@ It arrives here area by area from PlasmaZones. This first part is the **settings
 - The host settings extension, through which a host adds keys of its own to the same file, names the keys that
   belong to one machine, and labels its token keys.
 - The host's config directory name, which every config and data path is composed from.
+- The core: the overlay interface the runtime presents through (`IOverlayService`), the screen-mode router and the
+  cross-surface and geometry resolvers, geometry and layout-list helpers, the zone-selector and strip-selector
+  layouts, the animation profile bootstrap, the zone-overlay shader registry, the runtime's logging categories and
+  its translation catalog (`RuntimeI18n`, context `PhosphorEngineRuntime`).
 
 ## Key types
 
@@ -27,6 +31,11 @@ It arrives here area by area from PlasmaZones. This first part is the **settings
 | `ConfigMigration` | `ConfigMigration.h` | The schema-version migration chain run at startup |
 | `PerScreenResolver` | `PerScreenResolver.h` | Per-screen overrides resolved over the global values |
 | `setAppDirectoryName` | `AppDirectoryName.h` | The host's directory under the XDG config and data roots |
+| `IOverlayService` | `IOverlayService.h` | The overlays, zone selector, snap assist, OSDs and pickers the runtime shows |
+| `ScreenModeRouter` | `ScreenModeRouter.h` | Which placement mode each screen runs, per desktop and activity |
+| `AnimationBootstrap` | `AnimationBootstrap.h` | Loads the curve and motion-profile registries the overlays animate with |
+| `ShaderRegistry` | `ShaderRegistry.h` | The zone-overlay shader packs |
+| `RuntimeI18n` | `RuntimeI18n.h` | The runtime's translation context and `loadRuntimeTranslations` |
 
 ## Typical use
 
@@ -49,11 +58,13 @@ however it came about. PlasmaZones serves its KWin choices and its rendering pin
   out a path at the root of the user's config directory.
 - **Install the extension first.** A store built without it deletes the host's keys as undeclared on its next
   save, so the host installs it before the first `Settings`.
-- **Logging** is under `phosphor.engineruntime.*` (`phosphor.engineruntime.config` for the model).
+- **Logging** is under `phosphor.engineruntime.*`: `.config` for the model, `.core`, `.daemon` and its `.overlay` and
+  `.shortcuts`, and `.dbus.*` for the services by the interface each serves.
 
 ## Dependencies
 
 Qt Core and Gui, and PhosphorConfig (the store), PhosphorAnimation (motion profiles), PhosphorSurface and
 PhosphorRegistry (decoration and overlay trees), PhosphorRules (per-mode disable rules), PhosphorZones,
 PhosphorScreens, PhosphorEngine and the three engines' settings interfaces, PhosphorTiles, PhosphorShaders,
-PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose.
+PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose;
+PhosphorGeometry, PhosphorPlacement, PhosphorWorkspaces and PhosphorAudio for the core.
