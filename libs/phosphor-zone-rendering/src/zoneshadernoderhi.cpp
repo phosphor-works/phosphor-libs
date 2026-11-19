@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
+#include <PhosphorZoneRendering/ZoneShaderNodeRhi.h>
+
+#include <PhosphorRendering/ShaderCompiler.h>
+
+namespace PhosphorZoneRendering {
+
+PhosphorRendering::WarmShaderBakeResult
+warmShaderBakeCacheForPaths(const QString& vertexPath, const QString& fragmentPath, const QStringList& includePaths,
+                            const QString& paramPreamble, const QString& entryPrologue,
+                            const QList<PhosphorShaders::EntryCandidate>& entryCandidates)
+{
+    if (vertexPath.isEmpty() || fragmentPath.isEmpty()) {
+        PhosphorRendering::WarmShaderBakeResult result;
+        result.errorMessage = QStringLiteral("Vertex or fragment path is empty");
+        return result;
+    }
+
+    // The bake resolves #include against the bundled shared/ directories too,
+    // as the live render node does.
+    return PhosphorRendering::warmShaderBakeCacheForPaths(vertexPath, fragmentPath,
+                                                          expandShaderIncludePaths(includePaths), paramPreamble,
+                                                          entryPrologue, entryCandidates);
+}
+
+} // namespace PhosphorZoneRendering
