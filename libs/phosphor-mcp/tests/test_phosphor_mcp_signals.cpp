@@ -449,6 +449,11 @@ private Q_SLOTS:
         QCOMPARE(finished.count(), 0);
     }
 
+    // A child forked while a handler runs on another of the parent's threads
+    // inherits that handler's count. install() and release() in the child
+    // ignore it. No test here can fail for that: a handler cannot be held in
+    // the middle from a test. Stress probes, forking thousands of times while
+    // signals arrive, are what found it and checked the fix.
     void childCannotTakeTheParentsHandler()
     {
         // After the parent's call, the same server's call in a forked child
@@ -596,6 +601,10 @@ private Q_SLOTS:
             worker.wait();
         });
         Peer peer;
+        // Declared before the server's guard, which they outlive: on a
+        // failure the worker may still write them until the guard returns.
+        std::atomic<bool> holding{false};
+        std::atomic<QThread*> cancelledOn{nullptr};
         auto* server = new McpServer;
         // Touched on the worker only, until the server is gone.
         McpCall held;
@@ -618,8 +627,6 @@ private Q_SLOTS:
                 },
                 Qt::BlockingQueuedConnection);
         });
-        std::atomic<bool> holding{false};
-        std::atomic<QThread*> cancelledOn{nullptr};
         QVERIFY(server->addTool(McpTool(QStringLiteral("hold")), [&](McpCall call) {
             held = std::move(call);
             held.onCancelled([&] {

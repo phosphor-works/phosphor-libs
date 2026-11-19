@@ -25,7 +25,7 @@
 #
 # A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU,
 # PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, PHOSPHORMCP_USE_SYSTEM_VALIJSON, whose
-# default is phosphor-fsloader's option) checks that option before calling in
+# default AUTO follows phosphor-fsloader's option) checks that option before calling in
 # here, so it fetches no archive for a system copy. A standalone configure of
 # such a library with its system option on never includes this file. The
 # tree's root includes it on every configure, though, and CPM.cmake is loaded

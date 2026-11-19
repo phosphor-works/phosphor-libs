@@ -170,26 +170,27 @@ schema would make the list slow to build. The server multiplies the size of
 the arguments, in which a long string counts by its length, by a cost of the
 schema. The cost grows with the size of the schema, with the length of the
 names and values it lists (`required`, `enum`, `const`), and with each anyOf
-or oneOf nested in another. The server lists the errors only when the product
-keeps the work to about 0.2 s in a release build, whatever the strings and
-names are made of. Checking the arguments in the first place reads a string
-once for each `minLength` or `maxLength` that applies to it, which takes
-about 20 ms for 16 MiB of text that is not ASCII. So a schema with many of
-them around one long string makes each call slower, near a second for fifty
-of them. Before any check the server converts the arguments once, whatever
-the schema, which takes about 0.6 s for a 16 MiB line of small values.
-valijson takes about as long again to walk them under a subschema, and less
-for each further check: about 0.1 s for each keyword, and 0.2 s for each
-further subschema. That work grows with the longest line the server reads, so an
-application whose tools take no long text lowers it with
-`setMaxLineBytes`. Where valijson gives no
-reason for a failure (a `false` subschema, for one), the line names the
-place and says that it does not match the schema. A string or a member name
-with an unpaired UTF-16 surrogate, and an integral number outside the range
-of a 64-bit integer (1e19, 2^63, 1e300), are refused whatever the schema
-says, since valijson would read them differently from the handler. The range
-is checked on the number as Qt's JSON parser reads it, and the parser rounds
-a number outside it, and one written with a fraction or an exponent, to the
+or oneOf nested in another. The server lists the errors only when the
+product keeps the list to about a quarter of a second in a release build,
+whatever the strings and names are made of. Checking the arguments in the
+first place reads a string once for each `minLength` or `maxLength` that
+applies to it, which takes 10 to 45 ms for 16 MiB of text: the least for
+ASCII or one script, the most for text that mixes ASCII with other
+characters. So a schema with many of them around one long string makes each
+call slower, up to two seconds for fifty of them. Before any check the
+server converts the arguments once, whatever the schema, which takes 0.6 to
+0.8 s for a 16 MiB line of small values. valijson takes about as long again
+to walk them under a subschema, and less for each further check: about 0.1 s
+for each keyword, and 0.2 s for each further subschema. That work grows with
+the longest line the server reads, so an application whose tools take no
+long text lowers it with `setMaxLineBytes`. Where valijson gives no reason
+for a failure (a `false` subschema, for one), the line names the place and
+says that it does not match the schema. A string or a member name with an
+unpaired UTF-16 surrogate, and an integral number outside the range of a
+64-bit integer (1e19, 2^63, 1e300), are refused whatever the schema says,
+since valijson would read them differently from the handler. The range is
+checked on the number as Qt's JSON parser reads it, and the parser rounds a
+number outside it, and one written with a fraction or an exponent, to the
 nearest double. So -9223372036854775809, down to -9223372036854776832,
 passes as -9223372036854775808, the value that the handler reads, and
 9223372036854775807.0 is refused as 2^63.

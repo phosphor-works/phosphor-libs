@@ -111,11 +111,20 @@ if(NOT _phosphormcp_old_default STREQUAL "")
     set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ${_phosphormcp_old_value} CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
 endif()
 # The first option() looked for the system's headers through a cache variable
-# of its own. Its answer moves to the one that both libraries read.
+# of its own. Its answer moves to the one that both libraries read, unless
+# that one names a directory already, which then serves both, with a message.
+# In the tree, phosphor-fsloader looks first: a configure that also switches
+# it to the system's headers stops there before this runs, and one configure
+# without that switch, or VALIJSON_INCLUDE_DIR set, gets past it.
 if(DEFINED CACHE{PHOSPHORMCP_VALIJSON_INCLUDE_DIR})
     if(PHOSPHORMCP_VALIJSON_INCLUDE_DIR AND NOT VALIJSON_INCLUDE_DIR)
         set(VALIJSON_INCLUDE_DIR "${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}"
             CACHE PATH "Directory containing valijson/validator.hpp" FORCE)
+    elseif(PHOSPHORMCP_VALIJSON_INCLUDE_DIR
+           AND NOT PHOSPHORMCP_VALIJSON_INCLUDE_DIR STREQUAL VALIJSON_INCLUDE_DIR)
+        message(STATUS
+            "PHOSPHORMCP_VALIJSON_INCLUDE_DIR (${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}) is gone. phosphor-mcp now "
+            "takes valijson's headers from VALIJSON_INCLUDE_DIR (${VALIJSON_INCLUDE_DIR}), as phosphor-fsloader does.")
     endif()
     unset(PHOSPHORMCP_VALIJSON_INCLUDE_DIR CACHE)
 endif()

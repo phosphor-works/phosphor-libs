@@ -541,7 +541,8 @@ bool McpServer::handleTerminationSignals()
         if (!d->terminationSignals->belongsToThisProcess()) {
             qCWarning(lcMcp).noquote()
                 << "McpServer::handleTerminationSignals: the parent called this before the fork, and a "
-                   "child cannot take its handler. Call it only in the process that keeps the server.";
+                   "child cannot take its handler. In the child, destroy this copy and call it on a server made "
+                   "there.";
             return false;
         }
         return true;

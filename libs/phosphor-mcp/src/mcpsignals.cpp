@@ -51,7 +51,11 @@ extern "C" void onTerminationSignal(int signal)
         // A child forked before exec. The signal is the child's, not the
         // server's, so the child gets the disposition that it would have had
         // without the server. The signal is blocked while this runs, so the
-        // raised one comes to that disposition when this returns.
+        // raised one comes to that disposition when this returns. A child
+        // that destroys its copy and installs its own handler at the moment
+        // another of its threads runs this can lose the new handler to this
+        // sigaction(). The window is a few instructions wide, and nothing
+        // narrows it without a lock that a signal handler cannot take.
         sigaction(signal, signal == SIGTERM ? &s_oldTerm : &s_oldHup, nullptr);
         raise(signal);
         errno = savedErrno;

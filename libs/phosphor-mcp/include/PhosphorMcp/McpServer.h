@@ -173,8 +173,8 @@ public:
     // that forks to keep the server running in the child (a daemon) calls
     // this in the child, after the fork, and not in the parent before it.
     // After a call in the parent, a call in the child returns false, with a
-    // warning, while the child holds its copy of that server: the handler
-    // stays the parent's. Once the child destroyed its copy, a server in the
+    // warning, while the child holds its copy of that server, since the
+    // handler stays the parent's. Once the child destroyed its copy, a server in the
     // child takes the signals.
     bool handleTerminationSignals();
 

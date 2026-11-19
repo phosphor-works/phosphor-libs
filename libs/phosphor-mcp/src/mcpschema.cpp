@@ -49,15 +49,16 @@ constexpr qsizetype MaxCollectedPointerLength = 64 * 1024;
 // small value. The errors are collected only when the size of the value
 // (Inspector::size()) times the cost of the schema (errorPathCost()) is at
 // most this. A long string or member name in the value, and a long name or
-// value in the schema, count by their length. The slowest value found within
-// it takes about 0.15 s to list in a release build, many required names
-// missing from each of a few hundred items, and a long string of text that is
-// not ASCII under many length checks takes about as long. The check before
-// the list reads such a string as often again.
+// value in the schema, count by their length. In a release build the slowest
+// value found within it takes about 0.25 s to list: a long string that mixes
+// ASCII with other characters under many length checks, since valijson counts
+// its characters byte by byte. The check before the list reads it as often
+// again. Text of one script lists in about 0.1 s, and so do many required
+// names missing from each of a few hundred items.
 constexpr qint64 MaxErrorWork = 100000;
 // See Inspector::size() and literalCost().
 constexpr qint64 PointerLengthPerValue = 16;
-constexpr qint64 StringBytesPerValue = 2048;
+constexpr qint64 StringBytesPerValue = 1536;
 constexpr qint64 LiteralLengthPerValue = 128;
 
 // A member name in an error is cut to this many code units: a model's
@@ -820,9 +821,10 @@ private:
     // valijson and collect() copy its pointer several times, and valijson
     // copies a string out and counts its characters each time it checks its
     // length. As measured, PointerLengthPerValue code units of pointer cost
-    // as much as one more value, and so do StringBytesPerValue bytes of text
-    // that is not ASCII under length checks, the slowest strings. ASCII text
-    // costs less. A few megabytes of text still get their list.
+    // as much as one more value. StringBytesPerValue bytes of text under
+    // length checks cost about that much when the text is of one script, and
+    // about twice as much when it mixes ASCII with other characters, the
+    // slowest strings. A few megabytes of text still get their list.
     [[nodiscard]] qint64 size(std::size_t stringBytes) const
     {
         return m_nodes + m_pointerLength / PointerLengthPerValue + qint64(stringBytes) / StringBytesPerValue;
