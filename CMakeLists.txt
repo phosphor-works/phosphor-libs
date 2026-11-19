@@ -130,7 +130,7 @@ foreach(_phosphor_private GuiPrivate ShaderToolsPrivate QuickPrivate WaylandClie
     endif()
 endforeach()
 
-# The pinned archives (Luau, valijson, the test suite's surface packs) and the
+# The pinned archives (Luau, jsoncons, the test suite's surface packs) and the
 # CPM.cmake that downloads them. Included here, at this tree's top scope, and
 # not from the libraries that use them: the pins and CPM's state are ordinary
 # variables, and a module first included in one library's directory would leave

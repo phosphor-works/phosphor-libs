@@ -18,12 +18,13 @@ class QLoggingCategory;
 namespace PhosphorFsLoader {
 
 /**
- * @brief Validates parsed JSON documents against a JSON Schema (Draft 7).
+ * @brief Validates parsed JSON documents against a JSON Schema (2020-12).
  *
- * Thin, dependency-free wrapper over the vendored valijson engine. The
- * schema-validation library (valijson + its Qt adapter) is an implementation
- * detail confined to the .cpp; this header exposes only Qt/std types so the
- * engine never leaks into the public ABI or into consumers' include closure.
+ * A schema without @c $schema is read as 2020-12, and @c format is asserted
+ * (a "date" that is not a date fails), not only annotated. The validator,
+ * jsoncons, is an implementation detail confined to the .cpp. This header
+ * exposes only Qt and std types, so it never reaches the public ABI or the
+ * consumers' includes.
  *
  * Construct one validator per document type from the serialized schema bytes
  * (typically a schema embedded as a Qt resource), compile it once, and reuse
@@ -52,9 +53,11 @@ public:
     /**
      * @brief Compile a JSON Schema from its serialized bytes.
      *
-     * @param schemaJson  UTF-8 JSON text of a Draft 7 schema. A malformed or
-     *                    non-object schema leaves the validator in an invalid
-     *                    state (@c isValid() == false) instead of throwing.
+     * @param schemaJson  UTF-8 JSON text of a 2020-12 schema. A malformed or
+     *                    non-object schema, or one that does not compile (a
+     *                    @c pattern that is not an ECMAScript regex, for one),
+     *                    leaves the validator in an invalid state
+     *                    (@c isValid() == false) instead of throwing.
      */
     explicit SchemaValidator(const QByteArray& schemaJson);
     ~SchemaValidator();

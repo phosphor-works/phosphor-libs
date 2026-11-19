@@ -211,7 +211,7 @@ endif()
 # Luau is MIT-licensed (Roblox Corporation) and, in the default vendored
 # build, is statically linked into this library — so its licence notice must
 # accompany the distribution. Ship it in this tree's own licence directory,
-# beside the valijson notice phosphor-fsloader installs. The system-Luau build
+# beside the jsoncons notice phosphor-fsloader installs. The system-Luau build
 # links a separately-installed Luau that carries its own licence, so skip it
 # there.
 if(NOT PHOSPHOR_SYSTEM_LUAU)

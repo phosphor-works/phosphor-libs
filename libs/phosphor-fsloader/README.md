@@ -222,10 +222,15 @@ parse(mesh->bytes);
 ## Dependencies
 
 - `QtCore`
-- valijson 1.1.3 (BSD-2-Clause) — vendored by default and compiled into the
-  library, with its licence text installed alongside the app licences so the
-  notice ships with any distribution. Opt out with
-  `-DPHOSPHORFSLOADER_USE_SYSTEM_VALIJSON=ON` to link a system copy instead.
+- jsoncons 1.10.0 (BSL-1.0), header-only. By default it comes from the
+  archive that `cmake/PhosphorDependencies.cmake` pins, is compiled into the
+  library, and its licence installs as
+  `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with any
+  distribution. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
+  headers are used instead, found through `JSONCONS_INCLUDE_DIR`, and the
+  configure checks that they have the JSON Schema API the library uses.
+  `SchemaValidator` reads a schema without `$schema` as JSON Schema 2020-12,
+  and asserts `format` (a `date` that is not a date fails).
 
 ## See also
 
