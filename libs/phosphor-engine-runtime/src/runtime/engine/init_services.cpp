@@ -15,7 +15,6 @@
 #include <PhosphorAnimation/PhosphorProfileRegistry.h>
 #include <PhosphorAnimation/Profile.h>
 #include <PhosphorAnimation/ProfilePaths.h>
-#include <PhosphorAnimation/PhosphorCurve.h>
 #include <PhosphorAnimation/AnimationShaderRegistry.h>
 #include <PhosphorSurface/SurfaceShaderRegistry.h>
 

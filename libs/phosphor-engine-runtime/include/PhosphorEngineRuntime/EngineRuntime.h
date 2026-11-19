@@ -91,6 +91,16 @@ public:
         /// a factory that returns null, means the compositor cannot tell, and
         /// the decoration pause never engages.
         std::function<std::unique_ptr<IIdleSource>()> idleSource;
+        /// Publishes the runtime's curve registry as PhosphorCurve's default,
+        /// so overlay QML resolves named curves through it. The host does
+        /// this because it links the org.phosphor.animation QML module,
+        /// which holds that default, and the runtime does not. Called with
+        /// the registry when the animation profiles are set up and on every
+        /// start, and with null on every stop, before the registry goes.
+        /// The host also owns and publishes the QtQuickClockManager the
+        /// overlay QML animates against, for the runtime's whole life. Null
+        /// means the host loads no QML that reads named curves.
+        std::function<void(PhosphorAnimation::CurveRegistry*)> publishCurveRegistry;
     };
 
     explicit EngineRuntime(Platform platform, QObject* parent = nullptr);
@@ -458,10 +468,10 @@ private:
      * the shell animation family defaults
      * (`seedShellAnimationFamilies`) and installs their owner tag as the
      * registry's low-precedence tag so seed entries never ship in the published
-     * motion tree; publishes the three QML statics
-     * (`PhosphorCurve::setDefaultRegistry`,
-     * `PhosphorProfileRegistry::setDefaultRegistry`,
-     * `QtQuickClockManager::setDefaultManager`) that `stop()` clears; and
+     * motion tree; publishes the profile registry as
+     * `PhosphorProfileRegistry`'s default and hands the curve registry to
+     * the host's `Platform::publishCurveRegistry`, both of which `stop()`
+     * clears; and
      * registers the daemon's active animation Profile under the settings-driven
      * path set — `ProfilePaths::Global` today (kSettingsDrivenProfilePaths) —
      * with every other path resolving through inheritance.
@@ -1400,10 +1410,9 @@ private:
     /// DECLARATION ORDER INVARIANT: must precede `m_settings` and
     /// `m_curveLoader`, both of which borrow it, so
     /// reverse-order destruction tears every consumer down first and no
-    /// Settings / loader teardown path can UAF. Also cleared from
-    /// `PhosphorCurve::s_registry` in `~EngineRuntime`, so the QML static helper
-    /// can't dangle on shutdown or across successive Daemon
-    /// constructions in tests.
+    /// Settings / loader teardown path can UAF. `stop()` withdraws it from
+    /// the host's `publishCurveRegistry`, so the QML default can't dangle on
+    /// shutdown or across successive constructions in tests.
     PhosphorAnimation::CurveRegistry m_curveRegistry;
     /// Per-daemon profile registry, replacing the
     /// `PhosphorProfileRegistry::instance()` singleton. Published via
@@ -1414,14 +1423,6 @@ private:
     /// tears the consumers down first and no service teardown path can UAF. `stop()` calls
     /// `setDefaultRegistry(nullptr)` to clear the QML static handle.
     PhosphorAnimation::PhosphorProfileRegistry m_profileRegistry;
-    /// Per-daemon QtQuickClock manager — replaces the prior process-
-    /// global `QtQuickClockManager::instance()` singleton. Published via
-    /// `setDefaultManager` so any `PhosphorAnimatedValueBase`-derived
-    /// QML type in the overlay shell resolves the same per-window
-    /// clocks as the C++ side. Owned over the daemon lifetime; the
-    /// destroy-time `setDefaultManager(nullptr)` call in `stop()` drops
-    /// the published handle before the unique_ptr destructs.
-    std::unique_ptr<PhosphorAnimation::QtQuickClockManager> m_clockManager;
     // Declared BEFORE m_settings so reverse-order destruction frees it AFTER
     // m_settings: the ctor's adjacentThresholdChanged lambda (a m_settings->this
     // connection stop() deliberately does not sever) dereferences m_zoneDetector,
@@ -1473,6 +1474,8 @@ private:
     std::unique_ptr<IIdleSource> m_idleService;
     /// The host's Platform::idleSource, kept for every rebuild after a stop.
     std::function<std::unique_ptr<IIdleSource>()> m_idleSourceFactory;
+    /// Platform::publishCurveRegistry, or null.
+    std::function<void(PhosphorAnimation::CurveRegistry*)> m_publishCurveRegistry;
 
     /// Coalesces idle-ladder rebuilds. Rearming destroys and recreates the
     /// compositor's ext-idle-notify-v1 object, and while idle it announces a

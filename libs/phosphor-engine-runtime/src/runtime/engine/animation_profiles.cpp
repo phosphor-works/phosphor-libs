@@ -18,11 +18,9 @@
 
 #include <PhosphorAnimation/CurveLoader.h>
 #include <PhosphorAnimation/CurveRegistry.h>
-#include <PhosphorAnimation/PhosphorCurve.h>
 #include <PhosphorAnimation/PhosphorProfileRegistry.h>
 #include <PhosphorAnimation/Profile.h>
 #include <PhosphorAnimation/ProfilePaths.h>
-#include <PhosphorAnimation/QtQuickClockManager.h>
 
 #include <QLatin1StringView>
 #include <QString>
@@ -188,16 +186,16 @@ void EngineRuntime::setupAnimationProfiles()
         requestAnimationProfilePublish();
     });
 
-    // Wire the daemon-owned CurveRegistry into the QML static helper so
-    // every QML callsite that resolves curve wire-format strings uses
-    // the same per-process registry. Moved from the Daemon ctor into
-    // this function (between signal wiring and the initial scans) so
-    // publication of the static and population of the registry land
-    // together from QML's perspective — the static never goes live
-    // against an empty registry for the brief window before loaders
-    // run. The null-out in stop() prevents the static from dangling
-    // across process-lifetime Daemon reconstruction (e.g. in tests).
-    PhosphorCurve::setDefaultRegistry(&m_curveRegistry);
+    // Hand the runtime-owned CurveRegistry to the host to publish as the QML
+    // default, so every QML callsite that resolves curve wire-format strings
+    // uses the same per-process registry. Done here (between signal wiring
+    // and the initial scans) so publication and population land together
+    // from QML's perspective: the default never goes live against an empty
+    // registry for the brief window before loaders run. The null-out in
+    // stop() keeps it from dangling across reconstruction (e.g. in tests).
+    if (m_publishCurveRegistry) {
+        m_publishCurveRegistry(&m_curveRegistry);
+    }
 
     // Publish the daemon-owned PhosphorProfileRegistry as the QML-side
     // default — every `PhosphorMotionAnimation { profile: "<path>" }`
@@ -207,13 +205,6 @@ void EngineRuntime::setupAnimationProfiles()
     // explicit composition-root publication. Cleared in `stop()` before
     // the registry destructs.
     PhosphorProfileRegistry::setDefaultRegistry(&m_profileRegistry);
-
-    // Publish the daemon-owned QtQuickClockManager as the QML-side
-    // default — `PhosphorAnimatedValueBase::resolveClock` in any
-    // `PhosphorAnimatedReal/Color/Point/Rect/Size` instance that the
-    // overlay shell instantiates resolves through this pointer.
-    // Cleared in `stop()` before the manager destructs.
-    QtQuickClockManager::setDefaultManager(m_clockManager.get());
 
     // Three-phase initial load — curves first so the family-seed step and the
     // timing tree can both resolve named curves like `widget-out`; family

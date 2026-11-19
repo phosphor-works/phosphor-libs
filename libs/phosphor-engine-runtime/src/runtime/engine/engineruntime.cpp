@@ -13,8 +13,6 @@
 #include <PhosphorAnimation/PhosphorProfileRegistry.h>
 #include <PhosphorAnimation/Profile.h>
 #include <PhosphorAnimation/ProfilePaths.h>
-#include <PhosphorAnimation/PhosphorCurve.h>
-#include <PhosphorAnimation/QtQuickClockManager.h>
 
 // The header holds m_presetStore as a unique_ptr over a forward declaration, so the
 // complete type has to be here, where ~EngineRuntime instantiates its deleter. The unity
@@ -144,13 +142,9 @@ EngineRuntime::EngineRuntime(Platform platform, QObject* parent)
           std::make_unique<PhosphorZones::LayoutRegistry>(m_ruleStore.get(), ConfigDefaults::layoutsSubdir()))
     , m_layoutComputeService(std::make_unique<PhosphorZones::LayoutComputeService>(nullptr))
     // m_curveRegistry / m_profileRegistry are default-constructed (no
-    // init-list entries) — daemon.h declares them between m_layoutComputeService
-    // and m_clockManager, so the in-class default initialisation runs before
-    // any consumer below references them. m_clockManager owns its
-    // QtQuickClockManager via unique_ptr; the manager itself is published
-    // as the QML-side default in setupAnimationProfiles() below alongside
-    // the profile registry.
-    , m_clockManager(std::make_unique<PhosphorAnimation::QtQuickClockManager>())
+    // init-list entries) and declared after m_layoutComputeService, so the
+    // in-class default initialisation runs before any consumer below
+    // references them.
     // Pass &m_curveRegistry into Settings so its initial load() resolves
     // Profile blobs through the daemon-owned registry. Requires
     // m_curveRegistry to be declared BEFORE m_settings in daemon.h —
@@ -199,6 +193,7 @@ EngineRuntime::EngineRuntime(Platform platform, QObject* parent)
         m_shortcutManager->setBackendFactory(std::move(platform.shortcutBackends));
     }
     m_idleSourceFactory = std::move(platform.idleSource);
+    m_publishCurveRegistry = std::move(platform.publishCurveRegistry);
     // Install the layout screen-id resolver before any Daemon-owned machinery
     // starts loading layouts. First-call ensures the once-only install runs
     // exactly once across all Daemon constructions in the process; subsequent

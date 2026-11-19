@@ -37,8 +37,6 @@
 #include <PhosphorShaders/ShaderPresetStore.h>
 #include <PhosphorAnimation/CurveLoader.h>
 #include <PhosphorAnimation/PhosphorProfileRegistry.h>
-#include <PhosphorAnimation/PhosphorCurve.h>
-#include <PhosphorAnimation/QtQuickClockManager.h>
 #include <PhosphorAnimation/AnimationShaderRegistry.h>
 #include <PhosphorSurface/SurfaceShaderRegistry.h>
 #include <PhosphorZones/LayoutRegistry.h>
@@ -103,18 +101,19 @@ void EngineRuntime::start()
         setupIdleService();
     }
 
-    // Re-publish the QML static defaults. stop() nulls all three
-    // (`PhosphorCurve::setDefaultRegistry(nullptr)` etc.) to prevent
+    // Re-publish the QML defaults. stop() nulls both (the profile registry
+    // and, through the host, the curve registry) to prevent
     // borrowed-pointer UAF during teardown; without this re-publish,
     // a stop()→start() cycle (tests, programmatic restart) leaves QML
     // resolving against nullptr defaults — every
-    // `PhosphorMotionAnimation { profile: … }` and every clock-driven
-    // animated-value lookup silently fails until the next ctor runs.
+    // `PhosphorMotionAnimation { profile: … }` and every named-curve lookup
+    // silently fails until the next ctor runs.
     // The setters are idempotent: storing the same pointer the ctor
     // installed is a no-op on the first start() of a fresh daemon.
-    PhosphorAnimation::PhosphorCurve::setDefaultRegistry(&m_curveRegistry);
+    if (m_publishCurveRegistry) {
+        m_publishCurveRegistry(&m_curveRegistry);
+    }
     PhosphorAnimation::PhosphorProfileRegistry::setDefaultRegistry(&m_profileRegistry);
-    PhosphorAnimation::QtQuickClockManager::setDefaultManager(m_clockManager.get());
 
     // Suppress OSDs once Qt begins shutdown (SIGTERM, programmatic quit).
     // Connected once — m_aboutToQuitConnected prevents stacking on stop()→start().
@@ -215,18 +214,18 @@ void EngineRuntime::stop()
         m_dragResolver->setShortcutRegistrar(nullptr);
     }
 
-    // Null the QML static registry / manager pointers BEFORE the m_running
-    // gate. These three statics are published unconditionally from
+    // Null the QML default registries BEFORE the m_running gate. Both are
+    // published unconditionally from
     // `setupAnimationProfiles()` in the ctor — which runs before `init()`
     // or `start()`. A Daemon constructed but never started (test fixtures,
     // early-fail init paths) still has them pinned to the about-to-die
     // members, so the clear must run on every teardown path, not just the
     // post-start one. Same "borrowed-pointer + late member destruction"
-    // window as the provider lambdas below. The setDefault*(nullptr)
-    // calls are unconditionally null-safe.
-    PhosphorAnimation::PhosphorCurve::setDefaultRegistry(nullptr);
+    // window as the provider lambdas below. Both clears are null-safe.
+    if (m_publishCurveRegistry) {
+        m_publishCurveRegistry(nullptr);
+    }
     PhosphorAnimation::PhosphorProfileRegistry::setDefaultRegistry(nullptr);
-    PhosphorAnimation::QtQuickClockManager::setDefaultManager(nullptr);
 
     // Animation-loader teardown, ALSO above the m_running gate for the same ctor-origin reason as
     // the statics it pairs with: setupAnimationProfiles runs from the ctor, so an
