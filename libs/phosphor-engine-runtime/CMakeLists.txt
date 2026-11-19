@@ -51,6 +51,9 @@ endif()
 if(NOT TARGET PhosphorCompositor::PhosphorCompositor)
     find_package(PhosphorCompositor CONFIG REQUIRED)
 endif()
+if(NOT TARGET PhosphorPaths::PhosphorPaths)
+    find_package(PhosphorPaths CONFIG REQUIRED)
+endif()
 if(NOT TARGET PhosphorConfig::PhosphorConfig)
     find_package(PhosphorConfig CONFIG REQUIRED)
 endif()
@@ -143,7 +146,6 @@ endif()
 set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/AnimationBootstrap.h
     include/PhosphorEngineRuntime/AnimationShaderSupportedPaths.h
-    include/PhosphorEngineRuntime/AppDirectoryName.h
     include/PhosphorEngineRuntime/AutotileService.h
     include/PhosphorEngineRuntime/CavaOptions.h
     include/PhosphorEngineRuntime/ConfigBackends.h
@@ -293,7 +295,6 @@ set(phosphorengineruntime_SRCS
     src/config/settingsschema_workspaces.cpp
     src/core/interfaces/interfaces.cpp
     src/core/interfaces/isettings.cpp
-    src/core/platform/appdirectoryname.cpp
     src/core/platform/logging.cpp
     src/core/resolve/animationbootstrap.cpp
     src/core/resolve/crosssurfaceresolver.cpp
@@ -515,6 +516,9 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorCompositor::PhosphorCompositor
         PhosphorConfig::PhosphorConfig
         PhosphorEngine::PhosphorEngine
+        # The config, state and data paths: ConfigKeys.h names the shared
+        # trees through it.
+        PhosphorPaths::PhosphorPaths
         PhosphorIdentity::PhosphorIdentity
         PhosphorLayoutApi::PhosphorLayoutApi
         PhosphorProtocol::PhosphorProtocol

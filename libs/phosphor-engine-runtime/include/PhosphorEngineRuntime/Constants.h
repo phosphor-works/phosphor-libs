@@ -9,7 +9,7 @@
 #include <QLatin1String>
 #include <QString>
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 // Shared shapes (per-side gap struct + aspect-ratio classification) live in
 // libs/phosphor-layout-api so every layout/tile provider can consume them
@@ -120,7 +120,7 @@ constexpr int MinimumZoneDisplaySizePx = 10; // Minimum zone size for display (c
  */
 inline QString scriptedAlgorithmSubdir()
 {
-    return commonDataSubdir(QStringLiteral("algorithms"));
+    return PhosphorPaths::commonDataSubdir(QStringLiteral("algorithms"));
 }
 
 /**

@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 #include <QDir>
 #include <QStandardPaths>
 #include <QtGlobal>
 
-namespace PhosphorEngineRuntime {
+namespace PhosphorPaths {
 
 namespace {
 QString& storedName()
@@ -75,4 +75,4 @@ QString appCacheDir()
     return genericLocation(QStandardPaths::GenericCacheLocation, ".cache") + QLatin1Char('/') + appSubdir();
 }
 
-} // namespace PhosphorEngineRuntime
+} // namespace PhosphorPaths
