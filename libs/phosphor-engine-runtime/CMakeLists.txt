@@ -276,6 +276,19 @@ add_library(PhosphorEngineRuntime SHARED
 )
 add_library(PhosphorEngineRuntime::PhosphorEngineRuntime ALIAS PhosphorEngineRuntime)
 
+# Out of the unity build, as they were in PlasmaZones: the drag resolver's
+# translation units each declare file-local helpers under the same names,
+# which collide once unity merges them.
+set_source_files_properties(
+    src/runtime/dragresolver/drag.cpp
+    src/runtime/dragresolver/drag_protocol.cpp
+    src/runtime/dragresolver/drop.cpp
+    src/runtime/dragresolver/dragtimers.cpp
+    src/runtime/dragresolver/dragzonespan.cpp
+    src/runtime/dragresolver/selector_gate.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON
+)
+
 generate_export_header(PhosphorEngineRuntime
     EXPORT_FILE_NAME phosphorengineruntime_export.h
     EXPORT_MACRO_NAME PHOSPHORENGINERUNTIME_EXPORT
