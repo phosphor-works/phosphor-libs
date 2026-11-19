@@ -201,8 +201,15 @@ int McpTransport::reopenTerminal() const
     // both descriptors share. TIOCGDEV gives the terminal's own.
     unsigned int inherited = 0;
     unsigned int reopened = 0;
-    if (::ioctl(m_writeFd, TIOCGDEV, &inherited) != 0 || ::ioctl(fd, TIOCGDEV, &reopened) != 0
-        || inherited != reopened) {
+    if (::ioctl(m_writeFd, TIOCGDEV, &inherited) != 0 || ::ioctl(fd, TIOCGDEV, &reopened) != 0) {
+        const int error = errno;
+        ::close(fd);
+        qCWarning(lcMcp).nospace() << "McpTransport::open: cannot tell which terminal " << m_writeFd << " is ("
+                                   << strerror(error)
+                                   << "), so its shared description is made non-blocking until the transport closes";
+        return -1;
+    }
+    if (inherited != reopened) {
         ::close(fd);
         qCWarning(lcMcp).nospace() << "McpTransport::open: the terminal " << m_writeFd
                                    << " opens as another device, so its shared description is made non-blocking"

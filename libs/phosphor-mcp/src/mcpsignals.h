@@ -43,6 +43,9 @@ public:
     // stays, so that this may run from inside the callback. Once only, and a
     // later call does nothing.
     void release();
+    // False in a child forked after install(): the handler there takes the
+    // old dispositions, and this object handles nothing.
+    [[nodiscard]] bool belongsToThisProcess() const;
 
 private:
     McpTerminationSignals() = default;

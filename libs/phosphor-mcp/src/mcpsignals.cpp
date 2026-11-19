@@ -150,6 +150,11 @@ McpTerminationSignals::~McpTerminationSignals()
     ::close(m_writeFd);
 }
 
+bool McpTerminationSignals::belongsToThisProcess() const
+{
+    return ::getpid() == s_pid.load();
+}
+
 void McpTerminationSignals::release()
 {
     if (m_released) {

@@ -345,8 +345,8 @@ forked before `exec` gets the disposition it would have had without the
 server, not the server's handler. So a process that forks to keep the
 server running in the child, as a daemon does, calls
 `handleTerminationSignals()` in the child, after the fork, and not in the
-parent before it: there the child's own call would find the handler taken
-and install nothing.
+parent before it. After a call in the parent, the child's call returns
+false, with a warning, since the handler stays the parent's.
 
 The library never changes SIGPIPE's disposition. An ignored SIGPIPE survives
 `exec`, so every program that the application starts would inherit it, and

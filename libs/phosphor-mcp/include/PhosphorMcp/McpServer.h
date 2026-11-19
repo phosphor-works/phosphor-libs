@@ -164,9 +164,9 @@ public:
     // The handler belongs to the process that called this. A child forked
     // after it, before an exec, takes the old dispositions. So a process
     // that forks to keep the server running in the child (a daemon) calls
-    // this in the child, after the fork, and not in the parent before it:
-    // the child's own call would then find the handler taken and install
-    // nothing.
+    // this in the child, after the fork, and not in the parent before it.
+    // After a call in the parent, the child's call returns false, with a
+    // warning, since the handler stays the parent's.
     bool handleTerminationSignals();
 
     // Reads requests on stdin and writes replies on stdout. A server with no

@@ -536,6 +536,14 @@ bool McpServer::handleTerminationSignals()
         return false;
     }
     if (d->terminationSignals) {
+        // In a child forked after the parent's call, the copied handler
+        // takes the old dispositions, so the server handles nothing here.
+        if (!d->terminationSignals->belongsToThisProcess()) {
+            qCWarning(lcMcp).noquote()
+                << "McpServer::handleTerminationSignals: the parent called this before the fork, and a "
+                   "child cannot take its handler. Call it only in the process that keeps the server.";
+            return false;
+        }
         return true;
     }
     // The callback runs from the self-pipe's notifier. end() finishes

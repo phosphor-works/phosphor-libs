@@ -381,6 +381,37 @@ private Q_SLOTS:
         QCOMPARE(finished.count(), 0);
     }
 
+    void childCannotTakeTheParentsHandler()
+    {
+        // After the parent's call, the same server's call in a forked child
+        // says false: the handler there is the parent's, and SIGTERM would
+        // take the old disposition.
+        McpServer server;
+        QVERIFY(server.handleTerminationSignals());
+        int report[2];
+        QCOMPARE(::pipe(report), 0);
+        const pid_t child = ::fork();
+        if (child == 0) {
+            ::close(report[0]);
+            const char answer = server.handleTerminationSignals() ? '1' : '0';
+            [[maybe_unused]] const ssize_t written = ::write(report[1], &answer, 1);
+            ::_exit(0);
+        }
+        ::close(report[1]);
+        const auto closeReport = qScopeGuard([&report] {
+            ::close(report[0]);
+        });
+        QVERIFY(child > 0);
+        char answer = 0;
+        QCOMPARE(::read(report[0], &answer, 1), ssize_t(1));
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        QCOMPARE(answer, '0');
+        // The parent still holds them.
+        QVERIFY(server.handleTerminationSignals());
+        QVERIFY(hasServerHandler(SIGTERM));
+    }
+
     void signalsFollowTheServerToAnotherThread()
     {
         // Moved to a worker thread after handleTerminationSignals(), the
