@@ -67,11 +67,17 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 set(_phosphormcp_system_valijson_doc
     "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
 # A build directory from before AUTO holds the BOOL that an option() wrote,
-# known by its help text. Its value is the option()'s default unless someone
-# chose another: OFF for the first option(), and phosphor-fsloader's value
-# for the second. A default becomes AUTO, so that the directory follows
-# phosphor-fsloader from now on, and a choice stays. A BOOL that someone
-# passes with -D...:BOOL=OFF has another help text, and stays OFF.
+# known by its help text. The first option()'s default was OFF, and the
+# second's was phosphor-fsloader's value at the directory's first configure.
+# The cache records neither whether the value is that default or a choice,
+# nor what phosphor-fsloader's value was then. So a value equal to the
+# default as it reads now (OFF, or phosphor-fsloader's value at this
+# configure) becomes AUTO, and the directory follows phosphor-fsloader from
+# now on. Another value stays, with a message that says how to follow
+# phosphor-fsloader instead. A -D...:BOOL given to this revision or a later
+# one has another help text, and stays as given. In an old directory the
+# option() gave every entry its own help text, so a choice there that equals
+# the default becomes AUTO.
 set(_phosphormcp_old_help
     "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins")
 get_property(_phosphormcp_system_valijson_type CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY TYPE)
@@ -97,8 +103,21 @@ if(NOT _phosphormcp_old_default STREQUAL "")
     endif()
     if(_phosphormcp_old_value STREQUAL _phosphormcp_old_default)
         set(_phosphormcp_old_value AUTO)
+    else()
+        message(STATUS
+            "PHOSPHORMCP_USE_SYSTEM_VALIJSON keeps ${_phosphormcp_old_value} from an older build directory. "
+            "Set it to AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON.")
     endif()
     set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ${_phosphormcp_old_value} CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
+endif()
+# The first option() looked for the system's headers through a cache variable
+# of its own. Its answer moves to the one that both libraries read.
+if(DEFINED CACHE{PHOSPHORMCP_VALIJSON_INCLUDE_DIR})
+    if(PHOSPHORMCP_VALIJSON_INCLUDE_DIR AND NOT VALIJSON_INCLUDE_DIR)
+        set(VALIJSON_INCLUDE_DIR "${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}"
+            CACHE PATH "Directory containing valijson/validator.hpp" FORCE)
+    endif()
+    unset(PHOSPHORMCP_VALIJSON_INCLUDE_DIR CACHE)
 endif()
 set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}")
 set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
@@ -109,12 +128,14 @@ if(_phosphormcp_system_valijson_mode STREQUAL "AUTO")
     else()
         set(_phosphormcp_system_valijson OFF)
     endif()
-# CMake's named true and false constants, in any case, and integers written
-# without leading zeros mean ON and OFF. Anything else is more likely a
-# mistake, an empty value too, which CMake reads as false.
+# CMake's named constants mean ON and OFF as CMake reads them: in any case,
+# but NOTFOUND and a name that ends in -NOTFOUND only in capitals. So do 0
+# and positive integers written without leading zeros. Anything else is more
+# likely a mistake, an empty value too, which CMake reads as false.
 elseif(_phosphormcp_system_valijson_mode MATCHES "^(ON|YES|TRUE|Y|[1-9][0-9]*)$")
     set(_phosphormcp_system_valijson ON)
-elseif(_phosphormcp_system_valijson_mode MATCHES "^(OFF|NO|FALSE|N|0|IGNORE|NOTFOUND|.*-NOTFOUND)$")
+elseif(_phosphormcp_system_valijson_mode MATCHES "^(OFF|NO|FALSE|N|0|IGNORE)$"
+       OR PHOSPHORMCP_USE_SYSTEM_VALIJSON MATCHES "^(.*-)?NOTFOUND$")
     set(_phosphormcp_system_valijson OFF)
 else()
     message(FATAL_ERROR

@@ -462,10 +462,13 @@ without an input schema takes no arguments, as with
   phosphor-fsloader uses too, and the configure checks the version floor by
   compiling against them. The option's default is `AUTO`, which follows
   `PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON` at every configure, so
-  phosphor-fsloader's switch moves both libraries to the system's copy, in a
-  new build directory or an old one that kept the old default. `ON` and `OFF` choose for this library
-  alone. valijson is private to the library,
-  and a consumer needs nothing of it.
+  phosphor-fsloader's switch moves both libraries to the system's copy.
+  `ON` and `OFF` choose for this library alone. A build directory from
+  before `AUTO` moves to it when it holds the old default as it reads at the
+  upgrade. A value it keeps (one chosen, or a default from before a switch
+  of phosphor-fsloader) is named in a configure message, and setting the
+  option to `AUTO` makes the directory follow phosphor-fsloader again.
+  valijson is private to the library, and a consumer needs nothing of it.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
