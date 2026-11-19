@@ -8,12 +8,12 @@
 # dispatch of tools/call with argument checks against each tool's schema,
 # cancellation, progress, and the end of the session.
 #
-# Depends on Qt6::Core and the header-only valijson only. No Gui, no Qml, no
+# Depends on Qt6::Core and the header-only jsoncons only. No Gui, no Qml, no
 # Network: a server that runs inside a CLI command pulls in nothing more.
 # Linux only: the transport writes a terminal through /proc/self/fd and
 # sockets with MSG_NOSIGNAL, and takes back SIGPIPE with sigtimedwait.
 
-# 3.21 floor, as phosphor-control's: the tree's floor. The valijson
+# 3.21 floor, as phosphor-control's: the tree's floor. The jsoncons
 # acquisition needs 3.18 (file(ARCHIVE_EXTRACT)).
 cmake_minimum_required(VERSION 3.21)
 
@@ -50,149 +50,98 @@ include(GenerateExportHeader)
 
 find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 
-# valijson, header-only JSON Schema validation (Draft 7), checks the arguments
-# of each call against the tool's input schema. The archive
-# cmake/PhosphorDependencies.cmake pins by default, as phosphor-fsloader takes
-# it; system headers opt-in. Used only inside src/mcpschema.cpp, so it is a
-# PRIVATE SYSTEM include: its warnings stay out of our build, and it never
-# reaches the public ABI.
+# jsoncons, header-only JSON with JSON Schema validation, checks the arguments
+# of each call against the tool's input schema in JSON Schema 2020-12. The
+# archive cmake/PhosphorDependencies.cmake pins by default, as
+# phosphor-fsloader takes it; system headers opt-in. Used only inside
+# src/mcpschema.cpp, so it is a PRIVATE SYSTEM include: its warnings stay out
+# of our build, and it never reaches the public ABI.
 #
-# phosphor-fsloader takes the same valijson, and a packager who switches it to
-# the system's headers means the tree's valijson. So AUTO, the default,
-# follows PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, and is resolved again at each
+# phosphor-fsloader takes the same jsoncons, and a packager who switches it to
+# the system's headers means the tree's jsoncons. So AUTO, the default,
+# follows PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS, and is resolved again at each
 # configure: an option() would keep the first value in the cache, and a later
 # switch of phosphor-fsloader alone would leave the two libraries on two
 # different copies. ON and OFF choose for this library only. Both libraries
-# look for the headers through one cache variable, VALIJSON_INCLUDE_DIR.
-set(_phosphormcp_system_valijson_doc
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
-# A build directory from before AUTO holds the BOOL that an option() wrote,
-# known by its help text. The first option()'s default was OFF, and the
-# second's was phosphor-fsloader's value at the directory's first configure.
-# The cache records neither whether the value is that default or a choice,
-# nor what phosphor-fsloader's value was then. So a value equal to the
-# default as it reads now (OFF, or phosphor-fsloader's value at this
-# configure) becomes AUTO, and the directory follows phosphor-fsloader from
-# now on. Another value stays, with a message that says how to follow
-# phosphor-fsloader instead. A -D...:BOOL given to this revision or a later
-# one has another help text, and stays as given. In an old directory the
-# option() gave every entry its own help text, so a choice there that equals
-# the default becomes AUTO.
-set(_phosphormcp_old_help
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins")
-get_property(_phosphormcp_system_valijson_type CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY TYPE)
-get_property(_phosphormcp_system_valijson_help CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY HELPSTRING)
-set(_phosphormcp_old_default "")
-if(_phosphormcp_system_valijson_type STREQUAL "BOOL")
-    if(_phosphormcp_system_valijson_help STREQUAL _phosphormcp_old_help)
-        set(_phosphormcp_old_default OFF)
-    elseif(_phosphormcp_system_valijson_help STREQUAL
-           "${_phosphormcp_old_help} (default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)")
-        if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-            set(_phosphormcp_old_default ON)
-        else()
-            set(_phosphormcp_old_default OFF)
-        endif()
-    endif()
-endif()
-if(NOT _phosphormcp_old_default STREQUAL "")
-    if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
-        set(_phosphormcp_old_value ON)
+# look for the headers through one cache variable, JSONCONS_INCLUDE_DIR.
+set(PHOSPHORMCP_USE_SYSTEM_JSONCONS AUTO CACHE STRING
+    "Use system-provided jsoncons headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS")
+set_property(CACHE PHOSPHORMCP_USE_SYSTEM_JSONCONS PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_JSONCONS}" _phosphormcp_system_jsoncons_mode)
+if(_phosphormcp_system_jsoncons_mode STREQUAL "AUTO")
+    if(PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
+        set(_phosphormcp_system_jsoncons ON)
     else()
-        set(_phosphormcp_old_value OFF)
-    endif()
-    if(_phosphormcp_old_value STREQUAL _phosphormcp_old_default)
-        set(_phosphormcp_old_value AUTO)
-    else()
-        message(STATUS
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON keeps ${_phosphormcp_old_value} from an older build directory. "
-            "Set it to AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON.")
-    endif()
-    set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ${_phosphormcp_old_value} CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
-endif()
-# The first option() looked for the system's headers through a cache variable
-# of its own. Its answer moves to the one that both libraries read, unless
-# that one names a directory already, which then serves both, with a message.
-# In the tree, phosphor-fsloader looks first: a configure that also switches
-# it to the system's headers stops there before this runs, and one configure
-# without that switch, or VALIJSON_INCLUDE_DIR set, gets past it.
-if(DEFINED CACHE{PHOSPHORMCP_VALIJSON_INCLUDE_DIR})
-    if(PHOSPHORMCP_VALIJSON_INCLUDE_DIR AND NOT VALIJSON_INCLUDE_DIR)
-        set(VALIJSON_INCLUDE_DIR "${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}"
-            CACHE PATH "Directory containing valijson/validator.hpp" FORCE)
-    elseif(PHOSPHORMCP_VALIJSON_INCLUDE_DIR
-           AND NOT PHOSPHORMCP_VALIJSON_INCLUDE_DIR STREQUAL VALIJSON_INCLUDE_DIR)
-        message(STATUS
-            "PHOSPHORMCP_VALIJSON_INCLUDE_DIR (${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}) is gone. phosphor-mcp now "
-            "takes valijson's headers from VALIJSON_INCLUDE_DIR (${VALIJSON_INCLUDE_DIR}), as phosphor-fsloader does.")
-    endif()
-    unset(PHOSPHORMCP_VALIJSON_INCLUDE_DIR CACHE)
-endif()
-set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}")
-set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
-string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_VALIJSON}" _phosphormcp_system_valijson_mode)
-if(_phosphormcp_system_valijson_mode STREQUAL "AUTO")
-    if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-        set(_phosphormcp_system_valijson ON)
-    else()
-        set(_phosphormcp_system_valijson OFF)
+        set(_phosphormcp_system_jsoncons OFF)
     endif()
 # CMake's named constants mean ON and OFF as CMake reads them: in any case,
 # but NOTFOUND and a name that ends in -NOTFOUND only in capitals. So do 0
 # and positive integers written without leading zeros. Anything else is more
 # likely a mistake, an empty value too, which CMake reads as false.
-elseif(_phosphormcp_system_valijson_mode MATCHES "^(ON|YES|TRUE|Y|[1-9][0-9]*)$")
-    set(_phosphormcp_system_valijson ON)
-elseif(_phosphormcp_system_valijson_mode MATCHES "^(OFF|NO|FALSE|N|0|IGNORE)$"
-       OR PHOSPHORMCP_USE_SYSTEM_VALIJSON MATCHES "^(.*-)?NOTFOUND$")
-    set(_phosphormcp_system_valijson OFF)
+elseif(_phosphormcp_system_jsoncons_mode MATCHES "^(ON|YES|TRUE|Y|[1-9][0-9]*)$")
+    set(_phosphormcp_system_jsoncons ON)
+elseif(_phosphormcp_system_jsoncons_mode MATCHES "^(OFF|NO|FALSE|N|0|IGNORE)$"
+       OR PHOSPHORMCP_USE_SYSTEM_JSONCONS MATCHES "^(.*-)?NOTFOUND$")
+    set(_phosphormcp_system_jsoncons OFF)
 else()
     message(FATAL_ERROR
-        "PHOSPHORMCP_USE_SYSTEM_VALIJSON is \"${PHOSPHORMCP_USE_SYSTEM_VALIJSON}\". It takes AUTO, ON or OFF.")
+        "PHOSPHORMCP_USE_SYSTEM_JSONCONS is \"${PHOSPHORMCP_USE_SYSTEM_JSONCONS}\". It takes AUTO, ON or OFF.")
 endif()
 
-if(_phosphormcp_system_valijson)
-    find_path(VALIJSON_INCLUDE_DIR
-        NAMES valijson/validator.hpp
-        DOC "Directory containing valijson/validator.hpp")
-    if(NOT VALIJSON_INCLUDE_DIR)
+if(_phosphormcp_system_jsoncons)
+    find_path(JSONCONS_INCLUDE_DIR
+        NAMES jsoncons_ext/jsonschema/jsonschema.hpp
+        DOC "Directory containing jsoncons_ext/jsonschema/jsonschema.hpp")
+    # A directory given by hand is not searched, so it is checked too.
+    if(NOT JSONCONS_INCLUDE_DIR OR NOT EXISTS "${JSONCONS_INCLUDE_DIR}/jsoncons_ext/jsonschema/jsonschema.hpp")
         message(FATAL_ERROR
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON is ${PHOSPHORMCP_USE_SYSTEM_VALIJSON} (AUTO follows PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON), but "
-            "valijson/validator.hpp was not found. Install valijson's headers and point VALIJSON_INCLUDE_DIR at "
-            "them, or set PHOSPHORMCP_USE_SYSTEM_VALIJSON and PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON to OFF to "
-            "use the pinned archive.")
+            "PHOSPHORMCP_USE_SYSTEM_JSONCONS is ${PHOSPHORMCP_USE_SYSTEM_JSONCONS} (AUTO follows PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS), but "
+            "jsoncons_ext/jsonschema/jsonschema.hpp was not found (JSONCONS_INCLUDE_DIR is \"${JSONCONS_INCLUDE_DIR}\"). "
+            "Install jsoncons' headers and point JSONCONS_INCLUDE_DIR at them, or set PHOSPHORMCP_USE_SYSTEM_JSONCONS and "
+            "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS to OFF to use the pinned archive.")
     endif()
-    # valijson 1.1.0 is the first whose errors carry jsonPointer, which
-    # src/mcpschema.cpp reads. A header-only install has no version file
-    # worth trusting, so the check compiles against the headers. Its result
-    # is kept for the directory it was made with, and a failure is not kept.
-    if(NOT "${VALIJSON_INCLUDE_DIR}" STREQUAL "${_PHOSPHORMCP_VALIJSON_CHECKED_DIR}")
-        unset(PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER CACHE)
-        set(_PHOSPHORMCP_VALIJSON_CHECKED_DIR "${VALIJSON_INCLUDE_DIR}" CACHE INTERNAL
-            "The valijson headers that PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER was checked with")
+    # jsoncons 1.7.0 is the first with jsonschema::walk_state, which
+    # src/mcpschema.cpp returns from its reporter, beside the validation
+    # messages' keyword, evaluation path and details that it reads. A
+    # header-only install has no version file worth trusting, so the check
+    # compiles against the headers. Its result is kept for the directory it
+    # was made with, and a failure is not kept.
+    if(NOT "${JSONCONS_INCLUDE_DIR}" STREQUAL "${_PHOSPHORMCP_JSONCONS_CHECKED_DIR}")
+        unset(PHOSPHORMCP_JSONCONS_HAS_WALK_STATE CACHE)
+        set(_PHOSPHORMCP_JSONCONS_CHECKED_DIR "${JSONCONS_INCLUDE_DIR}" CACHE INTERNAL
+            "The jsoncons headers that PHOSPHORMCP_JSONCONS_HAS_WALK_STATE was checked with")
     endif()
     include(CheckCXXSourceCompiles)
     include(CMakePushCheckState)
     cmake_push_check_state(RESET)
-    set(CMAKE_REQUIRED_INCLUDES "${VALIJSON_INCLUDE_DIR}")
+    set(CMAKE_REQUIRED_INCLUDES "${JSONCONS_INCLUDE_DIR}")
     check_cxx_source_compiles([=[
-#include <valijson/validation_results.hpp>
+#include <jsoncons/json.hpp>
+#include <jsoncons_ext/jsonschema/jsonschema.hpp>
+#include <cstddef>
 int main()
 {
-    valijson::ValidationResults::Error error;
-    error.jsonPointer = "/text";
-    return error.jsonPointer.empty() ? 1 : 0;
+    namespace jss = jsoncons::jsonschema;
+    const auto schema = jss::make_json_schema(jsoncons::json::parse("{}"),
+        jss::evaluation_options{}.default_version(jss::schema_version::draft202012()));
+    std::size_t seen = 0;
+    schema.validate(jsoncons::json(1), [&](const jss::validation_message& message) -> jss::walk_state {
+        seen += message.keyword().size() + message.details().size() + message.eval_path().string().size()
+            + message.instance_location().string().size();
+        return jss::walk_state::abort;
+    });
+    return seen == 0 ? 0 : 1;
 }
-]=] PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER)
+]=] PHOSPHORMCP_JSONCONS_HAS_WALK_STATE)
     cmake_pop_check_state()
-    if(NOT PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER)
-        unset(PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER CACHE)
+    if(NOT PHOSPHORMCP_JSONCONS_HAS_WALK_STATE)
+        unset(PHOSPHORMCP_JSONCONS_HAS_WALK_STATE CACHE)
         message(FATAL_ERROR
-            "The valijson headers in ${VALIJSON_INCLUDE_DIR} are older than 1.1.0, which phosphor-mcp needs "
-            "(ValidationResults::Error::jsonPointer). Install valijson 1.1.0 or later, or set "
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON to OFF to use the pinned archive.")
+            "The jsoncons headers in ${JSONCONS_INCLUDE_DIR} are older than 1.7.0, which phosphor-mcp needs "
+            "(jsonschema::walk_state). Install jsoncons 1.7.0 or later, or set "
+            "PHOSPHORMCP_USE_SYSTEM_JSONCONS to OFF to use the pinned archive.")
     endif()
-    set(_phosphormcp_valijson_include "${VALIJSON_INCLUDE_DIR}")
+    set(_phosphormcp_jsoncons_include "${JSONCONS_INCLUDE_DIR}")
 else()
     # In-tree the root CMakeLists has already included the module at the top
     # scope, which is where it has to be (it explains why). A standalone
@@ -200,9 +149,9 @@ else()
     if(NOT COMMAND phosphor_fetch_dependency)
         include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/PhosphorDependencies.cmake")
     endif()
-    phosphor_fetch_dependency(valijson)
-    set(_phosphormcp_valijson_root "${valijson_SOURCE_DIR}")
-    set(_phosphormcp_valijson_include "${_phosphormcp_valijson_root}/include")
+    phosphor_fetch_dependency(jsoncons)
+    set(_phosphormcp_jsoncons_root "${jsoncons_SOURCE_DIR}")
+    set(_phosphormcp_jsoncons_include "${_phosphormcp_jsoncons_root}/include")
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -271,18 +220,18 @@ target_include_directories(PhosphorMcp
         $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}>
 )
 
-target_include_directories(PhosphorMcp SYSTEM PRIVATE "${_phosphormcp_valijson_include}")
+target_include_directories(PhosphorMcp SYSTEM PRIVATE "${_phosphormcp_jsoncons_include}")
 
 target_compile_features(PhosphorMcp PUBLIC cxx_std_20)
 
-# valijson's schema parser throws on a schema it cannot compile, and its
-# validator can throw on a value it cannot check. KDECompilerSettings turns
-# exceptions off, so they come back on for the one translation unit that
-# includes valijson, which catches everything before it returns. VALIJSON_USE_EXCEPTIONS
-# travels with the flag, as in phosphor-fsloader.
+# jsoncons throws on a schema it cannot compile, and can throw on a value it
+# cannot check. KDECompilerSettings turns exceptions off, so they come back
+# on for the one translation unit that includes jsoncons, which catches
+# everything before it returns. jsoncons reads __cpp_exceptions to choose
+# between throwing and std::terminate(), so the flag needs no define beside
+# it. No other translation unit includes a jsoncons header.
 set_source_files_properties(src/mcpschema.cpp PROPERTIES
-    COMPILE_OPTIONS "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fexceptions>"
-    COMPILE_DEFINITIONS "VALIJSON_USE_EXCEPTIONS=1")
+    COMPILE_OPTIONS "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fexceptions>")
 
 target_link_libraries(PhosphorMcp
     PUBLIC
@@ -321,15 +270,15 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcp/phosphormcp_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorMcp
 )
 
-# valijson is BSD-2-Clause, and with the pinned archive its headers are
-# compiled into this library, so its notice ships with it. The same file, at
-# the same path, as phosphor-fsloader installs.
-if(NOT _phosphormcp_system_valijson)
-    set(_phosphormcp_valijson_license "${_phosphormcp_valijson_root}/LICENSE")
-    if(EXISTS "${_phosphormcp_valijson_license}")
-        install(FILES ${_phosphormcp_valijson_license}
+# jsoncons is BSL-1.0, and with the pinned archive its headers are compiled
+# into this library, so its notice ships with it. The same file, at the same
+# path, as phosphor-fsloader installs.
+if(NOT _phosphormcp_system_jsoncons)
+    set(_phosphormcp_jsoncons_license "${_phosphormcp_jsoncons_root}/LICENSE")
+    if(EXISTS "${_phosphormcp_jsoncons_license}")
+        install(FILES ${_phosphormcp_jsoncons_license}
             DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
-            RENAME LICENSE.valijson)
+            RENAME LICENSE.jsoncons)
     endif()
 endif()
 
