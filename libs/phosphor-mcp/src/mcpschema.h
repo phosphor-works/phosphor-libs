@@ -26,11 +26,18 @@ public:
     McpSchema(const McpSchema&) = delete;
     McpSchema& operator=(const McpSchema&) = delete;
 
-    // Checks `schema` (a root with "type": "object", and only the keywords
-    // that both dialects share) and compiles it. Returns an empty string on
-    // success, else why the schema is refused, with the JSON pointer of the
-    // place.
-    QString compile(const QJsonObject& schema);
+    // What the root of a schema must be. A tool's input schema describes the
+    // arguments object, so its root has "type": "object". An output schema
+    // describes structuredContent, which may be any JSON value.
+    enum class Root {
+        Object,
+        Any,
+    };
+
+    // Checks `schema` (a root as `root` asks, and only the keywords that both
+    // dialects share) and compiles it. Returns an empty string on success,
+    // else why the schema is refused, with the JSON pointer of the place.
+    QString compile(const QJsonObject& schema, Root root = Root::Object);
 
     // The errors of `value` against the compiled schema, one
     // "<pointer>: <description>" for each, the pointer relative to the

@@ -93,6 +93,7 @@ set(phosphormcp_public_HDRS
 
 set(phosphormcp_SRCS
     src/mcpcall.cpp
+    src/mcplogging.cpp
     src/mcpresult.cpp
     src/mcpschema.cpp
     src/mcpserver.cpp

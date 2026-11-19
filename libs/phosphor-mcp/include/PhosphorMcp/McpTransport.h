@@ -109,6 +109,10 @@ Q_SIGNALS:
     void outputClosed(int error);
     // The write queue became empty.
     void drained();
+    // The reader took `bytes` more of the queue. Sent from the event loop
+    // when the write notifier drains a queue that had to wait, never from
+    // inside writeLine().
+    void bytesWritten(qint64 bytes);
 
 private:
     void onReadable();

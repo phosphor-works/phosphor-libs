@@ -30,8 +30,6 @@
 
 namespace PhosphorMcp {
 
-Q_LOGGING_CATEGORY(lcMcp, "phosphormcp")
-
 namespace {
 
 const QLatin1StringView MethodDiscover("server/discover");

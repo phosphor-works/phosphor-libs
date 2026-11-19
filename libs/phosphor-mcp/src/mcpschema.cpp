@@ -305,12 +305,12 @@ McpSchema::McpSchema()
 
 McpSchema::~McpSchema() = default;
 
-QString McpSchema::compile(const QJsonObject& schema)
+QString McpSchema::compile(const QJsonObject& schema, Root root)
 {
     if (d->compiled) {
         return QStringLiteral("the schema was compiled before");
     }
-    if (schema.value(QLatin1StringView("type")) != QJsonValue(QStringLiteral("object"))) {
+    if (root == Root::Object && schema.value(QLatin1StringView("type")) != QJsonValue(QStringLiteral("object"))) {
         return QStringLiteral("/type: the root of a tool schema must have \"type\": \"object\"");
     }
     const QString error = checkSchema(schema, QString());
