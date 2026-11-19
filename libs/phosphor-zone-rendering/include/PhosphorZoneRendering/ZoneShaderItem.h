@@ -47,18 +47,10 @@ namespace PhosphorZoneRendering {
 class PHOSPHORZONERENDERING_EXPORT ZoneShaderItem : public PhosphorRendering::ShaderEffect
 {
     Q_OBJECT
-    // Registered manually via qmlRegisterType under the "PlasmaZones" module
-    // URI, in daemon/main.cpp and settings/main.cpp plus the shared-module
-    // test. QML_ELEMENT here would be inert (no qt_add_qml_module target
-    // exists) and misleading.
-    //
-    // NOT the editor. plasmazones-editor links plasmazones_shared_qml, so it
-    // SHIPS ZoneShaderRenderer.qml, but it does not link
-    // plasmazones_rendering and calls no qmlRegisterType, so an editor .qml
-    // instantiating it would fail at load with "PlasmaZones is not installed".
-    // Nothing in the editor does today. Wiring the preview up means linking
-    // plasmazones_rendering there and registering both items, not just adding
-    // the import.
+    // Registered in the org.phosphor.zonerendering QML module as a foreign
+    // type (src/qml/zoneshaderitemforeign.h), beside ZoneShaderRenderer.qml.
+    // A process that draws zones links PhosphorZoneRenderingQml and imports
+    // its plugin.
 
     // Zone data (zone-specific, not in parent)
     Q_PROPERTY(QVariantList zones READ zones WRITE setZones NOTIFY zonesChanged FINAL)

@@ -45,3 +45,13 @@ function(phosphorzonerendering_add_test name)
 endfunction()
 
 phosphorzonerendering_add_test(test_zone_entry_scaffold)
+
+# The QML module: both types resolve from the import and instantiate.
+phosphorzonerendering_add_test(test_zone_rendering_qml_module)
+target_link_libraries(test_zone_rendering_qml_module
+    PRIVATE
+        PhosphorZoneRendering::PhosphorZoneRenderingQml
+        PhosphorZoneRenderingQmlplugin
+        Qt6::Qml
+        Qt6::Quick
+)

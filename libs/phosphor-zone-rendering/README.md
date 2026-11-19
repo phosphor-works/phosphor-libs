@@ -17,15 +17,27 @@ previews and the pack tooling (`plasmazones-shader-render`, the pack validator).
 
 | Type | Header | What it is |
 | --- | --- | --- |
-| `ZoneShaderItem` | `ZoneShaderItem.h` | The Qt Quick item a host registers with QML |
+| `ZoneShaderItem` | `ZoneShaderItem.h` | The Qt Quick item, in the `org.phosphor.zonerendering` QML module |
+| `ZoneShaderRenderer` | `qml/ZoneShaderRenderer.qml` | The QML wrapper the overlay and the previews share: one config object in, consistent bindings out |
 | `assembleZoneEntrySource` | `ZoneEntryScaffold.h` | The entry scaffold for packs without their own `main()` |
 | `expandShaderIncludePaths`, `resolveZoneVertexPath`, `warmShaderBakeCacheForPaths` | `ZoneShaderNodeRhi.h` | Include paths, the vertex stage and the warm bake |
 | `ZoneLabelTextureBuilder` | `ZoneLabelTextureBuilder.h` | The zone-number label texture |
 
 ## Typical use
 
+Link `PhosphorZoneRendering::PhosphorZoneRenderingQml` and `PhosphorZoneRenderingQmlplugin` (a static module, in
+this tree only), import the plugin once, and use the types from QML:
+
 ```cpp
-qmlRegisterType<PhosphorZoneRendering::ZoneShaderItem>("MyHost", 1, 0, "ZoneShaderItem");
+Q_IMPORT_QML_PLUGIN(org_phosphor_zonerenderingPlugin)
+```
+
+```qml
+import org.phosphor.zonerendering
+
+ZoneShaderRenderer {
+    config: overlayConfig
+}
 ```
 
 ## Design notes
@@ -37,5 +49,5 @@ qmlRegisterType<PhosphorZoneRendering::ZoneShaderItem>("MyHost", 1, 0, "ZoneShad
 
 ## Dependencies
 
-Qt Core, Gui and Quick, PhosphorRendering (the shader effect and RHI node), PhosphorShaders (entry points),
+Qt Core, Gui, Qml and Quick, PhosphorRendering (the shader effect and RHI node), PhosphorShaders (entry points),
 PhosphorEngineRuntime (the overlay data paths) and PhosphorZones (zone JSON keys).
