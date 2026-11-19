@@ -66,21 +66,39 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # look for the headers through one cache variable, VALIJSON_INCLUDE_DIR.
 set(_phosphormcp_system_valijson_doc
     "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
-# A build directory from before AUTO holds the BOOL that the option() wrote,
-# with its default unless someone chose ON. Such an OFF becomes AUTO, so that
-# the directory follows phosphor-fsloader too, and an ON stays. Only the
-# option()'s own entry is moved, known by its help text: a BOOL that someone
-# passes with -D...:BOOL=OFF is a choice, and stays OFF.
+# A build directory from before AUTO holds the BOOL that an option() wrote,
+# known by its help text. Its value is the option()'s default unless someone
+# chose another: OFF for the first option(), and phosphor-fsloader's value
+# for the second. A default becomes AUTO, so that the directory follows
+# phosphor-fsloader from now on, and a choice stays. A BOOL that someone
+# passes with -D...:BOOL=OFF has another help text, and stays OFF.
+set(_phosphormcp_old_help
+    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins")
 get_property(_phosphormcp_system_valijson_type CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY TYPE)
 get_property(_phosphormcp_system_valijson_help CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY HELPSTRING)
-if(_phosphormcp_system_valijson_type STREQUAL "BOOL"
-   AND _phosphormcp_system_valijson_help MATCHES
-       "^Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies\\.cmake pins( \\(default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON\\))?$")
-    if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
-        set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ON CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
-    else()
-        set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
+set(_phosphormcp_old_default "")
+if(_phosphormcp_system_valijson_type STREQUAL "BOOL")
+    if(_phosphormcp_system_valijson_help STREQUAL _phosphormcp_old_help)
+        set(_phosphormcp_old_default OFF)
+    elseif(_phosphormcp_system_valijson_help STREQUAL
+           "${_phosphormcp_old_help} (default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)")
+        if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
+            set(_phosphormcp_old_default ON)
+        else()
+            set(_phosphormcp_old_default OFF)
+        endif()
     endif()
+endif()
+if(NOT _phosphormcp_old_default STREQUAL "")
+    if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+        set(_phosphormcp_old_value ON)
+    else()
+        set(_phosphormcp_old_value OFF)
+    endif()
+    if(_phosphormcp_old_value STREQUAL _phosphormcp_old_default)
+        set(_phosphormcp_old_value AUTO)
+    endif()
+    set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ${_phosphormcp_old_value} CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
 endif()
 set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}")
 set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
@@ -91,8 +109,9 @@ if(_phosphormcp_system_valijson_mode STREQUAL "AUTO")
     else()
         set(_phosphormcp_system_valijson OFF)
     endif()
-# CMake's own true and false constants mean ON and OFF. An empty value, which
-# CMake reads as false, is more likely a mistake, and so is anything else.
+# CMake's named true and false constants, in any case, and integers written
+# without leading zeros mean ON and OFF. Anything else is more likely a
+# mistake, an empty value too, which CMake reads as false.
 elseif(_phosphormcp_system_valijson_mode MATCHES "^(ON|YES|TRUE|Y|[1-9][0-9]*)$")
     set(_phosphormcp_system_valijson ON)
 elseif(_phosphormcp_system_valijson_mode MATCHES "^(OFF|NO|FALSE|N|0|IGNORE|NOTFOUND|.*-NOTFOUND)$")

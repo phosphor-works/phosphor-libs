@@ -399,7 +399,8 @@ depends on what stdout is.
   file description of the server's own. The terminal that a shell shares
   with the server keeps its flags, even when the server is killed. When the
   terminal cannot be opened again (a pty that another user owns, after
-  `su`, or no `/proc`) or is a pty master, the server warns and treats it as
+  `su`, or no `/proc`), opens as another device or as one the server cannot
+  identify, or is a pty master, the server warns and treats it as
   a pipe, as below. Its shared description is then non-blocking until the
   server ends.
 - Anything else, such as the pipe an MCP client gives, gets `O_NONBLOCK`. At
@@ -453,7 +454,7 @@ without an input schema takes no arguments, as with
   compiling against them. The option's default is `AUTO`, which follows
   `PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON` at every configure, so
   phosphor-fsloader's switch moves both libraries to the system's copy, in a
-  new build directory or an old one. `ON` and `OFF` choose for this library
+  new build directory or an old one that kept the old default. `ON` and `OFF` choose for this library
   alone. valijson is private to the library,
   and a consumer needs nothing of it.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
