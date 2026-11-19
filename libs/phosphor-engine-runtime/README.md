@@ -82,8 +82,9 @@ however it came about. PlasmaZones serves its KWin choices and its rendering pin
 ## Design notes
 
 - **Everything lives under `phosphor-works`.** The data the apps share is in common trees in each XDG data root
-  (`phosphor-works/layouts`, `/algorithms`, `/scrolling-templates`, `/animations`, `/overlays`, `/pointer`,
-  `/curves`, `/profiles`, `/shader-presets`, and the motion, decoration and overlay sets), and the runtime's
+  (`phosphor-works/layouts`, `/algorithms`, `/scrolling-templates`, `/curves`, `/profiles`, and the motion,
+  decoration and overlay sets), every shader family under `phosphor-works/shaders/` (`animations`, `overlays`,
+  `pointer`, `presets`, and the surface packs in `surface`, which the host names), and the runtime's
   translations in `share/phosphor-works/translations`. What is one app's own is in its folder,
   `phosphor-works/<app>`: config files (`~/.config/phosphor-works/<app>/config.json`), state (workspaces) and
   cache.

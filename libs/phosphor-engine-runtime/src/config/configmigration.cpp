@@ -172,23 +172,30 @@ void adoptPreviousLocations()
         return;
     }
     const QString oldData = dataRoot + QLatin1Char('/') + appDirectoryName();
-    const QStringList trees = {
-        ConfigKeys::layoutsSubdir(),
-        ConfigKeys::animationsSubdir(),
-        ConfigKeys::overlaysSubdir(),
-        ConfigKeys::profilesSubdir(),
-        ConfigKeys::pointerSubdir(),
-        ConfigKeys::curvesSubdir(),
-        ConfigKeys::shaderPresetsSubdir(),
-        ConfigKeys::scrollingTemplatesSubdir(),
-        scriptedAlgorithmSubdir(),
-        ConfigDefaults::userMotionSetsSubdir().mid(1),
-        ConfigDefaults::userDecorationSetsSubdir().mid(1),
-        ConfigDefaults::userOverlaySetsSubdir().mid(1),
+    // 3.x's tree name under <data root>/<app>, and where it lives now.
+    const QList<std::pair<QString, QString>> trees = {
+        {QStringLiteral("layouts"), ConfigKeys::layoutsSubdir()},
+        {QStringLiteral("algorithms"), scriptedAlgorithmSubdir()},
+        {QStringLiteral("scrolling-templates"), ConfigKeys::scrollingTemplatesSubdir()},
+        {QStringLiteral("animations"), ConfigKeys::animationsSubdir()},
+        {QStringLiteral("overlays"), ConfigKeys::overlaysSubdir()},
+        {QStringLiteral("pointer"), ConfigKeys::pointerSubdir()},
+        {QStringLiteral("shader-presets"), ConfigKeys::shaderPresetsSubdir()},
+        {QStringLiteral("profiles"), ConfigKeys::profilesSubdir()},
+        {QStringLiteral("curves"), ConfigKeys::curvesSubdir()},
+        {QStringLiteral("motionsets"), ConfigDefaults::userMotionSetsSubdir().mid(1)},
+        {QStringLiteral("decorationsets"), ConfigDefaults::userDecorationSetsSubdir().mid(1)},
+        {QStringLiteral("overlaysets"), ConfigDefaults::userOverlaySetsSubdir().mid(1)},
     };
-    for (const QString& tree : trees) {
-        const QString name = tree.section(QLatin1Char('/'), -1);
-        moveTreeContents(oldData + QLatin1Char('/') + name, dataRoot + QLatin1Char('/') + tree);
+    for (const auto& [oldName, tree] : trees) {
+        moveTreeContents(oldData + QLatin1Char('/') + oldName, dataRoot + QLatin1Char('/') + tree);
+    }
+    // 3.x already kept the user's surface packs in the shared tree, beside
+    // the shader families' new home rather than in it.
+    const QString surfaceTree = ConfigKeys::surfacePacksSubdir();
+    const QString previousSurfaceTree = commonDataSubdir(QStringLiteral("surface"));
+    if (!surfaceTree.isEmpty() && surfaceTree != previousSurfaceTree) {
+        moveTreeContents(dataRoot + QLatin1Char('/') + previousSurfaceTree, dataRoot + QLatin1Char('/') + surfaceTree);
     }
     QDir().rmdir(oldData);
 }

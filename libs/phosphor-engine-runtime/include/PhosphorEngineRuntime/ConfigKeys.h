@@ -1122,7 +1122,8 @@ public:
     // The data families the daemon, settings app and editor locate, as
     // RELATIVE sub-paths: the form QStandardPaths::locate / locateAll and the
     // registries' subdirectory arguments take. Each is a tree every Phosphor
-    // app shares (commonDataSubdir(): phosphor-works/<tree>). Hoisted into one accessor each so a
+    // app shares (commonDataSubdir(): phosphor-works/<tree>), the shader
+    // families together under phosphor-works/shaders/. Hoisted into one accessor each so a
     // rename only touches one site. The ConfigDefaults::user*Subdir()
     // accessors are the same paths with the leading '/' a writableLocation()
     // concatenation needs, derived from these. The algorithms directory is
@@ -1137,11 +1138,11 @@ public:
     }
     static QString animationsSubdir()
     {
-        return commonDataSubdir(QStringLiteral("animations"));
+        return commonDataSubdir(QStringLiteral("shaders/animations"));
     }
     static QString overlaysSubdir()
     {
-        return commonDataSubdir(QStringLiteral("overlays"));
+        return commonDataSubdir(QStringLiteral("shaders/overlays"));
     }
     static QString profilesSubdir()
     {
@@ -1149,7 +1150,7 @@ public:
     }
     static QString pointerSubdir()
     {
-        return commonDataSubdir(QStringLiteral("pointer"));
+        return commonDataSubdir(QStringLiteral("shaders/pointer"));
     }
     static QString curvesSubdir()
     {
@@ -1157,7 +1158,7 @@ public:
     }
     static QString shaderPresetsSubdir()
     {
-        return commonDataSubdir(QStringLiteral("shader-presets"));
+        return commonDataSubdir(QStringLiteral("shaders/presets"));
     }
     static QString scrollingTemplatesSubdir()
     {
