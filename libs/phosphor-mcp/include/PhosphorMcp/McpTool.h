@@ -11,9 +11,10 @@
 
 namespace PhosphorMcp {
 
-// The definition of one tool, as tools/list shows it. McpServer::addTool
-// checks it: the name, and that both schemas are ones the server can check
-// arguments against (see the README, "Schemas").
+// The definition of one tool. tools/list shows all of it but the client
+// capabilities that a call needs, which only the server reads.
+// McpServer::addTool checks the name, and that both schemas are ones the
+// server can check arguments against (see the README, "Schemas").
 //
 // The behavior hints are the four of the spec's ToolAnnotations. A client
 // assumes the least safe value for a hint the tool does not give (not
@@ -49,9 +50,9 @@ public:
     [[nodiscard]] QJsonObject inputSchema() const;
     McpTool& setInputSchema(const QJsonObject& schema);
 
-    // The schema of the result's structured content. Empty means none. A
-    // tool with one must answer every call that is not an error with
-    // structured content that matches it.
+    // The schema of the result's structured content, which may be any JSON
+    // value. Empty means none. A tool with one must answer every call that
+    // is not an error with structured content that matches it.
     [[nodiscard]] QJsonObject outputSchema() const;
     McpTool& setOutputSchema(const QJsonObject& schema);
 
@@ -68,10 +69,14 @@ public:
     McpTool& setHints(const Hints& hints);
 
     // The client capabilities a call needs, in the shape of the request's
-    // io.modelcontextprotocol/clientCapabilities: {"elicitation": {}}. A
-    // call whose request does not declare each of them (and, for a
-    // non-empty object, each key inside it) is refused with
-    // ErrorCode::MissingRequiredClientCapability. Empty: none.
+    // io.modelcontextprotocol/clientCapabilities. Each member names a
+    // capability, and its value is an object of the options the call needs
+    // in it, {} for none. A call whose request does not declare each of them
+    // as an object (and, for a non-empty value, each option inside it, the
+    // same way) is refused with ErrorCode::MissingRequiredClientCapability.
+    // Empty means none. The server only checks the declaration, and sends
+    // no request to the client itself (see the README, "Not in the
+    // library"). The Tool object of tools/list leaves this out.
     [[nodiscard]] QJsonObject requiredClientCapabilities() const;
     McpTool& setRequiredClientCapabilities(const QJsonObject& capabilities);
 

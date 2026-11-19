@@ -36,15 +36,26 @@ public:
 
     // Checks `schema` (a root as `root` asks, and only the keywords that both
     // dialects share) and compiles it. Returns an empty string on success,
-    // else why the schema is refused, with the JSON pointer of the place.
+    // else why the schema is refused as "<pointer>: <reason>", the pointer
+    // being "" for the root itself.
     QString compile(const QJsonObject& schema, Root root = Root::Object);
 
     // The errors of `value` against the compiled schema, one
     // "<pointer>: <description>" for each, the pointer relative to the
     // value's root ("" for the root itself). Empty when `value` matches.
+    //
+    // A value that valijson would read differently from a handler is
+    // refused before valijson sees it. That is a string or member name with
+    // an unpaired UTF-16 surrogate, or an integral number outside the range
+    // of qint64. The list is short whatever the size of `value`, with at
+    // most ten errors and a last line that counts the rest. A value too
+    // large to list its errors cheaply gets one line that says so.
     [[nodiscard]] QStringList validate(const QJsonValue& value) const;
 
 private:
+    // Compiles a schema that checkSchema has accepted.
+    QString compileChecked(const QJsonObject& schema);
+
     struct Private;
     std::unique_ptr<Private> d;
 };

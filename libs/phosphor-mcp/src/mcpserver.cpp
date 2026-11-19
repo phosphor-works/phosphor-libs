@@ -69,23 +69,24 @@ QString idKey(const QJsonValue& id)
 
 bool isValidToolName(const QString& name)
 {
-    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_.-]{1,128}$"));
+    // Anchored at the very end: "$" would also match before a final "\n".
+    static const QRegularExpression pattern(QRegularExpression::anchoredPattern(u"[A-Za-z0-9_.-]{1,128}"));
     return pattern.match(name).hasMatch();
 }
 
-// Each capability that `required` names must be in `declared`, and for a
-// capability that is a non-empty object, each of its own keys too.
+// Each capability that `required` names must be declared as an object, as
+// the spec declares every capability ({} for one without options), and for
+// a capability that is a non-empty object, each of its own keys too. null,
+// false or a string does not declare a capability.
 bool hasCapabilities(const QJsonObject& declared, const QJsonObject& required)
 {
     for (auto it = required.begin(); it != required.end(); ++it) {
-        if (!declared.contains(it.key())) {
+        const QJsonValue have = declared.value(it.key());
+        if (!have.isObject()) {
             return false;
         }
-        if (it.value().isObject() && !it.value().toObject().isEmpty()) {
-            const QJsonValue have = declared.value(it.key());
-            if (!have.isObject() || !hasCapabilities(have.toObject(), it.value().toObject())) {
-                return false;
-            }
+        if (it.value().isObject() && !hasCapabilities(have.toObject(), it.value().toObject())) {
+            return false;
         }
     }
     return true;
