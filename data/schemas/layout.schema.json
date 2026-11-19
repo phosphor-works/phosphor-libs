@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "urn:plasmazones:schema:layout",
     "title": "PlasmaZones Layout",
     "description": "A tiling layout with identity metadata and a list of zones with relative geometry. Structural invariants are enforced here. The optional appearance, gap, geometry-mode, and visibility keys are allowed through so editor-produced and future layouts are not rejected.",
@@ -40,10 +40,10 @@
             "type": "array",
             "minItems": 1,
             "description": "At least one zone. The loader rejects zero-zone layouts.",
-            "items": { "$ref": "#/definitions/zone" }
+            "items": { "$ref": "#/$defs/zone" }
         }
     },
-    "definitions": {
+    "$defs": {
         "zone": {
             "type": "object",
             "required": ["relativeGeometry"],
@@ -51,7 +51,7 @@
                 "id": { "type": "string", "minLength": 1 },
                 "name": { "type": "string" },
                 "zoneNumber": { "type": "integer" },
-                "relativeGeometry": { "$ref": "#/definitions/relativeGeometry" }
+                "relativeGeometry": { "$ref": "#/$defs/relativeGeometry" }
             }
         },
         "relativeGeometry": {
