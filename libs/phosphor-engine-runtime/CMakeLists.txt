@@ -37,7 +37,7 @@ include(GenerateExportHeader)
 # Dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
 
-find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 ${PHOSPHORENGINERUNTIME_QT_MIN} REQUIRED COMPONENTS Core Gui Qml Quick Concurrent)
 # The overlay settings warm-bake through PhosphorRendering's ShaderCompiler,
 # whose header includes QShaderBaker (rhi/), in this private module.
 if(NOT TARGET Qt6::ShaderToolsPrivate)
@@ -552,6 +552,9 @@ target_link_libraries(PhosphorEngineRuntime
         # The hub's shader warm-up bakes the surface packs through
         # SurfaceShaderItem's own bake path.
         PhosphorSurfaceQuick::PhosphorSurfaceQuick
+        # The hub runs the warm bake and the startup layout scan off the GUI
+        # thread with QtConcurrent.
+        Qt6::Concurrent
         # overlay/settings.cpp reaches PhosphorRendering's ShaderCompiler.h.
         Qt6::ShaderToolsPrivate
 )
