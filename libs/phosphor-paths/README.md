@@ -61,10 +61,12 @@ if (!QFileInfo::exists(config)) {
 
 ## In CMake
 
-Install destinations use the same name, never a literal: `PHOSPHOR_SUITE_DIRECTORY_NAME` is set by the library's
-CMake in-tree and by `find_package(PhosphorPaths)` for an installed copy.
+Install destinations use the same name, never a literal: `PHOSPHOR_SUITE_DIRECTORY_NAME`. The phosphor-libs tree
+defines it once, in `cmake/PhosphorSuite.cmake`, which has no dependency, so a build without Qt can include it too.
+`find_package(PhosphorPaths)` sets it for an installed copy.
 
 ```cmake
+include("${phosphor-libs_SOURCE_DIR}/cmake/PhosphorSuite.cmake")
 install(DIRECTORY data/layouts/ DESTINATION ${KDE_INSTALL_DATADIR}/${PHOSPHOR_SUITE_DIRECTORY_NAME}/layouts)
 ```
 
