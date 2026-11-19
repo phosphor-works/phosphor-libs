@@ -24,7 +24,7 @@
 
 namespace PhosphorEngineRuntime {
 
-constexpr QLatin1StringView kShellAnimationFamilySeedsOwnerTag{"plasmazones-shell-family-seeds"};
+constexpr QLatin1StringView kShellAnimationFamilySeedsOwnerTag{"engineruntime-shell-family-seeds"};
 
 namespace {
 // Owner-tag partition the secondary processes (settings, editor) install the
@@ -33,7 +33,7 @@ namespace {
 // daemon and settings/editor share a process — today they don't, but the
 // narrower contract is correct. No resolver distinguishes the two tags; only
 // the seed tag is special.
-constexpr QLatin1StringView kSecondaryProfilesOwnerTag{"plasmazones-secondary-profiles"};
+constexpr QLatin1StringView kSecondaryProfilesOwnerTag{"engineruntime-secondary-profiles"};
 
 QString writableUserDir(const QString& xdgRelative)
 {

@@ -32,7 +32,7 @@ interfaces.
   cheatsheet and the scroll drop indicator, as slots of one passive layer-shell surface per screen, with their QML
   (`qrc:/phosphor-engine-runtime/overlay/`). The host presents them through a layer-shell transport and an
   `ISurfacePresentationHost` (the render backend and any GPU thumbnail import). Their layer-shell namespaces are
-  the host's app directory name and the overlay family (`<app>-osd`).
+  the runtime's own, `phosphor-<family>` (`phosphor-osd`), under every host.
 - The controllers: global shortcuts (`ShortcutManager`, over the host's PhosphorShortcuts backend), dynamic
   per-monitor workspaces (`WorkspaceController`), the unified layout list and mode toggle
   (`UnifiedLayoutController`), the engines' construction (`createEngines`) and the context resolver's adapters.

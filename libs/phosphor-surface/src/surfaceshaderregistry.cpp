@@ -833,13 +833,13 @@ QList<PhosphorShaders::EntryCandidate> SurfaceShaderRegistry::surfaceEntryCandid
     // the Qt RHI hosts the generated main() scales it by qt_Opacity, the host's
     // fade times the scene graph's inherited opacity (see
     // ShaderNodeRhi::setSurfaceOpacity); the compositor build defines
-    // PLASMAZONES_KWIN and has no qt_Opacity, so there it is written as is. A
+    // PHOSPHOR_KWIN and has no qt_Opacity, so there it is written as is. A
     // pack that writes its own main() bypasses this scaffold and so gets no
     // opacity applied on any host. Single candidate — surface packs have no
     // per-element loop (that is the overlay category's pZone).
     static const QString surfaceMain = QStringLiteral(
         "void main() {\n"
-        "#ifndef PLASMAZONES_KWIN\n"
+        "#ifndef PHOSPHOR_KWIN\n"
         "    fragColor = pSurface(vTexCoord) * qt_Opacity;\n"
         "#else\n"
         "    fragColor = pSurface(vTexCoord);\n"

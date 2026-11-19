@@ -90,7 +90,7 @@ namespace PhosphorSurfaceShaders {
 /// window's chrome geometry within it. They are populated on BOTH
 /// runtimes — KWin via classic-GL `setUniform`, the daemon via its
 /// surface-layer uniform plumbing — so none is guarded by an
-/// `#ifdef PLASMAZONES_KWIN`.
+/// `#ifdef PHOSPHOR_KWIN`.
 ///
 /// Field dynamics: the following are re-pushed every paint because they
 /// can change frame to frame. `uTexture0` (the live captured surface),
@@ -279,7 +279,7 @@ inline constexpr const char* kIAudioSpectrumSize = "iAudioSpectrumSize";
 /// `sampler2D uAudioSpectrum` — the CAVA spectrum as a `bars×1` texture (R =
 /// bar value in 0..1). Lives in surface_audio.glsl, not the UBO: `binding = 10`
 /// on the daemon's RHI pipeline, a loose named sampler on the compositor's
-/// classic-GL pipeline (the `#ifdef PLASMAZONES_KWIN` branch). Only sampled
+/// classic-GL pipeline (the `#ifdef PHOSPHOR_KWIN` branch). Only sampled
 /// while `iAudioSpectrumSize > 0`, so an unbound sampler is never read.
 inline constexpr const char* kUAudioSpectrum = "uAudioSpectrum";
 

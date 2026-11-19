@@ -354,7 +354,7 @@ PHOSPHORANIMATION_EXPORT extern const QString EventClassStrip;
 /// appearance rule, and the reason that matters is the RUNTIME, not the bake:
 /// the daemon never binds a tab snapshot, so a tab leg there would blend the
 /// arriving surface against nothing. `old_content.glsl` itself compiles on
-/// both ABIs — it declares `uOldWindow` under `PLASMAZONES_KWIN` and aliases
+/// both ABIs — it declares `uOldWindow` under `PHOSPHOR_KWIN` and aliases
 /// it onto `uTexture3` on the other branch — so a pack including it is not
 /// kept off the daemon by a compile failure.
 PHOSPHORANIMATION_EXPORT extern const QString EventClassTab;

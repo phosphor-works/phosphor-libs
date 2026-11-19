@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
-
 #include <PhosphorLayer/Role.h>
 #include <PhosphorOverlay/ShellHost.h>
 #include <PhosphorShellPatterns/Patterns.h>
@@ -22,17 +20,12 @@ namespace PhosphorEngineRuntime {
 /// @ref PhosphorShellPatterns axis-2 UI-pattern vocabulary.
 namespace PhosphorRoles {
 
-/// The layer-shell scope of an overlay family: the host's app directory name,
-/// a dash and the family (plasmazonesd: `plasmazones-osd`). The compositor sees
-/// it as the surface's namespace, so a rule or an effect exclusion matching it
-/// keeps working for that host.
-///
-/// The roles below are built on first use and kept, which is after the host
-/// has set its app directory name (at the top of main, before the runtime
-/// exists).
+/// The layer-shell scope of an overlay family, `phosphor-<family>`
+/// (`phosphor-osd`): the runtime's own name for its surfaces, the same under
+/// every host. The compositor sees it as the surface's namespace.
 inline QString scopeFor(const QString& family)
 {
-    return appDirectoryName() + QLatin1Char('-') + family;
+    return QStringLiteral("phosphor-") + family;
 }
 
 /// Zone-overlay config-only role. Same migration story as the OSD /
@@ -40,7 +33,7 @@ inline QString scopeFor(const QString& family)
 /// rectangles are an Item slot inside the per-screen PassiveShell (see
 /// createOverlayWindow in overlay.cpp), so the surface anchoring lives
 /// on the PassiveShell role and this role exists purely as the
-/// SurfaceAnimator config-lookup key (`<app>-zone-overlay`). The
+/// SurfaceAnimator config-lookup key (`phosphor-zone-overlay`). The
 /// Hud pattern's layer + AnchorAll fields are inherited but unused;
 /// createWarmedOsdSurface computes the shell's real anchors and margins,
 /// including the virtual-screen AnchorTop|AnchorLeft + offset case.
@@ -55,7 +48,7 @@ inline const PhosphorLayer::Role& ZoneOverlay()
 /// SnapAssist / LayoutPicker pattern). Post-shell-migration the zone
 /// selector is a slot inside the per-screen PassiveShell - the surface
 /// anchoring lives on the shell's PassiveShell role, and this role only
-/// names an animator scope (`<app>-zone-selector`) for the slot's
+/// names an animator scope (`phosphor-zone-selector`) for the slot's
 /// show/hide leg. The Top layer + AnchorNone fields are placeholders
 /// preserved for the (now unreachable) standalone-window path.
 inline const PhosphorLayer::Role& ZoneSelector()
@@ -231,7 +224,7 @@ inline const PhosphorLayer::Role& ScrollDropIndicator()
 ///
 /// Pre-existing failure modes this prevents:
 ///  - Build the per-instance literal from scratch (e.g. typo
-///    "<app>-notif-..."), or
+///    "phosphor-notif-..."), or
 ///  - Pass `OsdBase` instead of the named family role and re-type the
 ///    literal, then later rename the family role in this header.
 /// Either case made the longest-prefix match silently miss and the

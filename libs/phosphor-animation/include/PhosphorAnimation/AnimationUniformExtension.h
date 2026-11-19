@@ -53,7 +53,7 @@ namespace PhosphorAnimation {
 /// `setUniform` lookups for these names (see `paint_shader_window.cpp`)
 /// — independent of the UBO mechanism,
 /// works without any extension. Author-side GLSL is identical across
-/// runtimes (the `#ifdef PLASMAZONES_KWIN` branch of
+/// runtimes (the `#ifdef PHOSPHOR_KWIN` branch of
 /// animation_uniforms.glsl declares them as default-block uniforms;
 /// the UBO branch declares them inside `AnimationUniforms { ... }`).
 ///

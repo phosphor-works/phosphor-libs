@@ -144,7 +144,7 @@ PHOSPHORSHADERS_EXPORT int versionDirectiveEnd(const QString& source);
 /// The preprocessor block that selects the COMPOSITOR branch of a pack's
 /// source, newline-terminated with @p eol and ready for `spliceAfterVersion`.
 ///
-/// `#define PLASMAZONES_KWIN` is the ABI switch itself: the shared uniform
+/// `#define PHOSPHOR_KWIN` is the ABI switch itself: the shared uniform
 /// headers key their default-block-uniform branch off it.
 ///
 /// KWin picks the dialect from the GL context, not from its own version. On a
