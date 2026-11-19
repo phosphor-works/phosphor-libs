@@ -162,35 +162,93 @@ Invalid arguments for tool count_words:
 ```
 
 The text lists at most ten errors, and then a line such as
-`- arguments: and 3 more errors`. Arguments of more than 1000 JSON values,
-or whose paths come to more than 64 Ki UTF-16 code units together, get one
-line instead, which says that they do not match and are too large for the
-server to list each error. Smaller arguments get that line too when the
-schema would make the list slow to build. The server multiplies the size of
-the arguments, in which a long string counts by its length, by a cost of the
-schema. The cost grows with the size of the schema, with the length of the
-names and values it lists (`required`, `enum`, `const`), and with each anyOf
-or oneOf nested in another. The server lists the errors only when the
-product keeps the list to about a quarter of a second in a release build,
-whatever the strings and names are made of. Checking the arguments in the
-first place reads a string once for each `minLength` or `maxLength` that
-applies to it, which takes 10 to 45 ms for 16 MiB of text: the least for
-ASCII or one script, the most for text that mixes ASCII with other
-characters. So a schema with many of them around one long string makes each
-call slower, up to two seconds for fifty of them. Before any check the
-server converts the arguments once, whatever the schema, which takes 0.6 to
-0.8 s for a 16 MiB line of small values. valijson takes about as long again
-to walk them under a subschema, and less for each further check: about 0.1 s
-for each keyword, and 0.2 s for each further subschema. That work grows with
-the longest line the server reads, so an application whose tools take no
-long text lowers it with `setMaxLineBytes`. Where valijson gives no reason
-for a failure (a `false` subschema, for one), the line names the place and
-says that it does not match the schema. A string or a member name with an
-unpaired UTF-16 surrogate, and an integral number outside the range of a
-64-bit integer (1e19, 2^63, 1e300), are refused whatever the schema says,
-since valijson would read them differently from the handler. The range is
-checked on the number as Qt's JSON parser reads it, and the parser rounds a
-number outside it, and one written with a fraction or an exponent, to the
+`- arguments: and 3 more errors`. Arguments with more than a thousand
+errors, or whose errors' paths come to more than 1 Mi UTF-16 code units
+together, get one line instead, which says that they do not match and are
+too large for the server to list each error. The check stops there.
+
+Each line comes from the keyword that failed, its value in the schema and
+the arguments, never from jsoncons' English: `must be of type integer`,
+`is required`, `is not a known property`, `must be at most 5 characters
+long`, `must be one of the values of enum`, `is required when "card" is
+present`, `must have an item that matches contains`, and so on. A number in
+a line is written as the schema has it, the same in every locale. A failed
+`anyOf`, or a `oneOf` that matches no branch, lists the errors of each
+branch and then its own line. A `oneOf` that matches more than one branch
+says so alone, and a failed `allOf` lists the errors of its branches. A
+`false` subschema has no reason of its own, so its line names the place and
+says that it does not match the schema. jsoncons names neither the member
+that the schema of `additionalProperties` refuses nor the name that
+`propertyNames` refuses, so the server checks each one again on its own,
+and lists its errors at its place (`the property name must be at most 256
+characters long`). jsoncons reports only the first item that a `false`
+`items` or `unevaluatedItems` refuses, and the first property that
+`unevaluatedProperties: false` refuses. It counts an item or a property that
+fails another keyword as unevaluated, so `unevaluatedItems` and
+`unevaluatedProperties` add a line for it, where Python's jsonschema, for
+one, does not. The arguments fail either way.
+
+The check itself has a bound. Before it the server works out, from the
+schema and the arguments, how much jsoncons would do, and refuses arguments
+whose check could take more than about a second in a release build, or keep
+more than 128 MB of errors, with the line
+`- arguments: is too large for the server to check against the schema`.
+jsoncons does more than the size of the arguments suggests. It copies its
+path in the schema and the place in the value into each keyword it checks,
+so the work grows with the depth, and it keeps a copy of that path for each
+level of the walk, so the memory grows with the square of the depth. It
+keeps every error inside an `allOf`, `anyOf`, `oneOf`, `not`, `contains`,
+the condition of an `if` and the schema of `additionalProperties` until it
+knows whether they pass, and copies those errors twice more for each
+`allOf`, `anyOf` and `oneOf` around them. A `$ref` to a schema that holds it
+is followed anew at each level of the value, so two of them double the work
+at each level. The server reckons each of these, and refuses a schema
+path longer than 1024 tokens (a value 512 levels deep under a schema that
+recurses through `items` and `$ref`). Measured in a release build, as the
+CPU time of the check of the largest arguments that the bound lets through:
+
+| Schema and arguments | Largest checked | Time |
+|---|---|---|
+| `items: {"type": "integer"}`, valid integers | 2,480,000 integers | 0.58 s |
+| `items` with four keywords, valid integers | 914,000 integers | 0.42 s |
+| `items: {"type": "string"}`, every item wrong | 2,480,000 integers | 0.22 s |
+| `anyOf` of an array of strings and null, every item wrong | 53,000 integers (the 128 MB of errors) | 0.05 s |
+| the same in three `anyOf` | 19,900 integers | 0.05 s |
+| `oneOf` of 20 arrays, every item wrong | 2,700 integers | 0.06 s |
+| `allOf` of 50 `maxLength`, text that mixes ASCII and CJK | 4 MB | 0.62 s |
+| `minLength` and `maxLength` | 16 MB | 0.12 s |
+| `enum` of 3000 strings, a CJK string | 15 MB | 0.03 s |
+| `anyOf` of four `enum`, an array of strings (each `enum` writes it out) | 566,000 strings | 0.20 s |
+| `required` of 1000 names, objects without them | 19,800 objects | 0.01 s |
+| `additionalProperties: {"type": "integer"}` | 167,000 members | 0.09 s |
+| Afterglow's `env` (`additionalProperties` with `anyOf`, `propertyNames`), every member wrong | 22,300 members | 0.01 s |
+| `propertyNames` with an `anyOf`, every name wrong | 28,000 names | 0.01 s |
+| `contains` that no item matches | 87,000 integers | 0.06 s |
+| `prefixItems`, `items` and `unevaluatedItems` | 1,660,000 integers | 0.40 s |
+| `allOf`, `anyOf` and `unevaluatedProperties: false` | 2,000,000 members | 0.70 s |
+| a `default` of 2000 members, objects without the property | 5,800 objects | 0.21 s |
+| `items` through `$ref` to `{"not": {}}` | 890,000 integers | 0.10 s |
+| a list of lists through `items` and `$ref` | 510 levels | 0.03 s |
+| `allOf`, `$ref`, `anyOf` and `items` at each level | 40 levels | 0.01 s |
+| two `$ref` to the schema at each level | 9 levels | 0.01 s |
+
+So a valid list of 2.5 million small integers is checked, and one of three
+million, about 1.3 s of jsoncons' work, is refused. The bound is reckoned
+for the worst case, so arguments whose `anyOf` matches at its first branch
+are refused as soon as those that fail every branch. Before any check the
+server converts the arguments once into jsoncons' JSON, whatever the
+schema, which takes 0.14 to 0.65 s of CPU time (the most for many small objects) for a 16 MiB line, about what the earlier
+valijson tree took. That work grows with the longest line the server reads,
+so an application whose tools take no long text lowers it with
+`setMaxLineBytes`.
+
+A string or a member name with an unpaired UTF-16 surrogate, and an
+integral number outside the range of a 64-bit integer (1e19, 2^63, 1e300),
+are refused whatever the schema says, since jsoncons, which reads UTF-8 and
+64-bit integers, would read them differently from the handler. So is a value
+nested more than 1024 levels deep, which only a handler can build. The range
+is checked on the number as Qt's JSON parser reads it, and the parser rounds
+a number outside it, and one written with a fraction or an exponent, to the
 nearest double. So -9223372036854775809, down to -9223372036854776832,
 passes as -9223372036854775808, the value that the handler reads, and
 9223372036854775807.0 is refused as 2^63.
@@ -420,34 +478,53 @@ depends on what stdout is.
 ## Schemas
 
 MCP schemas are JSON Schema 2020-12 unless they name another dialect, and
-clients read them that way. The library checks arguments with valijson,
-which implements Draft 7. So `addTool` takes only schemas that mean the same
-in both dialects, without a `$schema`, and refuses the rest with the reason
-and the JSON pointer of the place (`error` argument, and a warning).
+clients read them that way. The library checks arguments and structured
+content with jsoncons, in 2020-12. A client must read 2020-12 and need not
+read another dialect, so `addTool` refuses a `$schema` other than
+`https://json-schema.org/draft/2020-12/schema` (with or without an empty
+fragment). It refuses as well the keywords that the server cannot check as
+2020-12 says, each with the reason and the JSON pointer of the place
+(`error` argument, and a warning).
 
 | | Keywords |
 |---|---|
-| Allowed | `type`, `properties`, `required`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` (numbers), `minLength`, `maxLength`, `minItems`, `maxItems`, `items` (one schema), `minProperties`, `maxProperties`, `additionalProperties` (a boolean or a schema), `propertyNames` (at the root and under a chain of `properties` from it), `oneOf`, `anyOf`, `allOf`, `not`, and the annotations `description`, `title`, `default`, `examples`, `readOnly`, `writeOnly`, `deprecated`, `$comment` |
-| Refused: the drafts differ | `$schema`, `$ref`, `$defs`, `definitions`, `prefixItems`, `items` as an array, `additionalItems`, `dependentRequired`, `dependentSchemas`, `dependencies`, `unevaluatedProperties`, `unevaluatedItems`, `$dynamicRef`, `$dynamicAnchor`, `$anchor`, `$id`, `$recursiveRef`, `$recursiveAnchor`, `$vocabulary` |
-| Refused: regular expressions | `pattern`, `patternProperties`. valijson matches them with `std::regex`, whose libstdc++ executor recurses once for each character. A string of a few hundred thousand characters overflows the stack and kills the process (GCC bug 86164), and nested quantifiers take forever. It also matches UTF-8 bytes, where a client matches UTF-16 code units (`^.{1,5}$` and "naïve" differ). Use `enum`, or check the value in the handler. |
-| Refused: other | `format` (valijson asserts it, where a 2020-12 reader need not), `multipleOf` (valijson lets 2.5 pass `multipleOf: 1`), `uniqueItems` (valijson compares every pair of items, so 20000 items take seconds), `propertyNames` anywhere else, and every keyword not in the first row (`contains`, `if`/`then`/`else`, ...) |
+| Checked | `type`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`, `required`, `dependentRequired`, `properties`, `additionalProperties`, `propertyNames`, `prefixItems`, `items` (one schema), `contains`, `minContains`, `maxContains`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `unevaluatedProperties` (`true` or `false`), `unevaluatedItems`, `$ref` (within the schema), `$defs`, `$anchor`, `$schema` (2020-12, at the root) |
+| Annotations, never checked | `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `contentMediaType`, `contentEncoding`, `format`. 2020-12 makes `format` an annotation unless a schema asks for the format vocabulary, and a client reads it so: the server lets `"format": "email"` pass any string. |
+| Refused: regular expressions | `pattern`, `patternProperties`. jsoncons matches them with `std::regex`, whose libstdc++ executor recurses once for each character. A string of a few hundred thousand characters overflows the stack and kills the process (GCC bug 86164), and nested quantifiers take forever. It also matches UTF-8 bytes, where a client matches UTF-16 code units (`^.{1,5}$` and "naïve" differ). Use `enum`, or check the value in the handler. |
+| Refused: cost | `uniqueItems`. jsoncons compares every pair of items, so 20000 items take seconds. Check for repeated items in the handler. |
+| Refused: jsoncons gets them wrong | `dependentSchemas`, whose subschemas jsoncons files under one name and whose errors it reports at a member that does not exist (use `if`, `required` and `then`). `unevaluatedProperties` with a schema, which jsoncons checks at the place of the object instead of each property. `unevaluatedProperties` and `unevaluatedItems` beside a `not` that applies to the same value, since jsoncons counts what the subschema of `not` evaluated, where 2020-12 drops it. `unevaluatedItems` beside a `contains`, since jsoncons counts the items of a nested array that `contains` matched as items of the outer one. |
+| Refused: references | A `$ref` that leaves the schema (another document, the meta-schema): the server fetches nothing. A `$ref` that leads back to its own schema without descending into the value, through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else` or another `$ref`, which jsoncons would follow until the stack overflows. A `$ref` to a boolean schema, or into an `items` beside `prefixItems`, which jsoncons files under another name. `$id`, `$dynamicRef`, `$dynamicAnchor` and `$vocabulary`. |
+| Refused: other drafts | `definitions` (use `$defs`), `dependencies` (use `dependentRequired`), `additionalItems` (use `items` beside `prefixItems`), `$recursiveRef`, `$recursiveAnchor`, and `items` as an array (use `prefixItems`) |
+| Refused: other | every other keyword |
 
-valijson mixes a `propertyNames` subschema up with the schema that holds it
-(tristanpenman/valijson#254, still open in 1.1.4). So the server checks
-`propertyNames` itself, which it can do where the object it applies to is
-known from the schema alone.
+A `$ref` is `#` (the whole schema), `#` and a JSON pointer, its characters
+percent-encoded where a URI cannot hold them (`#/$defs/a%20b`), or `#` and
+an `$anchor`. jsoncons takes an `$anchor` that starts with a letter only,
+where 2020-12 also allows "_". A `$ref` may recurse through a keyword that
+descends into the value (`properties`, `items`, `additionalProperties`, and
+so on), and the work bound above keeps such a schema from doubling its work
+without end.
+
+Integers compare exactly, with 64 bits: the server holds every integral
+number of the schema and the arguments that fits a 64-bit integer as one. So
+`"maximum": 9007199254740993` refuses 9007199254740994. jsoncons compares an
+integer with another number as doubles, which round the largest 64-bit
+integers to 2^63, so 2^63 itself is refused in a bound, `enum` or `const`.
+jsoncons checks `multipleOf` with doubles and lets a value pass within one
+unit in its last place of a multiple. So 2.5 fails `multipleOf: 1`, 0.3
+passes `multipleOf: 0.1` (which a client that divides doubles may refuse),
+and an integer of 2^53 or more in magnitude under `multipleOf` is refused,
+since doubles do not tell 10^17 from a multiple of 3.
 
 Only the root of an input schema must have `"type": "object"`. The root of
 an output schema may be any type, since structured content may be any JSON
 value. Keyword values are checked too, everywhere below the root. Lengths
-and counts are integers from 0 to 9007199254740991. A bound, or a number in `enum`
-or `const`, may not lie between 2^53 and 2^63 in magnitude, because the
-server compares numbers as doubles, which round the integers there.
-`required` may not name a property twice. A name in `properties` may not
-hold "/", which valijson would confuse with another place in the schema.
-Names, and the strings in `enum` and `const`, may not hold an unpaired
-UTF-16 surrogate. A Draft 4 boolean `exclusiveMinimum` and an unknown type
-name are refused as well. Names inside `properties` and values inside
+and counts are integers from 0 to 9007199254740991, and `multipleOf` is
+greater than 0. `required` and each list of `dependentRequired` may not name
+a property twice. Names, and the strings in `enum` and `const`, may not
+hold an unpaired UTF-16 surrogate, which UTF-8 cannot hold. A Draft 4
+boolean `exclusiveMinimum` and an unknown type name are refused as well.
+Names inside `properties`, `$defs` and `dependentRequired` and values inside
 `enum`, `const`, `default` and `examples` are data, not keywords. A tool
 without an input schema takes no arguments, as with
 `{"type": "object", "additionalProperties": false}`.
@@ -456,32 +533,31 @@ without an input schema takes no arguments, as with
 
 - `QtCore`. No QtGui, QtQml or QtNetwork, so a server inside a command-line
   program pulls in nothing more.
-- valijson 1.1.0 or later (header-only, BSD-2-Clause). By default it comes
-  from the archive that `cmake/PhosphorDependencies.cmake` pins (1.1.3), and
-  its notice then installs as `licenses/phosphor-libs/LICENSE.valijson`.
-  With `-DPHOSPHORMCP_USE_SYSTEM_VALIJSON=ON` the system's headers are used,
-  found through `VALIJSON_INCLUDE_DIR`, the cache variable that
-  phosphor-fsloader uses too, and the configure checks the version floor by
-  compiling against them. The option's default is `AUTO`, which follows
-  `PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON` at every configure, so
-  phosphor-fsloader's switch moves both libraries to the system's copy.
-  `ON` and `OFF` choose for this library alone. A build directory from
-  before `AUTO` moves to it when it holds the old default as it reads at the
-  upgrade. A value it keeps (one chosen, or a default from before a switch
-  of phosphor-fsloader) is named in a configure message, and setting the
-  option to `AUTO` makes the directory follow phosphor-fsloader again.
-  valijson is private to the library, and a consumer needs nothing of it.
+- jsoncons 1.7.0 or later (header-only, BSL-1.0). By default it comes from
+  the archive that `cmake/PhosphorDependencies.cmake` pins (1.10.0), and its
+  notice then installs as `licenses/phosphor-libs/LICENSE.jsoncons`. With
+  `-DPHOSPHORMCP_USE_SYSTEM_JSONCONS=ON` the system's headers are used, found
+  through `JSONCONS_INCLUDE_DIR`, the cache variable that phosphor-fsloader
+  uses too, and the configure checks the version floor by compiling against
+  them (1.7.0 is the first with `jsonschema::walk_state`). The option's
+  default is `AUTO`, which follows `PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS` at
+  every configure, so phosphor-fsloader's switch moves both libraries to the
+  system's copy. `ON` and `OFF` choose for this library alone. The keyword
+  policy and the lines of the errors were checked against 1.10.0, and an
+  older release may report its errors otherwise, which then read as "does
+  not match the schema". jsoncons is private to the library, and a consumer
+  needs nothing of it.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
 
 - [`phosphor-fsloader`](../phosphor-fsloader/README.md). It checks JSON files
-  against schemas with the same pinned valijson, and this library follows
+  against schemas with the same pinned jsoncons, and this library follows
   its system switch. The two keep separate validators on purpose. They share
-  only the few calls that drive valijson, while this one adds what arguments
-  from a model need: the keywords both dialects read alike, a check of the
-  value before valijson sees it, a bounded error list, and its own
-  `propertyNames`.
+  only the few calls that drive jsoncons, while this one adds what arguments
+  from a model need: the keywords that jsoncons checks as 2020-12 says, a
+  check of the value before jsoncons sees it, a bound on the work of the
+  check, and a short list of errors in plain words.
 - [`phosphor-ipc`](../phosphor-ipc/README.md). JSON over a Unix socket, for
   scripts and shells that drive a running Phosphor application. This library
   serves an agent that starts the application as a child instead.
