@@ -109,7 +109,13 @@ std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(QObject* c
                                                                       std::function<void(int)> callback)
 {
     if (s_owner) {
-        qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: another server handles the signals";
+        if (::getpid() != s_pid.load()) {
+            qCWarning(lcMcp).noquote()
+                << "McpServer::handleTerminationSignals: a server in the parent took the signals before the fork, "
+                   "and a child cannot take its handler. Call it only in the process that keeps the server.";
+        } else {
+            qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: another server handles the signals";
+        }
         return nullptr;
     }
     if (!context || !QAbstractEventDispatcher::instance(context->thread())) {
@@ -181,6 +187,14 @@ void McpTerminationSignals::release()
 
 void McpTerminationSignals::onReadable()
 {
+    if (!belongsToThisProcess()) {
+        // A child forked after install() shares the pipe, and the bytes in
+        // it are the parent's signals. The child leaves them to the parent.
+        if (m_notifier) {
+            m_notifier->setEnabled(false);
+        }
+        return;
+    }
     unsigned char bytes[16];
     const ssize_t got = ::read(m_readFd, bytes, sizeof bytes);
     if (got <= 0 || m_released) {

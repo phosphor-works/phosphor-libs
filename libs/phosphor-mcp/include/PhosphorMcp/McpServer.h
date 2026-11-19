@@ -147,12 +147,16 @@ public:
     // this is the application's choice. A signal that the process ignores
     // when this runs (nohup ignores SIGHUP) stays ignored. The old
     // dispositions come back as soon as the server ends without waiting for
-    // its replies (a signal, a closed output), before the cancel callbacks
-    // run, and otherwise when it finishes, at the latest when it is
-    // destroyed. So a second signal during a slow callback or teardown has
-    // its usual effect. A handler that someone else installed since
-    // stays. Call it after QCoreApplication exists, and before the server
-    // ends.
+    // its replies (a signal, a closed or failed output), before the cancel
+    // callbacks run. A signal during a slow callback or teardown then has its
+    // usual effect: the second one after a signal, and the first one after a
+    // closed output. After the end of stdin or a failed read they come back
+    // when the server finishes, at the latest when it is destroyed, so that a
+    // signal cuts the drain short. The server reads a signal from its event
+    // loop, so one that comes while a cancel callback blocks without one is
+    // read only after the callbacks returned, if the server has not finished
+    // by then. A handler that someone else installed since stays. Call it after QCoreApplication exists, and before the
+    // server ends.
     //
     // True when the server handles the signals, also when it did before.
     // False, with a warning, when another server handles them, when the
@@ -196,10 +200,11 @@ Q_SIGNALS:
     // comes when the replies already queued were written, or when the
     // client read none of them for DrainTimeoutMs. A signal or a closed
     // output during that wait ends it at once, with its own reason. One
-    // that comes while the cancel callbacks run gives its reason too, but
-    // finished() comes only after the last callback returned. The signals
-    // are put back at once then, so a second signal, during a callback that
-    // hangs, has its usual effect.
+    // that comes while the cancel callbacks run, and that a nested event
+    // loop of a callback reads, gives its reason too, but finished() comes
+    // only after the last callback returned. The signals are put back at
+    // once then, so a second signal, during a callback that hangs, has its
+    // usual effect.
     void finished(PhosphorMcp::McpServer::FinishReason reason);
 
 private:

@@ -546,9 +546,9 @@ bool McpServer::handleTerminationSignals()
         }
         return true;
     }
-    // The callback runs from the self-pipe's notifier. end() finishes
-    // later, from the event loop, so the signals are released after the
-    // callback returned.
+    // The callback runs from the self-pipe's notifier. end() releases the
+    // signals inside it, before the cancel callbacks run, and finishes
+    // later, from the event loop.
     d->terminationSignals = McpTerminationSignals::install(this, [this](int signal) {
         end(signal == SIGHUP ? FinishReason::HangUp : FinishReason::Terminated, false);
     });

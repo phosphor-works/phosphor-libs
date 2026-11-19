@@ -346,10 +346,16 @@ writes nothing more either.
 write to a self-pipe. Signal dispositions are global to the process, so the
 application asks for it, and one server at a time holds them. The server puts
 back what it found as soon as it ends without waiting for its replies (a
-signal, a closed output), before the cancel callbacks run, and otherwise at
-its finish (at the latest its destruction), unless another handler was
-installed since. A second signal during a slow callback or teardown so has
-its usual effect. A signal that the process ignores
+signal, a closed or failed output), before the cancel callbacks run, unless
+another handler was installed since. A signal during a slow callback or
+teardown then has its usual effect: the second one after a signal, and the
+first one after a closed output. After the end of stdin or a failed read the
+server keeps the signals while its replies drain, so that a signal cuts the
+wait short, and puts them back at its finish (at the latest its
+destruction). The server reads a signal from its event loop, though, so one
+that comes while a cancel callback blocks without an event loop is read only
+after the callbacks returned, and not at all when the server finished by
+then. A signal that the process ignores
 (SIGHUP under `nohup`) stays ignored. `handleTerminationSignals()` returns
 false, with a warning, before the `QCoreApplication` exists and after the
 server ended. A child

@@ -44,7 +44,8 @@ public:
     // later call does nothing.
     void release();
     // False in a child forked after install(): the handler there takes the
-    // old dispositions, and this object handles nothing.
+    // old dispositions, and this object leaves the bytes in the shared pipe,
+    // which are the parent's signals, to the parent.
     [[nodiscard]] bool belongsToThisProcess() const;
 
 private:

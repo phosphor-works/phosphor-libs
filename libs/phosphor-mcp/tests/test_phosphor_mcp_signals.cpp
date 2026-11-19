@@ -32,6 +32,7 @@
 #include <QTimer>
 
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <ctime>
 #include <optional>
@@ -39,6 +40,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -98,6 +100,27 @@ bool hasServerHandler(int signal)
     const auto handler = handlerOf(signal);
     const auto atStart = (signal == SIGTERM ? s_termAtStart : s_hupAtStart).sa_handler;
     return handler != SIG_DFL && handler != SIG_IGN && handler != atStart;
+}
+
+// One byte from a forked child, within a bound, so that a child stuck after
+// the fork fails the test instead of hanging it.
+bool readFromChild(int fd, char& byte)
+{
+    // A signal to this process interrupts poll(), which SA_RESTART does not
+    // restart.
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 10000) {
+        pollfd ready = {fd, POLLIN, 0};
+        const int got = ::poll(&ready, 1, int(10000 - timer.elapsed()));
+        if (got == 1) {
+            return ::read(fd, &byte, 1) == 1;
+        }
+        if (got == 0 || errno != EINTR) {
+            return false;
+        }
+    }
+    return false;
 }
 
 bool restored()
@@ -428,6 +451,7 @@ private Q_SLOTS:
         const pid_t child = ::fork();
         if (child == 0) {
             ::close(report[0]);
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("cannot take its handler")));
             const char answer = server.handleTerminationSignals() ? '1' : '0';
             [[maybe_unused]] const ssize_t written = ::write(report[1], &answer, 1);
             ::_exit(0);
@@ -438,13 +462,55 @@ private Q_SLOTS:
         });
         QVERIFY(child > 0);
         char answer = 0;
-        QCOMPARE(::read(report[0], &answer, 1), ssize_t(1));
+        QVERIFY(readFromChild(report[0], answer));
         int status = 0;
         QCOMPARE(::waitpid(child, &status, 0), child);
         QCOMPARE(answer, '0');
         // The parent still holds them.
         QVERIFY(server.handleTerminationSignals());
         QVERIFY(hasServerHandler(SIGTERM));
+    }
+
+    void childLeavesTheParentsSignalsAlone()
+    {
+        // A child forked after the parent's call shares the self-pipe. While
+        // the child runs its event loop, the parent takes a SIGTERM, and its
+        // byte waits in the pipe. The child's copy of the server leaves it,
+        // and the parent's server ends on it.
+        McpServer server;
+        QSignalSpy finished(&server, &McpServer::finished);
+        QVERIFY(server.handleTerminationSignals());
+        int report[2];
+        QCOMPARE(::pipe(report), 0);
+        const pid_t child = ::fork();
+        if (child == 0) {
+            ::close(report[0]);
+            bool childFinished = false;
+            QObject::connect(&server, &McpServer::finished, [&childFinished] {
+                childFinished = true;
+            });
+            // The parent is blocked in poll(), so the child's loop sees the
+            // byte first.
+            ::kill(::getppid(), SIGTERM);
+            spinFor(300);
+            const char answer = childFinished ? '1' : '0';
+            [[maybe_unused]] const ssize_t written = ::write(report[1], &answer, 1);
+            ::_exit(0);
+        }
+        ::close(report[1]);
+        const auto closeReport = qScopeGuard([&report] {
+            ::close(report[0]);
+        });
+        QVERIFY(child > 0);
+        char answer = 0;
+        QVERIFY(readFromChild(report[0], answer));
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        QCOMPARE(answer, '0');
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::Terminated);
     }
 
     void signalsFollowTheServerToAnotherThread()
