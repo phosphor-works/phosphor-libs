@@ -6,7 +6,8 @@
 # The settings model (the schema and its host extension, the store-backed
 # Settings and its interfaces, the defaults, keys and migrations) and the core
 # the runtime is built on (its interfaces, types, resolvers, geometry and
-# layout helpers, logging and translation catalog). The runtime's services,
+# layout helpers, logging and translation catalog), and window tracking and
+# the drag resolver. The runtime's services,
 # controllers and overlays follow it here area by area. Built standalone or as a subdirectory
 # of Phosphor.
 
@@ -97,6 +98,12 @@ endif()
 if(NOT TARGET PhosphorWorkspaces::PhosphorWorkspaces)
     find_package(PhosphorWorkspaces CONFIG REQUIRED)
 endif()
+if(NOT TARGET PhosphorContextResolver::PhosphorContextResolver)
+    find_package(PhosphorContextResolver CONFIG REQUIRED)
+endif()
+if(NOT TARGET PhosphorShortcuts::PhosphorShortcuts)
+    find_package(PhosphorShortcuts CONFIG REQUIRED)
+endif()
 if(NOT TARGET PhosphorZones::PhosphorZones)
     find_package(PhosphorZones CONFIG REQUIRED)
 endif()
@@ -133,6 +140,9 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/CrossSurfaceResolver.h
     include/PhosphorEngineRuntime/DaemonGeometryResolver.h
     include/PhosphorEngineRuntime/DmabufThumbnail.h
+    include/PhosphorEngineRuntime/DragActivation.h
+    include/PhosphorEngineRuntime/DragResolver.h
+    include/PhosphorEngineRuntime/DropProxy.h
     include/PhosphorEngineRuntime/Enums.h
     include/PhosphorEngineRuntime/GeometryUtils.h
     include/PhosphorEngineRuntime/IOverlayService.h
@@ -159,6 +169,9 @@ set(phosphorengineruntime_public_HDRS
     include/PhosphorEngineRuntime/Types.h
     include/PhosphorEngineRuntime/UnifiedLayoutList.h
     include/PhosphorEngineRuntime/Utils.h
+    include/PhosphorEngineRuntime/WindowLifecycleRelay.h
+    include/PhosphorEngineRuntime/WindowTracker.h
+    include/PhosphorEngineRuntime/WindowTrackerInternal.h
     include/PhosphorEngineRuntime/ZoneSelectorLayout.h
 )
 
@@ -224,6 +237,37 @@ set(phosphorengineruntime_SRCS
     src/core/utils/unifiedlayoutlist.cpp
     src/core/utils/utils.cpp
     src/runtime/common/runtimei18n.cpp
+    src/runtime/dragresolver/drag.cpp
+    src/runtime/dragresolver/drag_protocol.cpp
+    src/runtime/dragresolver/dragactivation.cpp
+    src/runtime/dragresolver/dragresolver.cpp
+    src/runtime/dragresolver/dragtimers.cpp
+    src/runtime/dragresolver/dragzonespan.cpp
+    src/runtime/dragresolver/drop.cpp
+    src/runtime/dragresolver/dropproxy.cpp
+    src/runtime/dragresolver/selector_gate.cpp
+    src/runtime/windowtracker/activation.cpp
+    src/runtime/windowtracker/convenience.cpp
+    src/runtime/windowtracker/crossmode.cpp
+    src/runtime/windowtracker/enginewiring.cpp
+    src/runtime/windowtracker/evacueeledger.h
+    src/runtime/windowtracker/evacuees.cpp
+    src/runtime/windowtracker/float.cpp
+    src/runtime/windowtracker/lifecycle.cpp
+    src/runtime/windowtracker/navigation.cpp
+    src/runtime/windowtracker/persistence.cpp
+    src/runtime/windowtracker/persistenceworker.cpp
+    src/runtime/windowtracker/persistenceworker.h
+    src/runtime/windowtracker/prune.cpp
+    src/runtime/windowtracker/queries.cpp
+    src/runtime/windowtracker/rules.cpp
+    src/runtime/windowtracker/rules_admission.h
+    src/runtime/windowtracker/rules_placement.cpp
+    src/runtime/windowtracker/saveload.cpp
+    src/runtime/windowtracker/screenleave.cpp
+    src/runtime/windowtracker/shellsurface.cpp
+    src/runtime/windowtracker/shellsurface_desktop.cpp
+    src/runtime/windowtracker/windowtracker.cpp
 )
 
 add_library(PhosphorEngineRuntime SHARED
@@ -281,6 +325,11 @@ target_link_libraries(PhosphorEngineRuntime
         PhosphorPlacement::PhosphorPlacement
         PhosphorWorkspaces::PhosphorWorkspaces
         PhosphorZones::PhosphorZones
+        # WindowTracker and DragResolver hold the context resolver their hosts give them.
+        PhosphorContextResolver::PhosphorContextResolver
+    PRIVATE
+        # DragResolver binds its Escape cancel through the host's ad-hoc registrar.
+        PhosphorShortcuts::PhosphorShortcuts
 )
 
 set_target_properties(PhosphorEngineRuntime PROPERTIES
