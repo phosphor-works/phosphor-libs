@@ -9,6 +9,7 @@
 #include <PhosphorEngineRuntime/AppDirectoryName.h>
 
 #include <PhosphorProtocol/ServiceConstants.h>
+#include <PhosphorSurface/SurfacePackLocation.h>
 // Not used by this header. The ConfigDefaults chain has always re-exported
 // AssignmentEntry, and the settings, daemon and D-Bus code that names
 // AssignmentEntry::Mode next to a ConfigDefaults call reaches the type through
@@ -1127,8 +1128,8 @@ public:
     // concatenation needs, derived from these. The algorithms directory is
     // spelled by scriptedAlgorithmSubdir() (core/types/constants.h).
     // The surface packs are shared with the other apps that draw them and live
-    // where phosphor-surface-packs installs them; the build passes that subdir
-    // in as PHOSPHOR_SURFACE_PACKS_DATA_SUBDIR.
+    // where phosphor-surface-packs installs them, which the host hands to
+    // PhosphorSurfaceShaders::setSurfacePackDataSubdir() at startup.
     // ═══════════════════════════════════════════════════════════════════════════
     static QString layoutsSubdir()
     {
@@ -1162,7 +1163,12 @@ public:
     {
         return appDirectoryName() + QStringLiteral("/scrolling-templates");
     }
-    P_CONFIG_KEY(surfacePacksSubdir, PHOSPHOR_SURFACE_PACKS_DATA_SUBDIR)
+    /// The surface packs' data subdirectory the host set
+    /// (PhosphorSurfaceShaders::surfacePackDataSubdir). Empty until it does.
+    static QString surfacePacksSubdir()
+    {
+        return PhosphorSurfaceShaders::surfacePackDataSubdir();
+    }
 
 private:
     // Non-instantiable
