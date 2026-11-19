@@ -236,11 +236,10 @@ So a valid list of 2.5 million small integers is checked, and one of three
 million, about 1.3 s of jsoncons' work, is refused. The bound is reckoned
 for the worst case, so arguments whose `anyOf` matches at its first branch
 are refused as soon as those that fail every branch. Before any check the
-server converts the arguments once into jsoncons' JSON, whatever the
-schema, which takes 0.14 to 0.65 s of CPU time (the most for many small objects) for a 16 MiB line, about what the earlier
-valijson tree took. That work grows with the longest line the server reads,
-so an application whose tools take no long text lowers it with
-`setMaxLineBytes`.
+server converts the arguments once into jsoncons' JSON, whatever the schema,
+which takes 0.14 to 0.65 s of CPU time for a 16 MiB line, the most for many
+small objects. That work grows with the longest line the server reads, so an
+application whose tools take no long text lowers it with `setMaxLineBytes`.
 
 A string or a member name with an unpaired UTF-16 surrogate, and an
 integral number outside the range of a 64-bit integer (1e19, 2^63, 1e300),

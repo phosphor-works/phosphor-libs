@@ -110,8 +110,8 @@ if(PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
         message(FATAL_ERROR
             "The jsoncons headers in ${JSONCONS_INCLUDE_DIR} lack the JSON Schema API that "
             "phosphor-fsloader uses (make_json_schema with evaluation_options, validate() with a "
-            "walk_state reporter). Install a newer jsoncons, or unset "
-            "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS to use the pinned archive.")
+            "walk_state reporter), so they are older than jsoncons 1.7.0. Install 1.7.0 or later, "
+            "or unset PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS to use the pinned archive.")
     endif()
     set(_phosphorfsloader_jsoncons_include "${JSONCONS_INCLUDE_DIR}")
 else()

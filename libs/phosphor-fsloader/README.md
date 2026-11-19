@@ -228,7 +228,8 @@ parse(mesh->bytes);
   `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with any
   distribution. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
   headers are used instead, found through `JSONCONS_INCLUDE_DIR`, and the
-  configure checks that they have the JSON Schema API the library uses.
+  configure checks that they have the JSON Schema API the library uses,
+  which jsoncons has from 1.7.0.
   `SchemaValidator` reads a schema without `$schema` as JSON Schema 2020-12,
   and asserts `format` (a `date` that is not a date fails).
 
