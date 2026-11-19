@@ -49,6 +49,14 @@ let
           hash = "sha256-iHtTsakk9v4LNfo7vJu75a6Mcgl7fw98F7RfTPpkYCk=";
         };
       }
+      {
+        name = "jsoncons-1.10.0.tar.gz";
+        path = fetchurl {
+          url = "https://github.com/danielaparker/jsoncons/archive/refs/tags/v1.10.0.tar.gz";
+          # sha256 c829350a2eece662beb378143e2ab1c1cbb07d703687bf168626665a8a7d8bc1
+          hash = "sha256-yCk1Ci7s5mK+s3gUPiqxwcuwfXA2h78WhiZmWop9i8E=";
+        };
+      }
     ]
     ++ lib.optionals withTests [
       {

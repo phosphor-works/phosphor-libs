@@ -55,7 +55,7 @@ include_guard(GLOBAL)
 # ─── Pins ────────────────────────────────────────────────────────────────────
 # Source archives: built into the tree. PHOSPHOR_DEPS lists them for the fetch
 # script and for the dep-pins rule.
-set(PHOSPHOR_DEPS luau valijson)
+set(PHOSPHOR_DEPS luau valijson jsoncons)
 
 # Luau (MIT, Roblox), the tiling algorithms' runtime (phosphor-scripting).
 set(PHOSPHOR_DEP_luau_VERSION "0.745")
@@ -69,6 +69,13 @@ set(PHOSPHOR_DEP_valijson_VERSION "1.1.3")
 set(PHOSPHOR_DEP_valijson_URL "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz")
 set(PHOSPHOR_DEP_valijson_FILE "valijson-1.1.3.tar.gz")
 set(PHOSPHOR_DEP_valijson_SHA256 "887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029")
+
+# jsoncons (BSL-1.0, Daniel Parker), header-only JSON with JSON Schema
+# validation, 2020-12 among its drafts (phosphor-fsloader, phosphor-mcp).
+set(PHOSPHOR_DEP_jsoncons_VERSION "1.10.0")
+set(PHOSPHOR_DEP_jsoncons_URL "https://github.com/danielaparker/jsoncons/archive/refs/tags/v1.10.0.tar.gz")
+set(PHOSPHOR_DEP_jsoncons_FILE "jsoncons-1.10.0.tar.gz")
+set(PHOSPHOR_DEP_jsoncons_SHA256 "c829350a2eece662beb378143e2ab1c1cbb07d703687bf168626665a8a7d8bc1")
 
 # Test data: read by the test suite and by nothing that is built or installed,
 # so fetched only when BUILD_TESTING is on, and not part of PHOSPHOR_DEPS. A
