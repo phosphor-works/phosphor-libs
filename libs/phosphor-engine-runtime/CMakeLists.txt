@@ -171,6 +171,7 @@ set(phosphorengineruntime_SRCS
     src/config/settingsschema_shadertrees.cpp
     src/config/settingsschema_tiling.cpp
     src/config/settingsschema_workspaces.cpp
+    src/core/interfaces/isettings.cpp
     src/core/platform/appdirectoryname.cpp
     src/core/types/overlayshadertree.cpp
 )
