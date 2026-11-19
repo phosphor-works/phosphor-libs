@@ -118,12 +118,12 @@ PHOSPHORENGINERUNTIME_EXPORT QString canonicalWorkspaceEntryId(const QVariant& r
 /// {modifier:int, mouseButton:int} maps). Defined in settingsschema.cpp;
 /// shared with the per-domain schema TUs because trigger-list keys now span
 /// domains (Tiling.Behavior and Scrolling.Behavior).
-QVariant canonicalTriggerList(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant canonicalTriggerList(const QVariant& v);
 
 /// canonicalTriggerList plus a drop of the AlwaysActive sentinel, for the
 /// wheel chord lists that are read with exact matching. See the definition
 /// for why the sentinel cannot travel that path.
-QVariant canonicalWheelTriggerList(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant canonicalWheelTriggerList(const QVariant& v);
 
 /// Canonicalize a theme-fallback colour: keep EMPTY (the "follow the colour
 /// scheme" sentinel) and any string QColor can parse, and drop anything else
@@ -132,19 +132,19 @@ QVariant canonicalWheelTriggerList(const QVariant& v);
 /// QML unchecked and Qt paints an invalid QColor as black. Shared by every
 /// theme-fallback colour key: the zone colours, the Windows border/tint
 /// colours, the tab indicator's three, and the drop indicator's two.
-QVariant canonicalThemeFallbackColor(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant canonicalThemeFallbackColor(const QVariant& v);
 
 /// Bound the animation-shader assignment tree at the persistence boundary:
 /// string lengths, parameter-map size and value shapes, override count. The
 /// twin of sanitizeOverlayShaderTree, sharing its bounds; see
 /// settingsschema_shadertrees.cpp for why the motion keys beside it cannot get
 /// the same treatment.
-QVariant sanitizeShaderProfileTree(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant sanitizeShaderProfileTree(const QVariant& v);
 
 /// The decoration-tree twin of the above. Its parameter map is nested one
 /// level deeper ({packId -> {paramId -> value}}), so only the inner level is
 /// bounded scalar-only.
-QVariant sanitizeDecorationProfileTree(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant sanitizeDecorationProfileTree(const QVariant& v);
 
 /// The MOTION tree's read-side bound, which simply runs the same canonicaliser its
 /// setter does (`canonicalMotionProfileTree`, settings/profiletrees.cpp).
@@ -153,42 +153,42 @@ QVariant sanitizeDecorationProfileTree(const QVariant& v);
 /// this key directly into the JSON document, outside the store, and config.json is
 /// hand-editable, so neither path ever passed through a setter. Sharing one function is
 /// what keeps the "canonicalise and bound on one pass" property the setter relies on.
-QVariant sanitizeMotionProfileTree(const QVariant& v);
+PHOSPHORENGINERUNTIME_EXPORT QVariant sanitizeMotionProfileTree(const QVariant& v);
 
 /// The motion tree's persistence form, shared by the setter and the sanitizer above.
-QVariantMap canonicalMotionProfileTree(const QVariantMap& tree);
+PHOSPHORENGINERUNTIME_EXPORT QVariantMap canonicalMotionProfileTree(const QVariantMap& tree);
 
-void appendShadersSchema(PhosphorConfig::Schema& schema);
-void appendOverlayShadersSchema(PhosphorConfig::Schema& schema);
-void appendAppearanceSchema(PhosphorConfig::Schema& schema);
-void appendOrderingSchema(PhosphorConfig::Schema& schema);
-void appendAnimationsSchema(PhosphorConfig::Schema& schema);
-void appendPerformanceSchema(PhosphorConfig::Schema& schema);
-void appendZoneGeometrySchema(PhosphorConfig::Schema& schema);
-void appendShortcutsSchema(PhosphorConfig::Schema& schema);
-void appendEditorSchema(PhosphorConfig::Schema& schema);
-void appendExclusionsSchema(PhosphorConfig::Schema& schema);
-void appendDisplaySchema(PhosphorConfig::Schema& schema);
-void appendZoneSelectorSchema(PhosphorConfig::Schema& schema);
-void appendActivationSchema(PhosphorConfig::Schema& schema);
-void appendBehaviorSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendShadersSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendOverlayShadersSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendAppearanceSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendOrderingSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendAnimationsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendPerformanceSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendZoneGeometrySchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendShortcutsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendEditorSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendExclusionsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendDisplaySchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendZoneSelectorSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendActivationSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendBehaviorSchema(PhosphorConfig::Schema& schema);
 // The tiling entry point lives in settingsschema_tiling.cpp (split out by
 // domain, the scrolling shape).
-void appendAutotilingSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendAutotilingSchema(PhosphorConfig::Schema& schema);
 // The three scrolling entry points live in settingsschema_scrolling.cpp (split
 // out by domain). appendScrollingShortcutsSchema is called from
 // appendShortcutsSchema, not from buildSettingsSchema.
-void appendScrollingSchema(PhosphorConfig::Schema& schema);
-void appendScrollingZoneSelectorSchema(PhosphorConfig::Schema& schema);
-void appendScrollingShortcutsSchema(PhosphorConfig::Schema& schema);
-void appendWindowsSchema(PhosphorConfig::Schema& schema);
-void appendWorkspacesSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendScrollingSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendScrollingZoneSelectorSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendScrollingShortcutsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendWindowsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendWorkspacesSchema(PhosphorConfig::Schema& schema);
 /// The dynamic-workspaces rows of the Shortcuts.Global key list. Lives with
 /// the rest of the workspaces schema in settingsschema_workspaces.cpp;
 /// appendShortcutsSchema calls it while building that group's list, so the
 /// keys land in Shortcuts.Global alongside every other global verb.
-void appendWorkspacesShortcutKeys(QVector<PhosphorConfig::KeyDef>& globals);
-void appendGapsSchema(PhosphorConfig::Schema& schema);
-void appendDecorationsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendWorkspacesShortcutKeys(QVector<PhosphorConfig::KeyDef>& globals);
+PHOSPHORENGINERUNTIME_EXPORT void appendGapsSchema(PhosphorConfig::Schema& schema);
+PHOSPHORENGINERUNTIME_EXPORT void appendDecorationsSchema(PhosphorConfig::Schema& schema);
 
 } // namespace PhosphorEngineRuntime

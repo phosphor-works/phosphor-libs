@@ -40,10 +40,12 @@ namespace WindowTrackingInternal {
 
 /// The screen of a store that holds @p windowId as a member with a zone, on a
 /// screen other than @p excludeScreen; empty when there is none (screenleave.cpp).
-QString snapZoneScreen(PhosphorSnapEngine::SnapEngine* snap, const QString& windowId, const QString& excludeScreen);
+PHOSPHORENGINERUNTIME_EXPORT QString snapZoneScreen(PhosphorSnapEngine::SnapEngine* snap, const QString& windowId,
+                                                    const QString& excludeScreen);
 /// Whether snap holds @p windowId in any store on another screen than
 /// @p keepScreenId (another virtual screen of the same monitor counts).
-bool snapHoldsOffScreen(PhosphorSnapEngine::SnapEngine* snap, const QString& windowId, const QString& keepScreenId);
+PHOSPHORENGINERUNTIME_EXPORT bool snapHoldsOffScreen(PhosphorSnapEngine::SnapEngine* snap, const QString& windowId,
+                                                     const QString& keepScreenId);
 
 /// The effective screen whose area holds @p pos, or empty when the point lies
 /// on no output. Utils::effectiveScreenIdAt answers the primary screen for an
@@ -184,7 +186,7 @@ inline std::optional<int> desktopShowing(const std::optional<QSet<int>>& desktop
 
 /// The desktop @p screenId shows: the per-output value, else the global current
 /// one the layout registry holds; 0 ("unknown") with neither (queries.cpp).
-int shownDesktop(const WindowTracker& adaptor, const QString& screenId);
+PHOSPHORENGINERUNTIME_EXPORT int shownDesktop(const WindowTracker& adaptor, const QString& screenId);
 
 /// Where a window's own context meets a screen showing @p shownDesktop (0:
 /// unknown) in @p currentActivity (empty: unknown): desktopShowing, and
