@@ -22,6 +22,7 @@ previews and the pack tooling (`plasmazones-shader-render`, the pack validator).
 | `assembleZoneEntrySource` | `ZoneEntryScaffold.h` | The entry scaffold for packs without their own `main()` |
 | `expandShaderIncludePaths`, `resolveZoneVertexPath`, `warmShaderBakeCacheForPaths` | `ZoneShaderNodeRhi.h` | Include paths, the vertex stage and the warm bake |
 | `ZoneLabelTextureBuilder` | `ZoneLabelTextureBuilder.h` | The zone-number label texture |
+| `setOverlayPackDataSubdir` | `OverlayPackLocation.h` | Where the app's overlay packs install, for the trusted roots |
 
 ## Typical use
 
@@ -44,10 +45,12 @@ ZoneShaderRenderer {
 
 - **One source of truth for include paths and the vertex stage.** `ZoneShaderItem` and the warm bake must compile
   against identical inputs or their bake-cache keys diverge, so neither derives them by hand.
-- The overlay roots are the engine runtime's (`ConfigDefaults::overlaysSubdir()` under the host's app directory).
+- **The app names its overlay pack directory** with `setOverlayPackDataSubdir()` (`OverlayPackLocation.h`) at
+  startup; the engine runtime's is `ConfigDefaults::overlaysSubdir()`. Until then no installed overlay root is trusted.
+  The library sits below the engine runtime and does not link it.
 - **Logging** is under `phosphor.zonerendering`.
 
 ## Dependencies
 
 Qt Core, Gui, Qml and Quick, PhosphorRendering (the shader effect and RHI node), PhosphorShaders (entry points),
-PhosphorEngineRuntime (the overlay data paths) and PhosphorZones (zone JSON keys).
+and PhosphorZones (zone JSON keys and the zone defaults).

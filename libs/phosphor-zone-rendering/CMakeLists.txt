@@ -42,9 +42,6 @@ if(NOT TARGET Qt6::ShaderToolsPrivate)
 endif()
 set(CMAKE_AUTOMOC ON)
 
-if(NOT TARGET PhosphorEngineRuntime::PhosphorEngineRuntime)
-    find_package(PhosphorEngineRuntime CONFIG REQUIRED)
-endif()
 if(NOT TARGET PhosphorRendering::PhosphorRendering)
     find_package(PhosphorRendering CONFIG REQUIRED)
 endif()
@@ -56,6 +53,7 @@ if(NOT TARGET PhosphorZones::PhosphorZones)
 endif()
 
 set(phosphorzonerendering_public_HDRS
+    include/PhosphorZoneRendering/OverlayPackLocation.h
     include/PhosphorZoneRendering/ZoneEntryScaffold.h
     include/PhosphorZoneRendering/ZoneLabelTextureBuilder.h
     include/PhosphorZoneRendering/ZoneShaderItem.h
@@ -64,6 +62,7 @@ set(phosphorzonerendering_public_HDRS
 
 set(phosphorzonerendering_SRCS
     src/zoneentryscaffold.cpp
+    src/overlaypacklocation.cpp
     src/zonelabeltexturebuilder.cpp
     src/zonerenderinglogging.cpp
     src/zonerenderinglogging.h
@@ -99,15 +98,15 @@ target_include_directories(PhosphorZoneRendering
 
 target_compile_features(PhosphorZoneRendering PUBLIC cxx_std_20)
 
-# PUBLIC: ZoneShaderItem is a PhosphorRendering::ShaderEffect, its headers
-# return PhosphorShaders entry candidates and bake results, and the include
-# paths come from the engine runtime's ConfigDefaults.
+# PUBLIC: ZoneShaderItem is a PhosphorRendering::ShaderEffect, and its headers
+# return PhosphorShaders entry candidates and bake results. The library sits
+# below the engine runtime: the overlay pack directory comes from the app
+# (setOverlayPackDataSubdir) and the zone defaults from PhosphorZones.
 target_link_libraries(PhosphorZoneRendering
     PUBLIC
         Qt6::Core
         Qt6::Gui
         Qt6::Quick
-        PhosphorEngineRuntime::PhosphorEngineRuntime
         PhosphorRendering::PhosphorRendering
         PhosphorShaders::PhosphorShaders
     PRIVATE

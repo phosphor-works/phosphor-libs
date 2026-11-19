@@ -6,7 +6,6 @@
 include(CMakeFindDependencyMacro)
 
 find_dependency(Qt6 @PHOSPHORZONERENDERING_QT_MIN@ COMPONENTS Core Gui Quick)
-find_dependency(PhosphorEngineRuntime)
 find_dependency(PhosphorRendering)
 find_dependency(PhosphorShaders)
 find_dependency(PhosphorZones)

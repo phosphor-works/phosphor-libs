@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <PhosphorEngineRuntime/ConfigDefaults.h>
+#include <PhosphorZoneRendering/OverlayPackLocation.h>
 
 #include <PhosphorRendering/ZoneShaderCommon.h>
 #include <PhosphorRendering/ZoneShaderNodeRhi.h>
@@ -19,14 +19,18 @@
 
 namespace PhosphorZoneRendering {
 
-/// The trusted PlasmaZones overlay roots, in QStandardPaths priority order
-/// (user first). NOT the same order as ShaderRegistry::searchPaths(), which is
-/// this list reversed.
+/// The trusted overlay roots, the app's overlay pack directory
+/// (setOverlayPackDataSubdir) under each data location, in QStandardPaths
+/// priority order (user first). NOT the same order as
+/// ShaderRegistry::searchPaths(), which is this list reversed. Empty until the
+/// app names its overlay pack directory.
 inline QStringList trustedShaderRoots()
 {
-    return QStandardPaths::locateAll(QStandardPaths::GenericDataLocation,
-                                     PhosphorEngineRuntime::ConfigDefaults::overlaysSubdir(),
-                                     QStandardPaths::LocateDirectory);
+    const QString subdir = overlayPackDataSubdir();
+    if (subdir.isEmpty()) {
+        return {};
+    }
+    return QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, subdir, QStandardPaths::LocateDirectory);
 }
 
 /// Expand @p inputPaths into the include-path list used to resolve
