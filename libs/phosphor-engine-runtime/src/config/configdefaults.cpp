@@ -26,12 +26,6 @@ static QString configDir()
     return dir;
 }
 
-/// The application's own config directory (appDirectoryName()).
-static QString appConfigDir()
-{
-    return configDir() + QLatin1Char('/') + appDirectoryName();
-}
-
 QString ConfigDefaults::configFilePath()
 {
     return appConfigDir() + QStringLiteral("/config.json");
@@ -127,7 +121,8 @@ QJsonObject ConfigDefaults::defaultLayoutVisibilitySettings()
 
 QString ConfigDefaults::legacyConfigFilePath()
 {
-    // The single-file INI the v1 config lived in, beside the directory.
+    // The single-file INI the v1 config lived in, beside 3.x's own config
+    // directory at the config root. Only the migration chain reads it, once.
     return configDir() + QLatin1Char('/') + appDirectoryName() + QStringLiteral("rc");
 }
 

@@ -25,7 +25,7 @@ void loadRuntimeTranslations(QCoreApplication* app)
     // qt_add_lrelease writes the .qm files.
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList searchDirs = {
-        appDir + QStringLiteral("/../share/phosphor-engine-runtime/translations"),
+        appDir + QStringLiteral("/../share/phosphor-works/translations"),
         appDir + QStringLiteral("/.."),
     };
     for (const QString& dir : searchDirs) {

@@ -1121,8 +1121,9 @@ public:
     //
     // The data families the daemon, settings app and editor locate, as
     // RELATIVE sub-paths: the form QStandardPaths::locate / locateAll and the
-    // registries' subdirectory arguments take, each under the application's
-    // directory (appDirectoryName()). Hoisted into one accessor each so a
+    // registries' subdirectory arguments take. Each is a tree every Phosphor
+    // app shares (commonDataSubdir(): phosphor-works/<tree>), the shader
+    // families together under phosphor-works/shaders/. Hoisted into one accessor each so a
     // rename only touches one site. The ConfigDefaults::user*Subdir()
     // accessors are the same paths with the leading '/' a writableLocation()
     // concatenation needs, derived from these. The algorithms directory is
@@ -1133,35 +1134,35 @@ public:
     // ═══════════════════════════════════════════════════════════════════════════
     static QString layoutsSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/layouts");
+        return commonDataSubdir(QStringLiteral("layouts"));
     }
     static QString animationsSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/animations");
+        return commonDataSubdir(QStringLiteral("shaders/animations"));
     }
     static QString overlaysSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/overlays");
+        return commonDataSubdir(QStringLiteral("shaders/overlays"));
     }
     static QString profilesSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/profiles");
+        return commonDataSubdir(QStringLiteral("profiles"));
     }
     static QString pointerSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/pointer");
+        return commonDataSubdir(QStringLiteral("shaders/pointer"));
     }
     static QString curvesSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/curves");
+        return commonDataSubdir(QStringLiteral("curves"));
     }
     static QString shaderPresetsSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/shader-presets");
+        return commonDataSubdir(QStringLiteral("shaders/presets"));
     }
     static QString scrollingTemplatesSubdir()
     {
-        return appDirectoryName() + QStringLiteral("/scrolling-templates");
+        return commonDataSubdir(QStringLiteral("scrolling-templates"));
     }
     /// The surface packs' data subdirectory the host set
     /// (PhosphorSurfaceShaders::surfacePackDataSubdir). Empty until it does.

@@ -3,6 +3,8 @@
 
 #include <PhosphorEngineRuntime/AppDirectoryName.h>
 
+#include <QDir>
+#include <QStandardPaths>
 #include <QtGlobal>
 
 namespace PhosphorEngineRuntime {
@@ -13,7 +15,25 @@ QString& storedName()
     static QString name;
     return name;
 }
+
+/// A generic writable location, or @p homeFallback under the home directory
+/// when QStandardPaths has none (a sandbox with no HOME-derived roots).
+QString genericLocation(QStandardPaths::StandardLocation location, const char* homeFallback)
+{
+    const QString dir = QStandardPaths::writableLocation(location);
+    return dir.isEmpty() ? QDir::homePath() + QLatin1Char('/') + QLatin1String(homeFallback) : dir;
+}
 } // namespace
+
+QString suiteDirectoryName()
+{
+    return QStringLiteral("phosphor-works");
+}
+
+QString commonDataSubdir(const QString& tree)
+{
+    return suiteDirectoryName() + QLatin1Char('/') + tree;
+}
 
 void setAppDirectoryName(const QString& name)
 {
@@ -33,6 +53,26 @@ QString appDirectoryName()
         qFatal("appDirectoryName() read before setAppDirectoryName(): call it at the top of main()");
     }
     return name;
+}
+
+QString appSubdir()
+{
+    return suiteDirectoryName() + QLatin1Char('/') + appDirectoryName();
+}
+
+QString appConfigDir()
+{
+    return genericLocation(QStandardPaths::GenericConfigLocation, ".config") + QLatin1Char('/') + appSubdir();
+}
+
+QString appStateDir()
+{
+    return genericLocation(QStandardPaths::GenericStateLocation, ".local/state") + QLatin1Char('/') + appSubdir();
+}
+
+QString appCacheDir()
+{
+    return genericLocation(QStandardPaths::GenericCacheLocation, ".cache") + QLatin1Char('/') + appSubdir();
 }
 
 } // namespace PhosphorEngineRuntime
