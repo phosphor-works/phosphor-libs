@@ -38,11 +38,11 @@ namespace PhosphorMcp {
 // that another user owns, no /proc, a pty master), or that opens as another
 // device or one it cannot identify, is treated as a pipe, with a warning.
 // Any other write descriptor (a pipe, as an MCP client gives) is made
-// non-blocking, and close() clears O_NONBLOCK again if open() set it. writeLine() writes what the descriptor takes now, and
-// queues the rest, which a write notifier drains when the reader takes
-// more. So a reply of many megabytes to a slow reader does not stop the
-// program from answering other requests meanwhile. Their lines wait behind
-// it in the queue.
+// non-blocking, and close() clears O_NONBLOCK again if open() set it.
+// writeLine() writes what the descriptor takes now, and queues the rest,
+// which a write notifier drains when the reader takes more. So a reply of
+// many megabytes to a slow reader does not stop the program from answering
+// other requests meanwhile. Their lines wait behind it in the queue.
 //
 // The queue is not dropped, and has a high-water mark instead
 // (maxPendingWriteBytes). Past it, the transport stops reading, and goes on

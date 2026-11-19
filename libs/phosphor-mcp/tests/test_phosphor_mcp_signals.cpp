@@ -123,6 +123,16 @@ bool readFromChild(int fd, char& byte)
     return false;
 }
 
+// A child that the test did not reap, after a failure, still holds the
+// test's output open, and whoever reads it would wait for the child.
+void killUnlessReaped(pid_t child, bool reaped)
+{
+    if (child > 0 && !reaped) {
+        ::kill(child, SIGKILL);
+        ::waitpid(child, nullptr, 0);
+    }
+}
+
 bool restored()
 {
     return sameAction(actionOf(SIGTERM), s_termAtStart) && sameAction(actionOf(SIGHUP), s_hupAtStart)
@@ -457,18 +467,66 @@ private Q_SLOTS:
             ::_exit(0);
         }
         ::close(report[1]);
-        const auto closeReport = qScopeGuard([&report] {
+        bool reaped = false;
+        const auto cleanUp = qScopeGuard([&] {
             ::close(report[0]);
+            killUnlessReaped(child, reaped);
         });
         QVERIFY(child > 0);
         char answer = 0;
         QVERIFY(readFromChild(report[0], answer));
         int status = 0;
         QCOMPARE(::waitpid(child, &status, 0), child);
+        reaped = true;
         QCOMPARE(answer, '0');
         // The parent still holds them.
         QVERIFY(server.handleTerminationSignals());
         QVERIFY(hasServerHandler(SIGTERM));
+    }
+
+    void childTakesTheSignalsOnceItsCopyIsGone()
+    {
+        // In a child forked after the parent's call, the child's own server
+        // cannot take the signals while the child holds its copy of the
+        // parent's server, and takes them once the child destroyed it. The
+        // parent keeps its own.
+        auto* parentServer = new McpServer;
+        const auto deleteParentServer = qScopeGuard([parentServer] {
+            delete parentServer;
+        });
+        QVERIFY(parentServer->handleTerminationSignals());
+        int report[2];
+        QCOMPARE(::pipe(report), 0);
+        const pid_t child = ::fork();
+        if (child == 0) {
+            ::close(report[0]);
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("took the signals before the fork")));
+            McpServer own;
+            char answers[2];
+            answers[0] = own.handleTerminationSignals() ? '1' : '0';
+            delete parentServer;
+            answers[1] = own.handleTerminationSignals() ? '1' : '0';
+            [[maybe_unused]] const ssize_t written = ::write(report[1], answers, 2);
+            ::_exit(0);
+        }
+        ::close(report[1]);
+        bool reaped = false;
+        const auto cleanUp = qScopeGuard([&] {
+            ::close(report[0]);
+            killUnlessReaped(child, reaped);
+        });
+        QVERIFY(child > 0);
+        char whileHeld = 0;
+        char afterwards = 0;
+        QVERIFY(readFromChild(report[0], whileHeld));
+        QVERIFY(readFromChild(report[0], afterwards));
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        reaped = true;
+        QCOMPARE(whileHeld, '0');
+        QCOMPARE(afterwards, '1');
+        QVERIFY(hasServerHandler(SIGTERM));
+        QVERIFY(parentServer->handleTerminationSignals());
     }
 
     void childLeavesTheParentsSignalsAlone()
@@ -498,14 +556,17 @@ private Q_SLOTS:
             ::_exit(0);
         }
         ::close(report[1]);
-        const auto closeReport = qScopeGuard([&report] {
+        bool reaped = false;
+        const auto cleanUp = qScopeGuard([&] {
             ::close(report[0]);
+            killUnlessReaped(child, reaped);
         });
         QVERIFY(child > 0);
         char answer = 0;
         QVERIFY(readFromChild(report[0], answer));
         int status = 0;
         QCOMPARE(::waitpid(child, &status, 0), child);
+        reaped = true;
         QCOMPARE(answer, '0');
         QVERIFY(spinUntil([&] {
             return finished.count() == 1;
@@ -538,6 +599,25 @@ private Q_SLOTS:
         auto* server = new McpServer;
         // Touched on the worker only, until the server is gone.
         McpCall held;
+        // After a failure below, the server and the call it holds go where
+        // the server lives, before the call is destroyed here.
+        const auto dropServer = qScopeGuard([&] {
+            if (!server) {
+                return;
+            }
+            if (server->thread() == QThread::currentThread()) {
+                delete server;
+                held = McpCall();
+                return;
+            }
+            QMetaObject::invokeMethod(
+                context,
+                [&] {
+                    delete server;
+                    held = McpCall();
+                },
+                Qt::BlockingQueuedConnection);
+        });
         std::atomic<bool> holding{false};
         std::atomic<QThread*> cancelledOn{nullptr};
         QVERIFY(server->addTool(McpTool(QStringLiteral("hold")), [&](McpCall call) {
@@ -571,6 +651,7 @@ private Q_SLOTS:
             context,
             [&] {
                 delete server;
+                server = nullptr;
                 held = McpCall();
             },
             Qt::BlockingQueuedConnection);

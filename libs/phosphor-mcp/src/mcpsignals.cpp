@@ -111,8 +111,8 @@ std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(QObject* c
     if (s_owner) {
         if (::getpid() != s_pid.load()) {
             qCWarning(lcMcp).noquote()
-                << "McpServer::handleTerminationSignals: a server in the parent took the signals before the fork, "
-                   "and a child cannot take its handler. Call it only in the process that keeps the server.";
+                << "McpServer::handleTerminationSignals: a server in the parent took the signals before the fork. "
+                   "The child can take them once it has destroyed its copy of that server.";
         } else {
             qCWarning(lcMcp).noquote() << "McpServer::handleTerminationSignals: another server handles the signals";
         }
@@ -133,6 +133,12 @@ std::unique_ptr<McpTerminationSignals> McpTerminationSignals::install(QObject* c
     self->m_callback = std::move(callback);
     self->m_readFd = fds[0];
     self->m_writeFd = fds[1];
+    if (::getpid() != s_pid.load()) {
+        // A child forked while a handler ran on another of the parent's
+        // threads keeps that handler's count, which nothing in the child
+        // lowers. No handler counts here until s_pid names this process.
+        s_handlersRunning.store(0);
+    }
     s_pid.store(::getpid());
     s_writeFd.store(fds[1]);
     s_owner = self.get();
@@ -175,8 +181,10 @@ void McpTerminationSignals::release()
     s_hupHandled = false;
     s_writeFd.store(-1);
     // A handler on another thread may have read the descriptor just before.
-    // Its write is one non-blocking byte, so this wait is short.
-    while (s_handlersRunning.load() != 0) {
+    // Its write is one non-blocking byte, so this wait is short. In a child
+    // forked after install() no handler counts, and a count there is the
+    // parent's, from a handler that ran when it forked.
+    while (belongsToThisProcess() && s_handlersRunning.load() != 0) {
         std::this_thread::yield();
     }
     if (m_notifier) {

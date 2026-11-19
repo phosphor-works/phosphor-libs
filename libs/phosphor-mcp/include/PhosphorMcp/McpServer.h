@@ -150,13 +150,14 @@ public:
     // its replies (a signal, a closed or failed output), before the cancel
     // callbacks run. A signal during a slow callback or teardown then has its
     // usual effect: the second one after a signal, and the first one after a
-    // closed output. After the end of stdin or a failed read they come back
-    // when the server finishes, at the latest when it is destroyed, so that a
-    // signal cuts the drain short. The server reads a signal from its event
-    // loop, so one that comes while a cancel callback blocks without one is
-    // read only after the callbacks returned, if the server has not finished
-    // by then. A handler that someone else installed since stays. Call it after QCoreApplication exists, and before the
-    // server ends.
+    // closed or failed output. After the end of stdin or a failed read they
+    // come back when the server finishes, at the latest when it is destroyed,
+    // so that a signal cuts the drain short. The server reads a signal from
+    // its event loop, so one that comes while a cancel callback blocks
+    // without one is read only after the callbacks returned, if the server
+    // has not finished by then. A handler that someone else installed since
+    // stays. Call it after QCoreApplication exists, and before the server
+    // ends.
     //
     // True when the server handles the signals, also when it did before.
     // False, with a warning, when another server handles them, when the
@@ -171,8 +172,10 @@ public:
     // after it, before an exec, takes the old dispositions. So a process
     // that forks to keep the server running in the child (a daemon) calls
     // this in the child, after the fork, and not in the parent before it.
-    // After a call in the parent, the child's call returns false, with a
-    // warning, since the handler stays the parent's.
+    // After a call in the parent, a call in the child returns false, with a
+    // warning, while the child holds its copy of that server: the handler
+    // stays the parent's. Once the child destroyed its copy, a server in the
+    // child takes the signals.
     bool handleTerminationSignals();
 
     // Reads requests on stdin and writes replies on stdout. A server with no

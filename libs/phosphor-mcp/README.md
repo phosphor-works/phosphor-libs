@@ -177,9 +177,10 @@ once for each `minLength` or `maxLength` that applies to it, which takes
 about 20 ms for 16 MiB of text that is not ASCII. So a schema with many of
 them around one long string makes each call slower, near a second for fifty
 of them. Before any check the server converts the arguments once, whatever
-the schema, which takes about 0.6 s for a 16 MiB line of small values, and
-valijson takes about as long again for each check that applies to every one
-of them. That work grows with the longest line the server reads, so an
+the schema, which takes about 0.6 s for a 16 MiB line of small values.
+valijson takes about as long again to walk them under a subschema, and less
+for each further check: about 0.1 s for each keyword, and 0.2 s for each
+further subschema. That work grows with the longest line the server reads, so an
 application whose tools take no long text lowers it with
 `setMaxLineBytes`. Where valijson gives no
 reason for a failure (a `false` subschema, for one), the line names the
@@ -347,27 +348,27 @@ writes nothing more either.
 
 `handleTerminationSignals()` installs handlers for SIGTERM and SIGHUP that
 write to a self-pipe. Signal dispositions are global to the process, so the
-application asks for it, and one server at a time holds them. The server puts
-back what it found as soon as it ends without waiting for its replies (a
-signal, a closed or failed output), before the cancel callbacks run, unless
-another handler was installed since. A signal during a slow callback or
-teardown then has its usual effect: the second one after a signal, and the
-first one after a closed output. After the end of stdin or a failed read the
-server keeps the signals while its replies drain, so that a signal cuts the
-wait short, and puts them back at its finish (at the latest its
-destruction). The server reads a signal from its event loop, though, so one
-that comes while a cancel callback blocks without an event loop is read only
-after the callbacks returned, and not at all when the server finished by
-then. A signal that the process ignores
-(SIGHUP under `nohup`) stays ignored. `handleTerminationSignals()` returns
-false, with a warning, before the `QCoreApplication` exists and after the
-server ended. A child
-forked before `exec` gets the disposition it would have had without the
-server, not the server's handler. So a process that forks to keep the
-server running in the child, as a daemon does, calls
-`handleTerminationSignals()` in the child, after the fork, and not in the
-parent before it. After a call in the parent, the child's call returns
-false, with a warning, since the handler stays the parent's.
+application asks for it, and one server at a time holds them. The server
+puts back what it found as soon as it ends without waiting for its replies
+(a signal, a closed or failed output), before the cancel callbacks run,
+unless another handler was installed since. A signal during a slow callback
+or teardown then has its usual effect: the second one after a signal, and
+the first one after a closed or failed output. After the end of stdin or a
+failed read the server keeps the signals while its replies drain, so that a
+signal cuts the wait short, and puts them back at its finish (at the latest
+its destruction). The server reads a signal from its event loop, though, so
+one that comes while a cancel callback blocks without an event loop is read
+only after the callbacks returned, and not at all when the server finished
+by then. A signal that the process ignores (SIGHUP under `nohup`) stays
+ignored. `handleTerminationSignals()` returns false, with a warning, before
+the `QCoreApplication` exists and after the server ended. A child forked
+before `exec` gets the disposition it would have had without the server, not
+the server's handler. So a process that forks to keep the server running in
+the child, as a daemon does, calls `handleTerminationSignals()` in the
+child, after the fork, and not in the parent before it. After a call in the
+parent, a call in the child returns false, with a warning, while the child
+holds its copy of that server, since the handler stays the parent's. Once
+the child destroyed its copy, a server in the child takes the signals.
 
 The library never changes SIGPIPE's disposition. An ignored SIGPIPE survives
 `exec`, so every program that the application starts would inherit it, and

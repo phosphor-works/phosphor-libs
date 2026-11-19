@@ -50,9 +50,10 @@ constexpr qsizetype MaxCollectedPointerLength = 64 * 1024;
 // (Inspector::size()) times the cost of the schema (errorPathCost()) is at
 // most this. A long string or member name in the value, and a long name or
 // value in the schema, count by their length. The slowest value found within
-// it takes about 0.2 s in a release build, many required names missing from
-// each of a few hundred items. Long strings and names, ASCII or not, list
-// their errors in about 0.15 s at most.
+// it takes about 0.15 s to list in a release build, many required names
+// missing from each of a few hundred items, and a long string of text that is
+// not ASCII under many length checks takes about as long. The check before
+// the list reads such a string as often again.
 constexpr qint64 MaxErrorWork = 100000;
 // See Inspector::size() and literalCost().
 constexpr qint64 PointerLengthPerValue = 16;
@@ -819,10 +820,9 @@ private:
     // valijson and collect() copy its pointer several times, and valijson
     // copies a string out and counts its characters each time it checks its
     // length. As measured, PointerLengthPerValue code units of pointer cost
-    // as much as one more value. StringBytesPerValue bytes of string count as
-    // one value, about half of what they cost at worst (text that is not
-    // ASCII): the errors of long strings stay well under those of the
-    // slowest values, and a few megabytes of text still get their list.
+    // as much as one more value, and so do StringBytesPerValue bytes of text
+    // that is not ASCII under length checks, the slowest strings. ASCII text
+    // costs less. A few megabytes of text still get their list.
     [[nodiscard]] qint64 size(std::size_t stringBytes) const
     {
         return m_nodes + m_pointerLength / PointerLengthPerValue + qint64(stringBytes) / StringBytesPerValue;
