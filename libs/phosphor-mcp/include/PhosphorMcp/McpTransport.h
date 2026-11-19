@@ -34,7 +34,9 @@ namespace PhosphorMcp {
 // MSG_DONTWAIT, and its flags stay as they are. A terminal is opened again,
 // for a file description of the transport's own that is non-blocking, so
 // the terminal that a shell shares with the program keeps its flags even
-// when the program is killed. Any other write descriptor (a pipe, as an MCP
+// when the program is killed. A terminal that cannot be opened again (one
+// that another user owns, no /proc, a pty master) is treated as a pipe, with
+// a warning. Any other write descriptor (a pipe, as an MCP
 // client gives) is made non-blocking, and close() clears O_NONBLOCK again if
 // open() set it. writeLine() writes what the descriptor takes now, and
 // queues the rest, which a write notifier drains when the reader takes
@@ -135,6 +137,9 @@ Q_SIGNALS:
 
 private:
     bool openOutput();
+    // A non-blocking descriptor of the transport's own on the terminal that
+    // m_writeFd writes to, or -1, with a warning, when there is none.
+    [[nodiscard]] int reopenTerminal() const;
     void onReadable();
     void flush();
     void dispatchLines();

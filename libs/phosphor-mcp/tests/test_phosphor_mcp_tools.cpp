@@ -648,8 +648,11 @@ private Q_SLOTS:
         QElapsedTimer timer;
         timer.start();
         QVERIFY(sendCall(peer, 1, QStringLiteral("env"), arguments));
-        const QJsonObject reply = peer.readOne(30000);
-        QVERIFY2(timer.elapsed() < 5000, qPrintable(QString::number(timer.elapsed())));
+        // Each answer takes well under a second, about ten under valgrind,
+        // and minutes with every error collected (152 s for the first).
+        const int bound = 30000;
+        const QJsonObject reply = peer.readOne(bound);
+        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
         QCOMPARE(errorLines(reply), expected);
         QCOMPARE(calls, 0);
     }
@@ -705,6 +708,21 @@ private Q_SLOTS:
         QCOMPARE(errorLines(peer.readOne()),
                  QStringLiteral("- arguments/") + QString(61, QLatin1Char('n'))
                      + QStringLiteral("...: is not a known property"));
+
+        // Names that differ only past the cut are as many errors, though
+        // their lines look alike: ten, and a count of the rest.
+        QJsonObject arguments{{QLatin1StringView("pane"), 1}};
+        for (int i = 0; i < 200; ++i) {
+            arguments.insert(QString(100, QLatin1Char('n')) + QString::number(i), 1);
+        }
+        QVERIFY(peer.send(callRequest(2, QStringLiteral("pane_tool"), arguments)));
+        const QStringList lines = errorLines(peer.readOne()).split(QLatin1Char('\n'));
+        QCOMPARE(lines.size(), 11);
+        QCOMPARE(lines.first(),
+                 QStringLiteral("- arguments/") + QString(61, QLatin1Char('n'))
+                     + QStringLiteral("...: is not a known property"));
+        QCOMPARE(lines.at(9), lines.first());
+        QCOMPARE(lines.last(), QStringLiteral("- arguments: and 190 more errors"));
     }
 
     void boundsAreTheSameInEveryLocale()
@@ -761,6 +779,10 @@ private Q_SLOTS:
         // gives the handler 0: refused before valijson.
         row("integer 2^63 with a minimum", "{'type': 'integer', 'minimum': 1}", "9223372036854775808", false);
         row("integer 1e19", "{'type': 'integer'}", "1e19", false);
+        // Qt's parser rounds these to a double, as the README says: the
+        // first arrives as qint64's minimum, the second as 2^63.
+        row("integer rounded to qint64 min", "{'type': 'integer'}", "-9223372036854775809", true);
+        row("integer qint64 max with a fraction", "{'type': 'integer'}", "9223372036854775807.0", false);
         row("number", "{'type': 'number'}", "2.5", true);
         row("number not a string", "{'type': 'number'}", "'2'", false);
         row("number past qint64", "{'type': 'number'}", "1e300", false);
@@ -896,6 +918,15 @@ private Q_SLOTS:
                                               "- arguments/a/b/z: the property name must be one of the values of enum");
         QTest::newRow("chain not an object") << chain << QByteArray("{'a': {'b': 3}}") << QString();
         QTest::newRow("chain absent") << chain << QByteArray("{'a': {}}") << QString();
+        // "properties" names members, and so does the chain: a name that is
+        // a number does not step into an array.
+        const QJsonObject numbered =
+            parse("{'type': 'object', 'properties': {'a': {'properties': {'0': {'propertyNames': false}}}}}");
+        QTest::newRow("chain through an array") << numbered << QByteArray("{'a': [{'x': 1}]}") << QString();
+        QTest::newRow("chain with a number") << numbered << QByteArray("{'a': {'0': {'x': 1}}}")
+                                             << QStringLiteral(
+                                                    "- arguments/a/0/x: is not allowed, because the schema allows no "
+                                                    "property here");
         QTest::newRow("false") << parse("{'type': 'object', 'properties': {'a': {'propertyNames': false}}}")
                                << QByteArray("{'a': {'k': 1}}")
                                << QStringLiteral(
@@ -944,6 +975,74 @@ private Q_SLOTS:
             QCOMPARE(resultOf(reply).value(QLatin1StringView("isError")), QJsonValue(true));
             QCOMPARE(errorLines(reply), expected);
         }
+    }
+
+    void errorsNameWhatRejects_data()
+    {
+        QTest::addColumn<QByteArray>("schema");
+        QTest::addColumn<QByteArray>("arguments");
+        QTest::addColumn<QString>("expected");
+        const auto row = [](const char* name, const char* schema, const char* arguments, const char* expected) {
+            QTest::newRow(name) << QByteArray(schema) << QByteArray(arguments) << QString::fromUtf8(expected);
+        };
+        // A branch of anyOf or oneOf that failed beside one that matched
+        // binds nothing, so its constraint is not named.
+        row("anyOf passed, type",
+            "{'type': 'object', 'properties': {'v': {'type': 'string', 'anyOf': [{'type': 'integer'}, {'type': "
+            "'number'}]}}}",
+            "{'v': 1.5}", "- arguments/v: must be of type string");
+        row("anyOf passed, bound",
+            "{'type': 'object', 'properties': {'v': {'maximum': 5, 'anyOf': [{'maximum': 0}, {'minimum': 6}]}}}",
+            "{'v': 7}", "- arguments/v: must be at most 5");
+        row("anyOf passed, unknown property",
+            "{'type': 'object', 'properties': {'a': {}}, 'additionalProperties': false, 'anyOf': [{'properties': "
+            "{'b': {}}, 'additionalProperties': false}, true]}",
+            "{'a': 1, 'z': 1}", "- arguments/z: is not a known property");
+        row("oneOf passed",
+            "{'type': 'object', 'properties': {'v': {'type': 'integer', 'oneOf': [{'type': 'string'}, {'type': "
+            "'number'}]}}}",
+            "{'v': 1.5}", "- arguments/v: must be of type integer");
+        // The anyOf is above the error, and passed there.
+        row("anyOf passed above",
+            "{'type': 'object', 'properties': {'v': {'properties': {'a': {'maximum': 5}}, 'anyOf': [{'properties': "
+            "{'a': {'maximum': 0}}}, {'type': 'object'}]}}}",
+            "{'v': {'a': 7}}", "- arguments/v/a: must be at most 5");
+        // An anyOf in a branch of allOf, which every value must match.
+        row("anyOf passed in allOf",
+            "{'type': 'object', 'properties': {'v': {'type': 'string', 'allOf': [{'anyOf': [{'type': 'boolean'}, "
+            "{'type': 'integer'}]}]}}}",
+            "{'v': 3}", "- arguments/v: must be of type string");
+        // Every branch failed: each is named, and the anyOf.
+        row("anyOf failed",
+            "{'type': 'object', 'properties': {'v': {'maximum': 5, 'anyOf': [{'maximum': 0}, {'minimum': 9}]}}}",
+            "{'v': 7}",
+            "- arguments/v: must be at most 0\n- arguments/v: must be at most 5\n"
+            "- arguments/v: must be at least 9\n- arguments/v: must match at least one schema of anyOf");
+        // valijson reports a failure below a false subschema, or one in
+        // items or additionalProperties, by a wrapper at each level above
+        // it. Only the deepest is listed.
+        row("false below items", "{'type': 'object', 'properties': {'v': {'items': {'properties': {'a': false}}}}}",
+            "{'v': [{'a': 1}]}", "- arguments/v/0/a: does not match the schema");
+        row("items false", "{'type': 'object', 'properties': {'v': {'items': false}}}", "{'v': [1, 2]}",
+            "- arguments/v/0: does not match the schema\n- arguments/v/1: does not match the schema");
+        row("false below additionalProperties",
+            "{'type': 'object', 'additionalProperties': {'properties': {'x': false}}}", "{'c': {'x': 1}}",
+            "- arguments/c/x: does not match the schema");
+    }
+
+    void errorsNameWhatRejects()
+    {
+        QFETCH(QByteArray, schema);
+        QFETCH(QByteArray, arguments);
+        QFETCH(QString, expected);
+        Peer peer;
+        McpServer server;
+        QString error;
+        QVERIFY2(server.addTool(McpTool(QStringLiteral("t")).setInputSchema(parse(schema)), noop(), &error),
+                 qPrintable(error));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+        QVERIFY(sendCall(peer, 1, QStringLiteral("t"), arguments));
+        QCOMPARE(errorLines(peer.readOne()), expected);
     }
 
     void errorsAreListedOnce()
@@ -1065,6 +1164,41 @@ private Q_SLOTS:
         QCOMPARE(resultOf(reply).value(QLatin1StringView("isError")).toBool(), true);
         QCOMPARE(firstText(reply), QStringLiteral("could not count"));
         QCOMPARE(finished, (QList<bool>{false, false, true}));
+    }
+
+    void outputPropertyNamesSkipArrays()
+    {
+        // An output schema may have any root. Its propertyNames under
+        // "properties" applies to an object's member called "0", not to the
+        // first item of an array.
+        Peer peer;
+        McpServer server;
+        McpTool tool(QStringLiteral("list"));
+        tool.setInputSchema(parse("{'type': 'object', 'properties': {'kind': {'type': 'string'}}}"));
+        tool.setOutputSchema(parse("{'properties': {'0': {'propertyNames': false}}}"));
+        const QJsonObject member{{QLatin1StringView("x"), 1}};
+        QVERIFY(server.addTool(tool, [&](McpCall call) {
+            if (call.arguments().value(QLatin1StringView("kind")) == QJsonValue(QStringLiteral("array"))) {
+                call.finish(McpResult::structured(QJsonArray{member}));
+            } else {
+                call.finish(McpResult::structured(QJsonObject{{QLatin1StringView("0"), member}}));
+            }
+        }));
+        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
+
+        QVERIFY(peer.send(
+            callRequest(1, QStringLiteral("list"), QJsonObject{{QLatin1StringView("kind"), QStringLiteral("array")}})));
+        QJsonObject reply = peer.readOne();
+        QCOMPARE(resultOf(reply).value(QLatin1StringView("structuredContent")), QJsonValue(QJsonArray{member}));
+
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("does not match its output schema")));
+        QVERIFY(peer.send(callRequest(2, QStringLiteral("list"),
+                                      QJsonObject{{QLatin1StringView("kind"), QStringLiteral("object")}})));
+        reply = peer.readOne();
+        QCOMPARE(errorCode(reply), ErrorCode::InternalError);
+        QVERIFY2(QJsonDocument(reply).toJson().contains(
+                     "structuredContent/0/x: is not allowed, because the schema allows no property here"),
+                 QJsonDocument(reply).toJson().constData());
     }
 
     void imageContent()

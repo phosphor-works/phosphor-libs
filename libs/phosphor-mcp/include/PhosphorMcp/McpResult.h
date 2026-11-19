@@ -29,8 +29,10 @@ public:
     [[nodiscard]] static McpContent text(const QString& text);
     // `bytes` are the encoded image (a PNG, a JPEG), not base64. The library
     // encodes them when the result goes out. Base64 takes 4/3 of the bytes,
-    // and the reply holds that text again while it is written, so a large
-    // image costs a few times its size in memory until it is sent.
+    // and the JSON objects and the serialized reply each hold that text again
+    // while the result is built and written. So a large image raises the peak
+    // memory by about eight times its size, briefly (133 MiB for 16 MiB,
+    // measured), and the queued reply holds 4/3 of it until it is sent.
     [[nodiscard]] static McpContent image(const QByteArray& bytes, const QString& mimeType);
     // The same for an encoded audio clip (a WAV, an MP3).
     [[nodiscard]] static McpContent audio(const QByteArray& bytes, const QString& mimeType);

@@ -27,6 +27,7 @@
 #include <limits>
 
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -283,6 +284,8 @@ private Q_SLOTS:
         fractionToken.insert(MetaProgressToken, 1.5);
         QJsonObject hugeToken = meta();
         hugeToken.insert(MetaProgressToken, 9223372036854775808.0);
+        QJsonObject loneSurrogateToken = meta();
+        loneSurrogateToken.insert(MetaProgressToken, QString(QStringLiteral("t") + QChar(0xD800)));
         const auto withMeta = [](const QJsonValue& m) {
             return QJsonValue(QJsonObject{{QLatin1StringView("_meta"), m}});
         };
@@ -292,7 +295,8 @@ private Q_SLOTS:
         const QString capabilitiesRequired =
             QStringLiteral("Invalid params: params._meta[\"%1\"] is required").arg(MetaClientCapabilities);
         const QString badToken = QStringLiteral(
-            "Invalid params: params._meta.progressToken must be a string or an integer of at most 64 bits");
+            "Invalid params: params._meta.progressToken must be a string of valid UTF-16 or an integer "
+            "of at most 64 bits");
 
         QTest::newRow("no params") << QJsonValue(QJsonValue::Undefined) << metaRequired;
         QTest::newRow("params null") << QJsonValue(QJsonValue::Null)
@@ -308,6 +312,8 @@ private Q_SLOTS:
         QTest::newRow("progressToken an object") << withMeta(objectToken) << badToken;
         QTest::newRow("progressToken a fraction") << withMeta(fractionToken) << badToken;
         QTest::newRow("progressToken past 2^63") << withMeta(hugeToken) << badToken;
+        // Echoed in a notification, it would come back as U+FFFD.
+        QTest::newRow("progressToken with an unpaired surrogate") << withMeta(loneSurrogateToken) << badToken;
     }
 
     void metaIsRequired()
@@ -536,6 +542,9 @@ private Q_SLOTS:
         QTest::newRow("id a boolean") << with("id", true) << NoId;
         // Echoed, it would come back as another number.
         QTest::newRow("id past 2^63") << with("id", 9223372036854775808.0) << NoId;
+        // Echoed, it would come back as U+FFFD and match no request.
+        QTest::newRow("id with an unpaired surrogate")
+            << with("id", QString(QStringLiteral("r") + QChar(0xD800))) << NoId;
         QTest::newRow("no jsonrpc") << with("jsonrpc", QJsonValue(QJsonValue::Undefined)) << QJsonValue(1);
         QTest::newRow("jsonrpc 1.0") << with("jsonrpc", QStringLiteral("1.0")) << QJsonValue(1);
         QTest::newRow("jsonrpc 1.0 without an id") << notificationWithBadJsonrpc << NoId;
@@ -651,6 +660,51 @@ private Q_SLOTS:
         QCOMPARE(finished.count(), 1);
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("started or ended before")));
         QVERIFY(!f.server.start(f.peer.serverFd(), f.peer.serverFd()));
+    }
+
+    void resetByTheClientIsAnEndOfInput()
+    {
+        // A client on a socket that exits with replies it did not read resets
+        // the connection, and the next read fails with ECONNRESET. That is
+        // the client's end, as EOF is on a pipe: EndOfInput, no warning.
+        Fixture f;
+        QSignalSpy finished(&f.server, &McpServer::finished);
+        QVERIFY(f.start());
+        QVERIFY(f.peer.send(request(1, QStringLiteral("server/discover"))));
+        // The reply waits, unread, in the client's buffer.
+        QVERIFY(spinUntil([&] {
+            int unread = 0;
+            return ::ioctl(f.peer.clientFd(), FIONREAD, &unread) == 0 && unread > 0;
+        }));
+        f.peer.closeClient();
+        QVERIFY(spinUntil([&] {
+            return finished.count() == 1;
+        }));
+        QCOMPARE(finished.first().first().value<McpServer::FinishReason>(), McpServer::FinishReason::EndOfInput);
+    }
+
+    void requirementNoClientCouldMeetIsRefused()
+    {
+        // A declared capability is an object, at every level, so a required
+        // one that holds anything else could never be met.
+        McpServer server;
+        QString error;
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("is not an object")));
+        QVERIFY(!server.addTool(
+            McpTool(QStringLiteral("t"))
+                .setRequiredClientCapabilities(QJsonObject{
+                    {QLatin1StringView("experimental"),
+                     QJsonObject{{QLatin1StringView("x"), QJsonObject{{QLatin1StringView("flag"), true}}}}}}),
+            answerAtOnce, &error));
+        QCOMPARE(error,
+                 QStringLiteral("requiredClientCapabilities/experimental/x/flag is not an object, and no client "
+                                "could declare it"));
+        // Objects all the way down are fine.
+        QVERIFY(server.addTool(
+            McpTool(QStringLiteral("u"))
+                .setRequiredClientCapabilities(QJsonObject{
+                    {QLatin1StringView("experimental"), QJsonObject{{QLatin1StringView("x"), QJsonObject()}}}}),
+            answerAtOnce, &error));
     }
 
     void outputClosedFinishes()

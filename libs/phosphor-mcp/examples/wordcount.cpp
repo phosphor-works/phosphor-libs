@@ -25,8 +25,8 @@ int main(int argc, char** argv)
 {
     // A client keeps the server's stderr as its log. Qt writes its messages
     // there only when the process has a terminal, which a server that a
-    // client starts has not, and otherwise to the systemd journal when Qt is
-    // built with it. So the example asks for stderr, before Qt writes
+    // client starts often has not, and otherwise to the systemd journal when
+    // Qt is built with it. So the example asks for stderr, before Qt writes
     // anything, unless the environment says otherwise.
     if (!qEnvironmentVariableIsSet("QT_FORCE_STDERR_LOGGING")) {
         qputenv("QT_FORCE_STDERR_LOGGING", QByteArrayView("1"));

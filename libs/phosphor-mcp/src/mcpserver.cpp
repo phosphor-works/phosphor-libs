@@ -17,6 +17,7 @@
 #include <QJsonParseError>
 #include <QLatin1StringView>
 #include <QMetaObject>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QTimer>
 
@@ -62,12 +63,15 @@ bool isServerMethod(const QString& method)
 
 // JSON-RPC ids are strings or numbers, and MCP rules out null. A number must
 // be an integer that a qint64 holds: echoed back, a larger one would come out
-// as another literal (2^63 as 9223372036854776000). Progress tokens follow
-// the same rule.
+// as another literal (2^63 as 9223372036854776000). A string must be valid
+// UTF-16: an unpaired surrogate goes out as U+FFFD (see
+// replaceLoneSurrogates), and the client could not match the reply.
+// Progress tokens follow the same rule.
 bool isValidId(const QJsonValue& id)
 {
     if (id.isString()) {
-        return true;
+        const QString text = id.toString();
+        return QStringView(text).isValidUtf16();
     }
     if (!id.isDouble()) {
         return false;
@@ -143,6 +147,24 @@ QString pointerToken(const QString& name)
     return token;
 }
 
+// The pointer of the first value in `required` that is not an object, or an
+// empty string. hasCapabilities() takes a declared capability only as an
+// object, so a requirement with any other value could never be met.
+QString capabilityThatIsNotAnObject(const QJsonObject& required, const QString& pointer)
+{
+    for (auto it = required.begin(); it != required.end(); ++it) {
+        const QString at = pointer + QLatin1Char('/') + pointerToken(it.key());
+        if (!it.value().isObject()) {
+            return at;
+        }
+        const QString inner = capabilityThatIsNotAnObject(it.value().toObject(), at);
+        if (!inner.isEmpty()) {
+            return inner;
+        }
+    }
+    return QString();
+}
+
 // Appends to `found` the places in `value` of the numbers that are not
 // finite, which JSON has no form for (Qt writes them as null), each as
 // "<pointer>: <what>" like McpSchema::validate().
@@ -170,6 +192,73 @@ void findNonFinite(const QJsonValue& value, const QString& pointer, QStringList&
             findNonFinite(it.value(), pointer + QLatin1Char('/') + pointerToken(it.key()), found);
         }
     }
+}
+
+// The text with each unpaired surrogate replaced by U+FFFD, as
+// replaceLoneSurrogates() does on the wire.
+QString withoutLoneSurrogates(const QString& text)
+{
+    QString clean;
+    clean.reserve(text.size());
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const QChar c = text.at(i);
+        if (c.isHighSurrogate() && i + 1 < text.size() && text.at(i + 1).isLowSurrogate()) {
+            clean += c;
+            clean += text.at(++i);
+        } else if (c.isSurrogate()) {
+            clean += QChar(QChar::ReplacementCharacter);
+        } else {
+            clean += c;
+        }
+    }
+    return clean;
+}
+
+bool hasLoneSurrogateKey(const QJsonValue& value)
+{
+    if (value.isArray()) {
+        const QJsonArray array = value.toArray();
+        for (const QJsonValue& element : array) {
+            if (hasLoneSurrogateKey(element)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (value.isObject()) {
+        const QJsonObject object = value.toObject();
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            const QString key = it.key();
+            if (!QStringView(key).isValidUtf16() || hasLoneSurrogateKey(it.value())) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Two keys that differ only in an unpaired surrogate would both go out as
+// the same key, and a line with a key twice is read differently by different
+// parsers. Their U+FFFD form is made here, in the object, so that the object
+// keeps one of them.
+QJsonValue withLoneSurrogateKeysReplaced(const QJsonValue& value)
+{
+    if (value.isArray()) {
+        QJsonArray array;
+        for (const QJsonValue& element : value.toArray()) {
+            array.append(withLoneSurrogateKeysReplaced(element));
+        }
+        return array;
+    }
+    if (value.isObject()) {
+        const QJsonObject source = value.toObject();
+        QJsonObject object;
+        for (auto it = source.begin(); it != source.end(); ++it) {
+            object.insert(withoutLoneSurrogates(it.key()), withLoneSurrogateKeysReplaced(it.value()));
+        }
+        return object;
+    }
+    return value;
 }
 
 bool isHexDigitFrom8(char c)
@@ -249,6 +338,15 @@ struct McpServer::Private
     bool ending = false;
     bool finishQueued = false;
     bool finished = false;
+    // From the start of ~McpServer: an unanswered call reads isCancelled().
+    bool destroying = false;
+    // While end() runs the cancel callbacks. An end that does not wait,
+    // coming from inside one of them (a signal or a closed output in a
+    // nested event loop), is kept here and posted after the last callback:
+    // finished() comes after every callback, and its slot may delete the
+    // server.
+    bool cancelling = false;
+    std::optional<FinishReason> cutShort;
     // While the replies drain after the end of the input: started again at
     // each write, so that it measures a client that reads nothing.
     QTimer* drainTimer = nullptr;
@@ -310,6 +408,7 @@ McpServer::~McpServer()
     // destructor looks its call up. The handlers go here too, while d is
     // whole, and not in d's own destruction after the table: a handler may
     // own an McpCall as well.
+    d->destroying = true;
     d->ending = true;
     d->finished = true;
     d->running.clear();
@@ -384,6 +483,11 @@ bool McpServer::addTool(const McpTool& tool, Handler handler, QString* error)
     }
     if (!handler) {
         return refuse(QStringLiteral("the handler is empty"));
+    }
+    const QString notAnObject = capabilityThatIsNotAnObject(tool.requiredClientCapabilities(), QString());
+    if (!notAnObject.isEmpty()) {
+        return refuse(QStringLiteral("requiredClientCapabilities%1 is not an object, and no client could declare it")
+                          .arg(notAnObject));
     }
     auto input = std::make_shared<McpSchema>();
     QString why = input->compile(tool.inputSchema());
@@ -471,8 +575,15 @@ bool McpServer::start(int readFd, int writeFd)
     connect(transport, &McpTransport::endOfInput, this, [this] {
         end(FinishReason::EndOfInput, true);
     });
-    // stdout may be fine: the replies already queued still go out.
+    // stdout may be fine: the replies already queued still go out. A client
+    // on a socket that closes with replies it did not read resets the
+    // connection, and the next read fails with ECONNRESET: that is the
+    // client's end, as on a pipe.
     connect(transport, &McpTransport::inputFailed, this, [this](int error) {
+        if (error == ECONNRESET) {
+            end(FinishReason::EndOfInput, true);
+            return;
+        }
         qCWarning(lcMcp).noquote() << "McpServer: reading the input failed:" << qt_error_string(error);
         end(FinishReason::InputFailed, true);
     });
@@ -558,8 +669,9 @@ void McpServer::onLine(const QByteArray& line)
         return;
     }
     if (!isValidId(id)) {
-        sendError(NoId, ErrorCode::InvalidRequest,
-                  QStringLiteral("Invalid Request: id must be a string or an integer of at most 64 bits"));
+        sendError(
+            NoId, ErrorCode::InvalidRequest,
+            QStringLiteral("Invalid Request: id must be a string of valid UTF-16 or an integer of at most 64 bits"));
         return;
     }
     if (name == MethodInitialize) {
@@ -652,8 +764,8 @@ bool McpServer::checkMeta(const QJsonValue& id, const QJsonObject& params)
     }
     if (metaObject.contains(MetaProgressToken) && !isValidId(metaObject.value(MetaProgressToken))) {
         sendError(id, ErrorCode::InvalidParams,
-                  QStringLiteral("Invalid params: params._meta.progressToken must be a string or an integer of at "
-                                 "most 64 bits"));
+                  QStringLiteral("Invalid params: params._meta.progressToken must be a string of valid UTF-16 or an "
+                                 "integer of at most 64 bits"));
         return false;
     }
     return true;
@@ -793,10 +905,13 @@ bool McpServer::sendMessage(const QJsonObject& message)
         return false;
     }
     // Compact JSON escapes every newline inside strings, so one message is
-    // one line.
-    QByteArray line = QJsonDocument(message).toJson(QJsonDocument::Compact);
+    // one line. Keys with an unpaired surrogate are rare (a tool's own JSON),
+    // so the object is only rebuilt when one is there.
+    QByteArray line = hasLoneSurrogateKey(message)
+        ? QJsonDocument(withLoneSurrogateKeysReplaced(message).toObject()).toJson(QJsonDocument::Compact)
+        : QJsonDocument(message).toJson(QJsonDocument::Compact);
     replaceLoneSurrogates(line);
-    return d->transport->writeLine(line);
+    return d->transport->writeLine(std::move(line));
 }
 
 void McpServer::end(FinishReason reason, bool drain)
@@ -808,7 +923,13 @@ void McpServer::end(FinishReason reason, bool drain)
         // An end that does not wait (a signal, the output gone) cuts short
         // the wait for the replies to drain.
         if (!drain) {
-            finishSoon(reason);
+            if (d->cancelling) {
+                if (!d->cutShort) {
+                    d->cutShort = reason;
+                }
+            } else {
+                finishSoon(reason);
+            }
         }
         return;
     }
@@ -826,11 +947,21 @@ void McpServer::end(FinishReason reason, bool drain)
     for (const quint64 token : tokens) {
         cancelCall(token);
     }
+    const QPointer<McpServer> self(this);
+    d->cancelling = true;
     for (const quint64 token : tokens) {
         runCancelCallback(token);
+        if (!self) {
+            return;
+        }
     }
-    // A callback that runs a nested event loop may have seen the end come
-    // another way already.
+    d->cancelling = false;
+    // An end that does not wait came from inside a callback, in a nested
+    // event loop. It decides the reason, and nothing waits for the replies.
+    if (d->cutShort) {
+        finishSoon(*d->cutShort);
+        return;
+    }
     if (d->finished || d->finishQueued) {
         return;
     }
@@ -935,7 +1066,12 @@ bool McpServer::callIsValid(quint64 token) const
 bool McpServer::callIsCancelled(quint64 token) const
 {
     const auto it = d->calls.constFind(token);
-    return it != d->calls.constEnd() && it->cancelled;
+    if (it == d->calls.constEnd()) {
+        // While the server is destroyed its table is gone, and a call that
+        // still holds a token was never answered (an answer drops it).
+        return d->destroying;
+    }
+    return it->cancelled;
 }
 
 bool McpServer::finishCall(quint64 token, const McpResult& result)
@@ -997,8 +1133,8 @@ bool McpServer::progressCall(quint64 token, double progress, std::optional<doubl
         return false;
     }
     if (it->lastProgress && progress <= *it->lastProgress) {
-        qCWarning(lcMcp) << "McpServer: progress of tool" << d->tools.at(it->tool).tool.name() << "refused:" << progress
-                         << "after" << *it->lastProgress << "does not grow, and progress must grow";
+        qCWarning(lcMcp) << "McpServer: progress of tool" << d->tools.at(it->tool).tool.name() << "is refused, as"
+                         << progress << "does not grow past" << *it->lastProgress;
         return false;
     }
     // Progress is a hint. While the client leaves more than the high-water
@@ -1035,7 +1171,12 @@ void McpServer::setCancelCallback(quint64 token, std::function<void()> callback)
         return;
     }
     if (it->cancelled) {
+        // The call's first callback may not have run yet, when end() is on
+        // its way to it. The new one replaces it, and runs now: one callback
+        // per call. The replaced one goes after, since it may own calls.
+        const std::function<void()> replaced = std::exchange(it->onCancelled, nullptr);
         callback();
+        Q_UNUSED(replaced)
         return;
     }
     // Exchanged, not assigned over: the callback it replaces may own calls,

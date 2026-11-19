@@ -51,7 +51,8 @@ class McpTransport;
 // go to the logging category "phosphormcp", which Qt writes to stderr when
 // the process has a terminal or QT_FORCE_STDERR_LOGGING=1 is set, and
 // otherwise to the systemd journal when Qt is built with it. A server that
-// an MCP client starts has no terminal (see the README, "Wire protocol").
+// an MCP client starts often has no terminal (see the README, "Wire
+// protocol").
 //
 // Single-threaded: use it on the thread that owns it. Never destroy it from
 // inside a handler or a cancel callback, but deleteLater() is fine. A
@@ -134,8 +135,9 @@ public:
     // the reason in `error` and a warning, for a name that is not 1 to 128
     // of [A-Za-z0-9_.-] or that another tool has, for a schema that the
     // server cannot check arguments against (see the README, "Schemas"), for
-    // a handler that is empty, and after start(), since the list stays the
-    // same for the life of the server.
+    // required client capabilities that hold anything but objects (no client
+    // could declare them), for a handler that is empty, and after start(),
+    // since the list stays the same for the life of the server.
     bool addTool(const McpTool& tool, Handler handler, QString* error = nullptr);
     // The tools added, in the order tools/list shows them.
     [[nodiscard]] QList<McpTool> tools() const;
@@ -158,6 +160,11 @@ public:
     // SIGPIPE is left alone, here and everywhere in the library: an ignored
     // SIGPIPE survives exec, and the programs the application starts would
     // inherit it. The transport keeps a closed stdout from raising it.
+    //
+    // The handler belongs to the process that called this. A child forked
+    // after it, before an exec, takes the old dispositions. So a process
+    // that forks to keep the server running in the child (a daemon) calls
+    // this in the child, after the fork.
     bool handleTerminationSignals();
 
     // Reads requests on stdin and writes replies on stdout. A server with no
@@ -165,8 +172,9 @@ public:
     [[nodiscard]] bool start();
     // The same on other descriptors, which stay the caller's. One
     // descriptor may do both. False, with a warning, when the server was
-    // started before, when it ended before it started (a signal), and when
-    // the transport does not open. finished() never comes then.
+    // started before, when it ended before it started (a signal, whose
+    // finished() came already), and when the transport does not open. In
+    // the last case finished() never comes.
     [[nodiscard]] bool start(int readFd, int writeFd);
     // True from start() until the server ends, which is before finished()
     // when replies still drain.

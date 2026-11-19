@@ -58,26 +58,34 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # reaches the public ABI.
 #
 # phosphor-fsloader takes the same valijson, and a packager who switches it to
-# the system's headers means the tree's valijson. So this option defaults to
-# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON whenever that is set (on the command
-# line it is, whichever library configures first), and both look for the
-# headers through one cache variable, VALIJSON_INCLUDE_DIR.
-if(DEFINED PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-    set(_phosphormcp_system_valijson_default ${PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON})
+# the system's headers means the tree's valijson. So AUTO, the default,
+# follows PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, and is resolved again at each
+# configure: an option() would keep the first value in the cache, and a later
+# switch of phosphor-fsloader alone would leave the two libraries on two
+# different copies. ON and OFF choose for this library only. Both libraries
+# look for the headers through one cache variable, VALIJSON_INCLUDE_DIR.
+set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING
+    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
+set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
+if(PHOSPHORMCP_USE_SYSTEM_VALIJSON STREQUAL "AUTO")
+    if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
+        set(_phosphormcp_system_valijson ON)
+    else()
+        set(_phosphormcp_system_valijson OFF)
+    endif()
+elseif(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+    set(_phosphormcp_system_valijson ON)
 else()
-    set(_phosphormcp_system_valijson_default OFF)
+    set(_phosphormcp_system_valijson OFF)
 endif()
-option(PHOSPHORMCP_USE_SYSTEM_VALIJSON
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins (default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)"
-    ${_phosphormcp_system_valijson_default})
 
-if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+if(_phosphormcp_system_valijson)
     find_path(VALIJSON_INCLUDE_DIR
         NAMES valijson/validator.hpp
         DOC "Directory containing valijson/validator.hpp")
     if(NOT VALIJSON_INCLUDE_DIR)
         message(FATAL_ERROR
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON is ON (its default is PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON), but "
+            "PHOSPHORMCP_USE_SYSTEM_VALIJSON is ${PHOSPHORMCP_USE_SYSTEM_VALIJSON} (AUTO follows PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON), but "
             "valijson/validator.hpp was not found. Install valijson's headers and point VALIJSON_INCLUDE_DIR at "
             "them, or set PHOSPHORMCP_USE_SYSTEM_VALIJSON and PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON to OFF to "
             "use the pinned archive.")
@@ -244,7 +252,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcp/phosphormcp_export.h
 # valijson is BSD-2-Clause, and with the pinned archive its headers are
 # compiled into this library, so its notice ships with it. The same file, at
 # the same path, as phosphor-fsloader installs.
-if(NOT PHOSPHORMCP_USE_SYSTEM_VALIJSON)
+if(NOT _phosphormcp_system_valijson)
     set(_phosphormcp_valijson_license "${_phosphormcp_valijson_root}/LICENSE")
     if(EXISTS "${_phosphormcp_valijson_license}")
         install(FILES ${_phosphormcp_valijson_license}
@@ -280,11 +288,13 @@ install(FILES
 # Example and tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ON when this tree is the outermost project (phosphor-libs on its own, or
-# this library standalone), and when the tests are built, whose smoke test
-# runs it. OFF inside an app that adds the tree without tests. Never
-# installed: it is source for authors of other servers.
-if(PROJECT_IS_TOP_LEVEL OR BUILD_TESTING)
+# ON when phosphor-libs is the outermost project, when this library is
+# configured on its own, and when the tests are built, whose smoke test runs
+# it. OFF inside an app that adds the tree or this library without tests:
+# PROJECT_IS_TOP_LEVEL would be the app's there, when the app adds this
+# directory itself. Never installed: it is source for authors of other
+# servers.
+if(PHOSPHOR_LIBS_TOP_LEVEL OR CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR OR BUILD_TESTING)
     set(_phosphormcp_examples_default ON)
 else()
     set(_phosphormcp_examples_default OFF)

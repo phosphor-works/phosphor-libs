@@ -47,9 +47,15 @@ public:
     // A value that valijson would read differently from a handler is
     // refused before valijson sees it. That is a string or member name with
     // an unpaired UTF-16 surrogate, or an integral number outside the range
-    // of qint64. The list is short whatever the size of `value`, with at
-    // most ten errors and a last line that counts the rest. A value too
-    // large to list its errors cheaply gets one line that says so.
+    // of qint64 as Qt's JSON parser left it. The parser rounds a number
+    // outside qint64, and one written with a fraction or an exponent, to the
+    // nearest double. So -9223372036854775809, down to -9223372036854776832,
+    // passes as -9223372036854775808, which the handler reads too, and
+    // 9223372036854775807.0 is refused as 2^63.
+    //
+    // The list is short whatever the size of `value`, with at most ten
+    // errors and a last line that counts the rest. A value too large to list
+    // its errors cheaply gets one line that says so.
     [[nodiscard]] QStringList validate(const QJsonValue& value) const;
 
 private:

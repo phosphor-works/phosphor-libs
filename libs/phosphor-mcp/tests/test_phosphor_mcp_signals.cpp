@@ -22,17 +22,21 @@
 #include <PhosphorMcp/McpTransport.h>
 
 #include <QElapsedTimer>
+#include <QEventLoop>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTest>
 #include <QThread>
+#include <QTimer>
 
 #include <atomic>
 #include <csignal>
 #include <ctime>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -195,8 +199,10 @@ private Q_SLOTS:
             return server.transport() && server.transport()->pendingWriteBytes() > 0;
         }));
         peer.closeWrite();
-        spinFor(100);
-        QVERIFY(!server.isRunning());
+        QVERIFY(spinUntil([&] {
+            return !server.isRunning();
+        }));
+        // The reply still drains: nobody reads it.
         QCOMPARE(finished.count(), 0);
 
         QVERIFY(hasServerHandler(SIGTERM));
@@ -212,6 +218,56 @@ private Q_SLOTS:
         // An ended server does not take the signals again.
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("the server has ended")));
         QVERIFY(!server.handleTerminationSignals());
+        QVERIFY(restored());
+    }
+
+    void signalInsideACancelCallbackWaitsForTheOtherCallbacks()
+    {
+        // At the end of the input the server runs the cancel callbacks. Each
+        // here runs a nested event loop, and SIGTERM comes inside it. The
+        // signal decides the reason, but finished() still comes after every
+        // callback, and its slot may delete the server.
+        Peer peer;
+        auto* server = new McpServer;
+        const QPointer<McpServer> alive(server);
+        std::vector<McpCall> calls;
+        QVERIFY(server->addTool(McpTool(QStringLiteral("hold")), [&calls](McpCall call) {
+            calls.push_back(std::move(call));
+        }));
+        QVERIFY(server->handleTerminationSignals());
+        QVERIFY(server->start(peer.serverFd(), peer.serverFd()));
+        QVERIFY(peer.send(callRequest(1, QStringLiteral("hold"))));
+        QVERIFY(peer.send(callRequest(2, QStringLiteral("hold"))));
+        QVERIFY(spinUntil([&] {
+            return calls.size() == 2;
+        }));
+        QVERIFY(hasServerHandler(SIGTERM));
+        int callbacksRun = 0;
+        int callbacksBeforeFinished = -1;
+        std::optional<McpServer::FinishReason> reason;
+        for (McpCall& call : calls) {
+            call.onCancelled([&callbacksRun] {
+                ++callbacksRun;
+                QEventLoop loop;
+                QTimer::singleShot(0, [] {
+                    ::kill(::getpid(), SIGTERM);
+                });
+                QTimer::singleShot(200, &loop, &QEventLoop::quit);
+                loop.exec();
+            });
+        }
+        connect(server, &McpServer::finished, server, [&, server](McpServer::FinishReason finishReason) {
+            reason = finishReason;
+            callbacksBeforeFinished = callbacksRun;
+            server->deleteLater();
+        });
+        peer.closeWrite();
+        QVERIFY(spinUntil([&] {
+            return alive.isNull();
+        }));
+        QCOMPARE(callbacksBeforeFinished, 2);
+        QVERIFY(reason.has_value());
+        QCOMPARE(*reason, McpServer::FinishReason::Terminated);
         QVERIFY(restored());
     }
 

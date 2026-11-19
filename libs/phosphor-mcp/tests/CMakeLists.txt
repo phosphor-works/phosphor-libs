@@ -22,6 +22,11 @@ function(phosphormcp_add_test name)
             PhosphorMcp::PhosphorMcp
             Qt6::Test
     )
+    # A unity build wraps even a single source in a generated file that
+    # includes it. The test is then not GCC's main file, and its
+    # anonymous-namespace fixtures captured in lambdas trip
+    # -Wsubobject-linkage, as phosphor-control's tests avoid the same way.
+    set_target_properties(${name} PROPERTIES UNITY_BUILD OFF)
     add_test(NAME ${name} COMMAND ${name} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
     phosphor_apply_test_isolation(${name})
     # QTEST_GUILESS_MAIN everywhere: a QCoreApplication, no display. The

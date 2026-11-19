@@ -18,6 +18,7 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -175,6 +176,38 @@ bool McpTransport::open()
     return true;
 }
 
+int McpTransport::reopenTerminal() const
+{
+    // A pty master opened again through /proc is /dev/ptmx, which hands out
+    // a new pty pair: replies would go to a terminal that nobody reads. Only
+    // a master answers TIOCGPTN.
+    unsigned int ptyNumber = 0;
+    if (::ioctl(m_writeFd, TIOCGPTN, &ptyNumber) == 0) {
+        qCWarning(lcMcp).nospace() << "McpTransport::open: the write descriptor " << m_writeFd
+                                   << " is a pty master, so it is made non-blocking, and the flag comes back at close";
+        return -1;
+    }
+    const QByteArray path = "/proc/self/fd/" + QByteArray::number(m_writeFd);
+    const int fd = ::open(path.constData(), O_WRONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+        qCWarning(lcMcp).nospace() << "McpTransport::open: cannot open the terminal " << m_writeFd << " again ("
+                                   << strerror(errno)
+                                   << "), so its shared description is made non-blocking until the transport closes";
+        return -1;
+    }
+    // Any other device that hands out a new one on open is caught here.
+    struct stat inherited = {};
+    struct stat reopened = {};
+    if (::fstat(m_writeFd, &inherited) != 0 || ::fstat(fd, &reopened) != 0 || inherited.st_rdev != reopened.st_rdev) {
+        ::close(fd);
+        qCWarning(lcMcp).nospace() << "McpTransport::open: the terminal " << m_writeFd
+                                   << " opens as another device, so its shared description is made non-blocking"
+                                   << " until the transport closes";
+        return -1;
+    }
+    return fd;
+}
+
 bool McpTransport::openOutput()
 {
     // send() takes MSG_DONTWAIT, so the socket's flags never change.
@@ -185,18 +218,17 @@ bool McpTransport::openOutput()
     // A terminal's file description is shared with the shell that started
     // the program and with stdin and stderr. O_NONBLOCK there would stay
     // after the program is killed, and break the shell's next reads. A
-    // description of the transport's own leaves it alone.
+    // description of the transport's own leaves it alone. When the terminal
+    // cannot be opened again, the shared description is made non-blocking
+    // as for a pipe, and close() puts the flag back: the inherited
+    // descriptor still writes, so the server still runs.
     if (::isatty(m_writeFd)) {
-        const QByteArray path = "/proc/self/fd/" + QByteArray::number(m_writeFd);
-        const int fd = ::open(path.constData(), O_WRONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) {
-            qCWarning(lcMcp).nospace() << "McpTransport::open: cannot open the terminal " << m_writeFd
-                                       << " again for writes that do not block (" << strerror(errno) << ")";
-            return false;
+        const int fd = reopenTerminal();
+        if (fd >= 0) {
+            m_outputFd = fd;
+            m_ownsOutputFd = true;
+            return true;
         }
-        m_outputFd = fd;
-        m_ownsOutputFd = true;
-        return true;
     }
     const int flags = ::fcntl(m_writeFd, F_GETFL);
     if (flags < 0 || ((flags & O_NONBLOCK) == 0 && ::fcntl(m_writeFd, F_SETFL, flags | O_NONBLOCK) < 0)) {

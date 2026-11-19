@@ -27,6 +27,7 @@
 #include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 using namespace PhosphorMcp;
@@ -930,6 +931,87 @@ private Q_SLOTS:
         }
         QCOMPARE(::fcntl(terminal, F_GETFL), before);
         QCOMPARE(openDescriptorCount(), descriptors);
+    }
+
+    void ptyMasterIsWrittenAsAPipe()
+    {
+        // Opened again through /proc, a pty master is /dev/ptmx, which hands
+        // out a new pty pair that nobody reads. The transport writes the
+        // master itself, non-blocking until it closes.
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+        if (master < 0 || ::grantpt(master) != 0 || ::unlockpt(master) != 0) {
+            if (master >= 0) {
+                ::close(master);
+            }
+            QSKIP("no pseudo-terminal here");
+        }
+        const auto closeMaster = qScopeGuard([master] {
+            ::close(master);
+        });
+        const int terminal = ::open(::ptsname(master), O_RDWR | O_NOCTTY | O_CLOEXEC);
+        QVERIFY(terminal >= 0);
+        const auto closeTerminal = qScopeGuard([terminal] {
+            ::close(terminal);
+        });
+        const int before = ::fcntl(master, F_GETFL);
+        QCOMPARE(before & O_NONBLOCK, 0);
+        {
+            McpTransport transport(master, master);
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("is a pty master")));
+            QVERIFY(transport.open());
+            QCOMPARE(::fcntl(master, F_GETFL), before | O_NONBLOCK);
+            QVERIFY(transport.writeLine("hello"));
+            pollfd ready{terminal, POLLIN, 0};
+            QCOMPARE(::poll(&ready, 1, 5000), 1);
+            char buffer[64];
+            const ssize_t got = ::read(terminal, buffer, sizeof buffer);
+            QVERIFY(QByteArray(buffer, int(qMax<ssize_t>(got, 0))).startsWith("hello"));
+        }
+        QCOMPARE(::fcntl(master, F_GETFL), before);
+    }
+
+    void terminalThatCannotBeOpenedAgainIsWrittenAsAPipe()
+    {
+        // A terminal that another user owns cannot be opened again, but the
+        // inherited descriptor still writes. The server runs, writing the
+        // shared description non-blocking until it closes.
+        if (::geteuid() == 0) {
+            QSKIP("root opens a terminal whatever its mode");
+        }
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+        if (master < 0 || ::grantpt(master) != 0 || ::unlockpt(master) != 0) {
+            if (master >= 0) {
+                ::close(master);
+            }
+            QSKIP("no pseudo-terminal here");
+        }
+        const auto closeMaster = qScopeGuard([master] {
+            ::close(master);
+        });
+        const int terminal = ::open(::ptsname(master), O_RDWR | O_NOCTTY | O_CLOEXEC);
+        QVERIFY(terminal >= 0);
+        struct stat mode = {};
+        QCOMPARE(::fstat(terminal, &mode), 0);
+        QCOMPARE(::fchmod(terminal, 0), 0);
+        const auto restore = qScopeGuard([terminal, mode] {
+            ::fchmod(terminal, mode.st_mode & 07777);
+            ::close(terminal);
+        });
+        const int before = ::fcntl(terminal, F_GETFL);
+        QCOMPARE(before & O_NONBLOCK, 0);
+        {
+            McpTransport transport(terminal, terminal);
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("cannot open the terminal")));
+            QVERIFY(transport.open());
+            QCOMPARE(::fcntl(terminal, F_GETFL), before | O_NONBLOCK);
+            QVERIFY(transport.writeLine("hello"));
+            pollfd ready{master, POLLIN, 0};
+            QCOMPARE(::poll(&ready, 1, 5000), 1);
+            char buffer[64];
+            const ssize_t got = ::read(master, buffer, sizeof buffer);
+            QVERIFY(QByteArray(buffer, int(qMax<ssize_t>(got, 0))).startsWith("hello"));
+        }
+        QCOMPARE(::fcntl(terminal, F_GETFL), before);
     }
 
     void refusesAClosedDescriptor()

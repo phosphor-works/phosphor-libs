@@ -3,6 +3,7 @@
 
 #include "mcpschema.h"
 
+#include <QHash>
 #include <QJsonArray>
 #include <QLatin1StringView>
 #include <QList>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -191,6 +193,33 @@ QString shownPointer(const QStringList& names)
     return pointer;
 }
 
+// The JSON pointer of `names`, whole.
+QString fullPointer(const QStringList& names)
+{
+    QString pointer;
+    for (const QString& name : names) {
+        pointer += QLatin1Char('/') + pointerToken(name);
+    }
+    return pointer;
+}
+
+// The object at `names` below `value`, reached through objects only. A
+// name steps into an object's member and never into an array's item, as
+// "properties" does.
+std::optional<QJsonObject> objectAt(QJsonValue value, const QStringList& names)
+{
+    for (const QString& name : names) {
+        if (!value.isObject()) {
+            return std::nullopt;
+        }
+        value = value.toObject().value(name);
+    }
+    if (!value.isObject()) {
+        return std::nullopt;
+    }
+    return value.toObject();
+}
+
 // The value at `names` below `value`, or Undefined.
 QJsonValue valueAt(QJsonValue value, const QStringList& names)
 {
@@ -233,6 +262,14 @@ bool isInexactNumber(const QJsonValue& value)
 
 // An integral number that does not fit qint64. valijson takes 2^63 for an
 // integer while QJsonValue::toInteger() gives a handler 0 for it.
+//
+// This sees the number as Qt's JSON parser left it, which is not always as
+// it was written. The parser reads a number that is not an integer literal
+// within qint64 as the nearest double, and keeps a double that is integral
+// and fits qint64 as that integer. So -9223372036854775809, down to
+// -9223372036854776832, arrives as -9223372036854775808 and passes, the
+// value the handler reads too. And 9223372036854775807.0 arrives as 2^63
+// and is refused. Neither can be told apart here from what was written.
 bool isOutsideInt64(const QJsonValue& value)
 {
     const double number = value.toDouble();
@@ -516,14 +553,22 @@ QString checkSchema(const QJsonValue& schema, const QString& path, bool fixedLoc
 class Report
 {
 public:
-    // A line that may repeat one before it.
-    void add(const QString& line)
+    // "<pointer>: <description>" for the place at `names`, unless it was
+    // added before. The test is on the whole names, not on the line, which
+    // cuts them: two long names alike in their first 61 code units are two
+    // errors.
+    void add(const QStringList& names, const QString& description)
     {
-        if (m_seen.contains(line)) {
+        const QString key = fullPointer(names) + QLatin1StringView(": ") + description;
+        if (m_seen.contains(key)) {
             return;
         }
-        m_seen.insert(line);
-        addDistinct(line);
+        m_seen.insert(key);
+        if (isFull()) {
+            countDistinct();
+        } else {
+            addDistinct(shownPointer(names) + QLatin1StringView(": ") + description);
+        }
     }
     // A line that differs from every other.
     void addDistinct(const QString& line)
@@ -662,41 +707,6 @@ private:
     qsizetype m_pointerLength = 0;
 };
 
-// The schemas below `schema` that apply to the instance at `names`, as
-// valijson walks them: through properties, additionalProperties and items,
-// and into every branch of allOf, anyOf and oneOf. Not into not, whose
-// failures valijson reports as one.
-void applicableSchemas(const QJsonValue& schema, const QJsonValue& instance, const QStringList& names, qsizetype index,
-                       QList<QJsonObject>& out)
-{
-    if (!schema.isObject()) {
-        return;
-    }
-    const QJsonObject node = schema.toObject();
-    for (const QLatin1StringView combinator :
-         {QLatin1StringView("allOf"), QLatin1StringView("anyOf"), QLatin1StringView("oneOf")}) {
-        for (const QJsonValue& branch : node.value(combinator).toArray()) {
-            applicableSchemas(branch, instance, names, index, out);
-        }
-    }
-    if (index == names.size()) {
-        out.append(node);
-        return;
-    }
-    const QString& name = names.at(index);
-    if (instance.isObject()) {
-        const QJsonValue child = instance.toObject().value(name);
-        const QJsonObject properties = node.value(QLatin1StringView("properties")).toObject();
-        if (properties.contains(name)) {
-            applicableSchemas(properties.value(name), child, names, index + 1, out);
-        } else {
-            applicableSchemas(node.value(QLatin1StringView("additionalProperties")), child, names, index + 1, out);
-        }
-    } else if (instance.isArray()) {
-        applicableSchemas(node.value(QLatin1StringView("items")), valueAt(instance, {name}), names, index + 1, out);
-    }
-}
-
 bool typeAccepts(const QString& type, const QJsonValue& value)
 {
     if (type == QLatin1StringView("integer")) {
@@ -766,15 +776,34 @@ struct McpSchema::Private
         std::unique_ptr<McpSchema> names;
     };
 
+    // What one collect() works out once for all the errors it describes.
+    struct Collection
+    {
+        // The value that collect() checks.
+        const QJsonValue& value;
+        // The places where a wrapper adds nothing (see collect()).
+        QSet<QString> covered;
+        // Whether every branch of an anyOf or oneOf fails at a place, by
+        // "<the combinator's pointer in source> <the place's pointer>".
+        QHash<QString, bool> combinatorFailed;
+    };
+
     QString takePropertyNames(QJsonObject& node, const QStringList& location);
+    void compileBranches(const QJsonValue& node, const QString& path);
     bool matches(const QJsonValue& value) const;
+    bool branchMatches(const QJsonValue& branch, const QString& path, const QJsonValue& instance) const;
     void collect(const QJsonValue& value, Report& report) const;
-    void describe(const valijson::ValidationResults::Error& error, const QJsonValue& value,
-                  const QSet<QString>& covered, Report& report) const;
+    void applicableSchemas(const QJsonValue& schema, const QString& schemaPath, const QJsonValue& instance,
+                           const QStringList& names, qsizetype index, Collection& collection,
+                           QList<QJsonObject>& out) const;
+    void describe(const valijson::ValidationResults::Error& error, Collection& collection, Report& report) const;
 
     // The schema that valijson compiled, without propertyNames.
     QJsonObject source;
     valijson::Schema schema;
+    // Each branch of an anyOf or oneOf in `source` that is an object, compiled
+    // alone, by its pointer in `source` ("/properties/v/anyOf/1").
+    std::map<QString, std::unique_ptr<valijson::Schema>> branches;
     mutable valijson::Validator validator;
     std::vector<NameRule> nameRules;
     bool compiled = false;
@@ -812,6 +841,36 @@ QString McpSchema::Private::takePropertyNames(QJsonObject& node, const QStringLi
     return QString();
 }
 
+void McpSchema::Private::compileBranches(const QJsonValue& node, const QString& path)
+{
+    if (!node.isObject()) {
+        return;
+    }
+    const QJsonObject object = node.toObject();
+    const QJsonObject properties = object.value(QLatin1StringView("properties")).toObject();
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        compileBranches(it.value(), path + QLatin1StringView("/properties/") + pointerToken(it.key()));
+    }
+    compileBranches(object.value(QLatin1StringView("additionalProperties")),
+                    path + QLatin1StringView("/additionalProperties"));
+    compileBranches(object.value(QLatin1StringView("items")), path + QLatin1StringView("/items"));
+    for (const QLatin1StringView combinator :
+         {QLatin1StringView("allOf"), QLatin1StringView("anyOf"), QLatin1StringView("oneOf")}) {
+        const QJsonArray array = object.value(combinator).toArray();
+        for (qsizetype i = 0; i < array.size(); ++i) {
+            const QString at = path + QLatin1Char('/') + combinator + QLatin1Char('/') + QString::number(i);
+            if (combinator != QLatin1StringView("allOf") && array.at(i).isObject()) {
+                auto branch = std::make_unique<valijson::Schema>();
+                const valijson::adapters::QtJsonAdapter adapter(array.at(i));
+                valijson::SchemaParser parser(valijson::SchemaParser::kDraft7);
+                parser.populateSchema(adapter, *branch);
+                branches[at] = std::move(branch);
+            }
+            compileBranches(array.at(i), at);
+        }
+    }
+}
+
 bool McpSchema::Private::matches(const QJsonValue& value) const
 {
     // No results: valijson stops at the first failure and keeps nothing.
@@ -820,12 +879,11 @@ bool McpSchema::Private::matches(const QJsonValue& value) const
         return false;
     }
     for (const NameRule& rule : nameRules) {
-        const QJsonValue object = valueAt(value, rule.location);
-        if (!object.isObject()) {
+        const std::optional<QJsonObject> members = objectAt(value, rule.location);
+        if (!members) {
             continue;
         }
-        const QJsonObject members = object.toObject();
-        for (auto it = members.begin(); it != members.end(); ++it) {
+        for (auto it = members->begin(); it != members->end(); ++it) {
             if (!rule.names || !rule.names->d->matches(QJsonValue(it.key()))) {
                 return false;
             }
@@ -834,42 +892,66 @@ bool McpSchema::Private::matches(const QJsonValue& value) const
     return true;
 }
 
+bool McpSchema::Private::branchMatches(const QJsonValue& branch, const QString& path, const QJsonValue& instance) const
+{
+    if (branch.isBool()) {
+        return branch.toBool();
+    }
+    // compileBranches compiled every branch that this is asked about: it
+    // walks the same keywords as applicableSchemas.
+    const auto found = branches.find(path);
+    if (found == branches.end()) {
+        return false;
+    }
+    const valijson::adapters::QtJsonAdapter adapter(instance);
+    return validator.validate(*found->second, adapter, nullptr);
+}
+
 void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
 {
     valijson::ValidationResults results;
     const valijson::adapters::QtJsonAdapter adapter(value);
     validator.validate(schema, adapter, &results);
 
-    // The places that an error other than a wrapper is at or below: a
-    // wrapper about one of them adds nothing.
-    QSet<QString> covered;
-    for (const valijson::ValidationResults::Error& error : results) {
-        QString pointer = QString::fromStdString(error.jsonPointer);
-        if (wrapperSubject(error.description, pointer)) {
-            continue;
-        }
-        while (!covered.contains(pointer)) {
-            covered.insert(pointer);
+    // A wrapper about a place adds nothing when a deeper error is listed.
+    // That is an error other than a wrapper, at the place or below it, or
+    // another wrapper about a place below it. So the covered places are
+    // those of the errors other than wrappers, those above the place of each
+    // wrapper, and all their ancestors.
+    Collection collection{value, {}, {}};
+    const auto cover = [&](QString pointer) {
+        // Each place in the set has its ancestors in it.
+        while (!collection.covered.contains(pointer)) {
+            collection.covered.insert(pointer);
             if (pointer.isEmpty()) {
                 break;
             }
             pointer.truncate(pointer.lastIndexOf(QLatin1Char('/')));
         }
+    };
+    for (const valijson::ValidationResults::Error& error : results) {
+        const QString pointer = QString::fromStdString(error.jsonPointer);
+        if (const std::optional<QString> subject = wrapperSubject(error.description, pointer)) {
+            if (!subject->isEmpty()) {
+                cover(subject->left(subject->lastIndexOf(QLatin1Char('/'))));
+            }
+        } else {
+            cover(pointer);
+        }
     }
     for (const valijson::ValidationResults::Error& error : results) {
-        describe(error, value, covered, report);
+        describe(error, collection, report);
     }
 
     for (const NameRule& rule : nameRules) {
-        const QJsonValue object = valueAt(value, rule.location);
-        if (!object.isObject()) {
+        const std::optional<QJsonObject> members = objectAt(value, rule.location);
+        if (!members) {
             continue;
         }
-        const QJsonObject members = object.toObject();
-        for (auto it = members.begin(); it != members.end(); ++it) {
-            const QString at = shownPointer(rule.location + QStringList{it.key()});
+        for (auto it = members->begin(); it != members->end(); ++it) {
+            const QStringList names = rule.location + QStringList{it.key()};
             if (!rule.names) {
-                report.add(at + QStringLiteral(": is not allowed, because the schema allows no property here"));
+                report.add(names, QStringLiteral("is not allowed, because the schema allows no property here"));
                 continue;
             }
             const QJsonValue name(it.key());
@@ -879,11 +961,11 @@ void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
             Report nameReport;
             rule.names->d->collect(name, nameReport);
             if (nameReport.isEmpty()) {
-                report.add(at + QStringLiteral(": the property name does not match propertyNames"));
+                report.add(names, QStringLiteral("the property name does not match propertyNames"));
             }
             for (const QString& line : nameReport.lines()) {
                 // The name is the root of its own check: ": <description>".
-                report.add(at + QStringLiteral(": the property name ") + line.mid(2));
+                report.add(names, QStringLiteral("the property name ") + line.mid(2));
             }
             // Each differs from every line before: it has this name in it.
             for (qsizetype i = 0; i < nameReport.unlisted(); ++i) {
@@ -893,27 +975,91 @@ void McpSchema::Private::collect(const QJsonValue& value, Report& report) const
     }
 }
 
-void McpSchema::Private::describe(const valijson::ValidationResults::Error& error, const QJsonValue& value,
-                                  const QSet<QString>& covered, Report& report) const
+// The schemas below `schema`, at `schemaPath` in `source`, that apply to the
+// instance at `names` and whose own failures valijson reports. `instance` is
+// the value at the first `index` of `names`. valijson walks through
+// properties, additionalProperties and items, and into every branch of
+// allOf. It keeps what the branches of an anyOf or a oneOf report only when
+// none of them matches, so the walk goes into them only then. A branch that
+// failed beside one that matched is no reason for the value to fail. Not
+// into not, whose failure valijson reports as one.
+void McpSchema::Private::applicableSchemas(const QJsonValue& schema, const QString& schemaPath,
+                                           const QJsonValue& instance, const QStringList& names, qsizetype index,
+                                           Collection& collection, QList<QJsonObject>& out) const
+{
+    if (!schema.isObject()) {
+        return;
+    }
+    const QJsonObject node = schema.toObject();
+    for (const QLatin1StringView combinator :
+         {QLatin1StringView("allOf"), QLatin1StringView("anyOf"), QLatin1StringView("oneOf")}) {
+        const QJsonArray array = node.value(combinator).toArray();
+        if (array.isEmpty()) {
+            continue;
+        }
+        const QString at = schemaPath + QLatin1Char('/') + combinator;
+        if (combinator != QLatin1StringView("allOf")) {
+            const QString key = at + QLatin1Char(' ') + fullPointer(names.first(index));
+            auto failed = collection.combinatorFailed.constFind(key);
+            if (failed == collection.combinatorFailed.cend()) {
+                bool none = true;
+                for (qsizetype i = 0; i < array.size() && none; ++i) {
+                    none = !branchMatches(array.at(i), at + QLatin1Char('/') + QString::number(i), instance);
+                }
+                failed = collection.combinatorFailed.insert(key, none);
+            }
+            if (!*failed) {
+                continue;
+            }
+        }
+        for (qsizetype i = 0; i < array.size(); ++i) {
+            applicableSchemas(array.at(i), at + QLatin1Char('/') + QString::number(i), instance, names, index,
+                              collection, out);
+        }
+    }
+    if (index == names.size()) {
+        out.append(node);
+        return;
+    }
+    const QString& name = names.at(index);
+    if (instance.isObject()) {
+        const QJsonValue child = instance.toObject().value(name);
+        const QJsonObject properties = node.value(QLatin1StringView("properties")).toObject();
+        if (properties.contains(name)) {
+            applicableSchemas(properties.value(name),
+                              schemaPath + QLatin1StringView("/properties/") + pointerToken(name), child, names,
+                              index + 1, collection, out);
+        } else {
+            applicableSchemas(node.value(QLatin1StringView("additionalProperties")),
+                              schemaPath + QLatin1StringView("/additionalProperties"), child, names, index + 1,
+                              collection, out);
+        }
+    } else if (instance.isArray()) {
+        applicableSchemas(node.value(QLatin1StringView("items")), schemaPath + QLatin1StringView("/items"),
+                          valueAt(instance, {name}), names, index + 1, collection, out);
+    }
+}
+
+void McpSchema::Private::describe(const valijson::ValidationResults::Error& error, Collection& collection,
+                                  Report& report) const
 {
     const std::string& text = error.description;
     const QString pointer = QString::fromStdString(error.jsonPointer);
     const QStringList names = pointerTokens(pointer);
-    const QString at = shownPointer(names);
     const auto add = [&](const QString& description) {
-        report.add(at + QStringLiteral(": ") + description);
+        report.add(names, description);
     };
 
     if (const std::optional<QString> subject = wrapperSubject(text, pointer)) {
         // A failure with nothing more specific at or below its place, as of
         // a false subschema.
-        if (!covered.contains(*subject)) {
-            report.add(shownPointer(pointerTokens(*subject)) + QStringLiteral(": does not match the schema"));
+        if (!collection.covered.contains(*subject)) {
+            report.add(pointerTokens(*subject), QStringLiteral("does not match the schema"));
         }
         return;
     }
     if (const std::optional<QString> name = between(text, "Missing required property '", "'.")) {
-        report.add(shownPointer(names + QStringList{*name}) + QStringLiteral(": is required"));
+        report.add(names + QStringList{*name}, QStringLiteral("is required"));
         return;
     }
 
@@ -972,9 +1118,9 @@ void McpSchema::Private::describe(const valijson::ValidationResults::Error& erro
 
     // The rest say what is wrong from the schema, which valijson's text
     // does not tell exactly.
-    const QJsonValue instance = valueAt(value, names);
+    const QJsonValue instance = valueAt(collection.value, names);
     QList<QJsonObject> schemas;
-    applicableSchemas(source, value, names, 0, schemas);
+    applicableSchemas(source, QString(), collection.value, names, 0, collection, schemas);
     bool described = false;
     const auto addFound = [&](const QString& description) {
         add(description);
@@ -992,8 +1138,7 @@ void McpSchema::Private::describe(const valijson::ValidationResults::Error& erro
             const QJsonObject properties = schema.value(QLatin1StringView("properties")).toObject();
             for (auto it = members.begin(); it != members.end(); ++it) {
                 if (!properties.contains(it.key())) {
-                    report.add(shownPointer(names + QStringList{it.key()})
-                               + QStringLiteral(": is not a known property"));
+                    report.add(names + QStringList{it.key()}, QStringLiteral("is not a known property"));
                     described = true;
                 }
             }
@@ -1094,6 +1239,7 @@ QString McpSchema::compileChecked(const QJsonObject& schema)
         const valijson::adapters::QtJsonAdapter adapter(stripped);
         valijson::SchemaParser parser(valijson::SchemaParser::kDraft7);
         parser.populateSchema(adapter, d->schema);
+        d->compileBranches(stripped, QString());
         d->source = stripped;
         d->compiled = true;
         return QString();

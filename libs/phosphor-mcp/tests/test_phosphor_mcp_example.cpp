@@ -52,7 +52,7 @@ public:
             process.waitForFinished(5000);
         }
         if (QTest::currentTestFailed()) {
-            qWarning().noquote() << "stderr of the example:\n" + QString::fromUtf8(standardError());
+            qWarning().noquote() << "stderr of the example:\n" << QString::fromUtf8(standardError());
         }
     }
     Q_DISABLE_COPY_MOVE(Example)
