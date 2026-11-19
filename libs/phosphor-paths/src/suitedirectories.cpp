@@ -65,6 +65,11 @@ QString appConfigDir()
     return genericLocation(QStandardPaths::GenericConfigLocation, ".config") + QLatin1Char('/') + appSubdir();
 }
 
+QString appDataDir()
+{
+    return genericLocation(QStandardPaths::GenericDataLocation, ".local/share") + QLatin1Char('/') + appSubdir();
+}
+
 QString appStateDir()
 {
     return genericLocation(QStandardPaths::GenericStateLocation, ".local/state") + QLatin1Char('/') + appSubdir();

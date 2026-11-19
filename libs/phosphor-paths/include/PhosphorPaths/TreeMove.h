@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "phosphorpaths_export.h"
+#include <PhosphorPaths/phosphorpaths_export.h>
 
 #include <QString>
 

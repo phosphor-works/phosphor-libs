@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "phosphorpaths_export.h"
+#include <PhosphorPaths/phosphorpaths_export.h>
 
 #include <QString>
 
@@ -35,10 +35,11 @@ PHOSPHORPATHS_EXPORT QString appDirectoryName();
 /// QStandardPaths::locate takes for data only this app reads.
 PHOSPHORPATHS_EXPORT QString appSubdir();
 
-/// The application's writable config, state and cache directories:
-/// `phosphor-works/<app>` under the generic config, state and cache locations.
-/// One per app, whichever of its executables asks.
+/// The application's writable config, data, state and cache directories:
+/// `phosphor-works/<app>` under the generic config, data, state and cache
+/// locations. One per app, whichever of its executables asks.
 PHOSPHORPATHS_EXPORT QString appConfigDir();
+PHOSPHORPATHS_EXPORT QString appDataDir();
 PHOSPHORPATHS_EXPORT QString appStateDir();
 PHOSPHORPATHS_EXPORT QString appCacheDir();
 

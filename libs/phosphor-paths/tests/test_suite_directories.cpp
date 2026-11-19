@@ -32,6 +32,8 @@ private Q_SLOTS:
         const QString suffix = QStringLiteral("/phosphor-works/pathstest");
         QCOMPARE(PhosphorPaths::appConfigDir(),
                  QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + suffix);
+        QCOMPARE(PhosphorPaths::appDataDir(),
+                 QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + suffix);
         QCOMPARE(PhosphorPaths::appStateDir(),
                  QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + suffix);
         QCOMPARE(PhosphorPaths::appCacheDir(),
