@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <QString>
+
 namespace PhosphorEngineRuntime {
 
 /**
@@ -59,6 +61,15 @@ public:
     /// Give back any desktop-switch shortcuts a takeover holds, this session's
     /// or an earlier one's. Idempotent.
     virtual void restoreStockDesktopShortcuts() = 0;
+
+    /// The name the compositor gives a desktop it creates at @p oneBasedPosition,
+    /// so a desktop the feature adds carries the same name the compositor would
+    /// have given it. KWin's is its own translated "Desktop %1". The default is
+    /// the untranslated "Desktop %1".
+    virtual QString defaultDesktopName(int oneBasedPosition) const
+    {
+        return QStringLiteral("Desktop %1").arg(oneBasedPosition);
+    }
 };
 
 } // namespace PhosphorEngineRuntime
