@@ -9,7 +9,7 @@
         "id": {
             "type": "string",
             "minLength": 1,
-            "description": "Stable layout identity. Built-in layouts use a brace-wrapped UUID."
+            "description": "Stable layout identity, a UUID with or without braces. Built-in layouts use a brace-wrapped one. The loader gives a layout whose id is not a UUID, or is the nil UUID, a new random one on every load, so anything keyed by its id does not stick."
         },
         "name": {
             "type": "string",
@@ -18,23 +18,23 @@
         },
         "description": { "type": "string" },
         "type": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Layout-type enum (Grid, Columns, Rows, BSP, ...)."
+            "description": "Legacy key from older layouts. The loader ignores it, so any value is accepted."
         },
-        "isSystem": { "type": "boolean" },
+        "isSystem": {
+            "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so any value is accepted."
+        },
         "fixedGeometryInDevicePixels": {
             "type": "boolean",
             "description": "When true, the fixedGeometry of every fixed-mode zone counts the output's device pixels and is divided by the output's scale when resolved. Omitting the key means logical pixels."
         },
         "showZoneNumbers": { "type": "boolean" },
-        "defaultOrder": { "type": "integer" },
+        "defaultOrder": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "aspectRatioClass": {
             "oneOf": [
                 { "type": "string", "enum": ["any", "standard", "ultrawide", "super-ultrawide", "portrait"] },
                 { "type": "integer", "minimum": 0, "maximum": 4 }
             ],
-            "description": "Aspect-ratio bucket the layout targets. Both serialized forms are on the wire and readers accept either: Layout::toJson emits the canonical string, while the editor's save round-trip carries the raw enum int. Omitting the key means Any."
+            "description": "Aspect-ratio bucket the layout targets. Both serialized forms are on the wire, and readers accept either. Layout::toJson emits the canonical string, while the editor's save round-trip carries the raw enum int. Omitting the key means Any."
         },
         "zones": {
             "type": "array",
@@ -50,7 +50,7 @@
             "properties": {
                 "id": { "type": "string", "minLength": 1 },
                 "name": { "type": "string" },
-                "zoneNumber": { "type": "integer" },
+                "zoneNumber": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
                 "relativeGeometry": { "$ref": "#/$defs/relativeGeometry" }
             }
         },

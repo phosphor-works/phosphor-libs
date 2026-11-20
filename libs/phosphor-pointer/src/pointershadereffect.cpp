@@ -102,8 +102,9 @@ PointerShaderEffect PointerShaderEffect::fromJson(const QJsonObject& obj, const 
     // is never silently dropped out of the decision.
     e.samplesTrail = obj.value(QLatin1String("samplesTrail")).toBool(true);
     // Clamped to trailSeconds at the boundary as well as in resolvedTrailWindow,
-    // so a declaration past the liveness window is reported once at load rather
-    // than silently narrowed on every query.
+    // so the stored value is already the one every query uses. The clamp is
+    // silent: clampedNumber warns only about a non-numeric value, and the
+    // schema's description says the cap applies without a warning.
     e.trailWindowSeconds = clampedNumber(obj, "trailWindowSeconds", 0.0, 0.0, e.trailSeconds, e.id);
     e.trailWindowParam = obj.value(QLatin1String("trailWindowParam")).toString();
     e.needsCursor = obj.value(QLatin1String("needsCursor")).toBool(false);

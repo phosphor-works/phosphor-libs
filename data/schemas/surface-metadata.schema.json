@@ -20,7 +20,7 @@
         "audio": { "type": "boolean" },
         "handlesOpacity": {
             "type": "boolean",
-            "description": "Retired and ignored. Opacity is layer-backed now, so packs no longer declare it: the compositor folds the window's resolved opacity into the chain's opacity-tint layer, and the other layers never see it. Accepted only so pre-existing pack metadata still validates."
+            "description": "Retired and ignored. Opacity is layer-backed now, so packs no longer declare it. The compositor folds the window's resolved opacity into the chain's opacity-tint layer, and the other layers never see it. Accepted only so pre-existing pack metadata still validates."
         },
         "providesBorder": { "type": "boolean" },
         "providesOpacityTint": { "type": "boolean" },
@@ -44,18 +44,20 @@
         "bufferWrap": { "type": "string", "enum": ["clamp", "repeat", "mirror"] },
         "bufferWraps": {
             "type": "array",
-            "items": { "type": "string", "enum": ["clamp", "repeat", "mirror"] },
+            "items": { "type": "string", "enum": ["clamp", "repeat", "mirror", ""] },
+            "description": "Per-buffer wrap, aligned with bufferShaders. An empty string is the default of that buffer, and the loader keeps it in place so later entries stay aligned.",
             "maxItems": 8
         },
         "bufferFilter": { "type": "string", "enum": ["linear", "nearest", "mipmap"] },
         "bufferFilters": {
             "type": "array",
-            "items": { "type": "string", "enum": ["linear", "nearest", "mipmap"] },
+            "items": { "type": "string", "enum": ["linear", "nearest", "mipmap", ""] },
+            "description": "Per-buffer filter, aligned with bufferShaders. An empty string is the default of that buffer, and the loader keeps it in place so later entries stay aligned.",
             "maxItems": 8
         },
         "depthBuffer": {
             "type": "boolean",
-            "description": "Allocate a depth attachment alongside the colour FBO so a pass can sample window depth. DAEMON-ONLY, and that matters more here than in the other families: the compositor implements no depth buffer for surface packs, and the compositor is where a decoration lives on a real window, so a pack that samples depth looks one way in the settings preview and another on screen. The surface family also ships no depth module to include, unlike data/overlays/shared/depth.glsl, so declare `layout(binding = 16) uniform sampler2D uDepthBuffer;` yourself. Setting it also makes every pass render at the single bufferScale on the daemon, because the depth attachment is sized from bufferScale and a render target's colour and depth attachments must agree in size, so no bufferScales entry is consulted there. That holds on a one-pass chain too. plasmazones-shader-validate reports all of this."
+            "description": "Allocate a depth attachment alongside the colour FBO so a pass can sample window depth. DAEMON-ONLY, and that matters more here than in the other families. The compositor implements no depth buffer for surface packs, and the compositor is where a decoration lives on a real window, so a pack that samples depth looks one way in the settings preview and another on screen. The surface family also ships no depth module to include, unlike data/overlays/shared/depth.glsl, so declare `layout(binding = 16) uniform sampler2D uDepthBuffer;` yourself. Setting it also makes every pass render at the single bufferScale on the daemon, because the depth attachment is sized from bufferScale and a render target's colour and depth attachments must agree in size, so no bufferScales entry is consulted there. That holds on a one-pass chain too. plasmazones-shader-validate reports all of this."
         },
         "halfFloatBuffers": { "type": "boolean" },
         "paddingParam": { "type": "string" },
@@ -75,7 +77,7 @@
         "presets": {
             "type": "object",
             "maxProperties": 64,
-            "description": "Named parameter presets. Each value is a map of parameter id to value, naming a subset of the pack's declared parameters. A preset id is its key here, and it is also the label the picker shows, so it has to read as a name. That rules out control and bidi-formatting characters, and anything longer than a label can show. Unlike a user preset id it never becomes a filename, because duplicating a pack preset mints a fresh UUID. A null value is allowed and means the preset says nothing about that parameter, so it keeps the pack's default, and the loader drops the entry. Those rules are checked by plasmazones-shader-validate rather than here, because the vendored JSON-schema validator rejects every name under a propertyNames rule, legitimate ones included.",
+            "description": "Named parameter presets. Each value is a map of parameter id to value, naming a subset of the pack's declared parameters. A preset id is its key here, and it is also the label the picker shows, so it has to read as a name. That rules out control and bidi-formatting characters, and anything longer than a label can show. Unlike a user preset id it never becomes a filename, because duplicating a pack preset mints a fresh UUID. A null value is allowed and means the preset says nothing about that parameter, so it keeps the pack's default, and the loader drops the entry. Those rules are checked by plasmazones-shader-validate rather than here, with the predicate the picker relies on. A propertyNames rule could not say them exactly, because the runtime validator matches a pattern against UTF-8 bytes and so cannot express the bidi-formatting rule.",
             "additionalProperties": {
                 "type": "object",
                 "maxProperties": 48,
