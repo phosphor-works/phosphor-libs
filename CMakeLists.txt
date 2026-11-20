@@ -23,7 +23,11 @@
 # config, so it still configures alone from its own directory. Add new
 # libraries under libs/ following the phosphor-<name> convention.
 
-cmake_minimum_required(VERSION 3.16)
+# 3.21: the highest floor among the libraries this file adds (phosphor-control
+# reads PROJECT_IS_TOP_LEVEL). The pinned archives need 3.18, for
+# file(ARCHIVE_EXTRACT) in cmake/PhosphorDependencies.cmake. The presets
+# (CMakePresets.json) need 3.25, which only the cmake --workflow route asks for.
+cmake_minimum_required(VERSION 3.21)
 
 project(PhosphorLibs VERSION 0.1.0 LANGUAGES C CXX)
 
