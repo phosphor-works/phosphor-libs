@@ -1121,9 +1121,12 @@ bool McpServer::finishCall(quint64 token, const McpResult& result)
 
     QStringList errors;
     if (result.hasStructuredContent()) {
-        findNonFinite(result.structuredContent(), QString(), errors);
         if (entry.output) {
-            errors += entry.output->validate(result.structuredContent());
+            // The check refuses a number that is not finite itself, at its
+            // place, before it checks anything else.
+            errors = entry.output->validate(result.structuredContent());
+        } else {
+            findNonFinite(result.structuredContent(), QString(), errors);
         }
     } else if (entry.output && !result.isError()) {
         errors.append(QStringLiteral(": no structured content"));

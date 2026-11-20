@@ -10,7 +10,6 @@
 #include <PhosphorMcp/McpProtocol.h>
 #include <PhosphorMcp/McpServer.h>
 
-#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -124,7 +123,6 @@ QString patternReason()
 const QString CountRefusal = QStringLiteral(": must be an integer from 0 to 9007199254740991");
 const QString TooLargeToList =
     QStringLiteral("- arguments: does not match the schema, and is too large for the server to list each error");
-const QString TooLargeToCheck = QStringLiteral("- arguments: is too large for the server to check against the schema");
 
 } // namespace
 
@@ -245,17 +243,12 @@ private Q_SLOTS:
             QTest::newRow(name) << schema << expected << outputToo;
         };
 
-        // The keywords the server cannot check as 2020-12 says, at the root
-        // and nested, each with its reason.
+        // The keywords the server does not check, at the root and nested,
+        // each with its reason. patternProperties is refused unless it is
+        // empty, and applies nothing.
         const QList<std::pair<const char*, QString>> refused{
             {"pattern", patternReason()},
             {"patternProperties", patternReason()},
-            {"uniqueItems",
-             QStringLiteral(" is not supported, because the server would compare every pair of items. Check for "
-                            "repeated items in the handler")},
-            {"dependentSchemas",
-             QStringLiteral(" is not supported, because the server's validator reports its errors at the wrong "
-                            "place. Use \"if\" with \"required\", and \"then\"")},
             {"$id",
              QStringLiteral(" is not supported, because the server resolves references within the tool's "
                             "schema only")},
@@ -265,22 +258,24 @@ private Q_SLOTS:
              QStringLiteral(" is not supported, because the server does not resolve dynamic references. Use \"$ref\"")},
             {"$vocabulary", QStringLiteral(" is not supported, because it belongs in a meta-schema")},
             {"definitions", QStringLiteral(" is not a keyword of JSON Schema 2020-12. Use \"$defs\"")},
-            {"dependencies", QStringLiteral(" is not a keyword of JSON Schema 2020-12. Use \"dependentRequired\"")},
+            {"dependencies",
+             QStringLiteral(" is not a keyword of JSON Schema 2020-12. Use \"dependentRequired\" or "
+                            "\"dependentSchemas\"")},
             {"additionalItems",
              QStringLiteral(" is not a keyword of JSON Schema 2020-12. Use \"items\" beside \"prefixItems\"")},
             {"$recursiveRef", QStringLiteral(" is not a keyword of JSON Schema 2020-12. Use \"$ref\"")},
             {"$recursiveAnchor", QStringLiteral(" is not a keyword of JSON Schema 2020-12")},
-            {"contentSchema", QStringLiteral(" is not supported in a tool schema")},
             {"colour", QStringLiteral(" is not supported in a tool schema")},
         };
         for (const auto& [keyword, reason] : refused) {
             const QString name = QString::fromLatin1(keyword);
             const QString quotedName = QLatin1Char('"') + name + QLatin1Char('"');
             QTest::addRow("root %s", keyword)
-                << QByteArray("{'type': 'object', '") + keyword + "': {}}"
+                << QByteArray("{'type': 'object', '") + keyword + "': {'x': {}}}"
                 << QLatin1Char('/') + name + QStringLiteral(": ") + quotedName + reason << true;
             QTest::addRow("nested %s", keyword)
-                << QByteArray("{'type': 'object', 'properties': {'a': {'type': 'object', '") + keyword + "': {}}}}"
+                << QByteArray("{'type': 'object', 'properties': {'a': {'type': 'object', '") + keyword
+                    + "': {'x': {}}}}}"
                 << QStringLiteral("/properties/a/") + name + QStringLiteral(": ") + quotedName + reason << true;
         }
         // Below every kind of subschema.
@@ -292,9 +287,11 @@ private Q_SLOTS:
         row("$id deep in anyOf", "{'type': 'object', 'anyOf': [{'properties': {'b': {'$id': 'x'}}}]}",
             QStringLiteral("/anyOf/0/properties/b/$id: \"$id\" is not supported, because the server resolves "
                            "references within the tool's schema only"));
-        row("uniqueItems in $defs", "{'type': 'object', '$defs': {'d': {'uniqueItems': true}}}",
-            QStringLiteral("/$defs/d/uniqueItems: \"uniqueItems\" is not supported, because the server would "
-                           "compare every pair of items. Check for repeated items in the handler"));
+        row("pattern in $defs", "{'type': 'object', '$defs': {'d': {'pattern': '^a'}}}",
+            QStringLiteral("/$defs/d/pattern: \"pattern\"") + patternReason());
+        row("patternProperties in dependentSchemas",
+            "{'type': 'object', 'dependentSchemas': {'a': {'patternProperties': {'^x': true}}}}",
+            QStringLiteral("/dependentSchemas/a/patternProperties: \"patternProperties\"") + patternReason());
         row("colour in prefixItems", "{'type': 'object', 'prefixItems': [true, {'colour': 1}]}",
             QStringLiteral("/prefixItems/1/colour: \"colour\" is not supported in a tool schema"));
         row("colour in then", "{'type': 'object', 'if': true, 'then': {'colour': 1}}",
@@ -336,6 +333,30 @@ private Q_SLOTS:
         row("$ref with a broken escape", "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/%zz'}}}",
             QStringLiteral("/properties/a/$ref: is not a valid URI fragment. Percent-encode the characters that a URI "
                            "cannot hold"));
+        row("$ref with a cut escape", "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/a%2'}}}",
+            QStringLiteral("/properties/a/$ref: is not a valid URI fragment. Percent-encode the characters that a URI "
+                           "cannot hold"));
+        // Percent-encoded bytes that are not UTF-8 name no member.
+        row("$ref with bytes that are not UTF-8",
+            "{'type': 'object', '$defs': {'a': {}}, 'properties': {'a': {'$ref': '#/$defs/%ff'}}}",
+            QStringLiteral("/properties/a/$ref: the percent-encoded bytes of the fragment are not UTF-8"));
+        row("$ref with an encoded surrogate", "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/%ed%a0%80'}}}",
+            QStringLiteral("/properties/a/$ref: the percent-encoded bytes of the fragment are not UTF-8"));
+        // A plain-name fragment is compared as it is written (RFC 3986): an
+        // anchor "foo" is not "%66oo".
+        row("$ref to a percent-encoded anchor",
+            "{'type': 'object', '$defs': {'a': {'$anchor': 'foo'}}, 'properties': {'a': {'$ref': '#%66oo'}}}",
+            QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
+        row("$ref with a broken pointer escape", "{'type': 'object', '$defs': {'a': {}}, '$ref': '#/$defs/~2'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        row("$ref past the end of prefixItems", "{'type': 'object', 'prefixItems': [{}], '$ref': '#/prefixItems/1'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        row("$ref with a leading zero", "{'type': 'object', 'prefixItems': [{}], '$ref': '#/prefixItems/00'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        row("$ref into a boolean schema", "{'type': 'object', '$defs': {'f': false}, '$ref': '#/$defs/f/items'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        row("$ref into contentSchema", "{'type': 'object', 'contentSchema': {}, '$ref': '#/contentSchema'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
         row("$ref to nothing", "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/x'}}}",
             QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
         row("$ref to a keyword's value",
@@ -343,26 +364,20 @@ private Q_SLOTS:
             QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
         row("$ref to an unknown anchor", "{'type': 'object', 'properties': {'a': {'$ref': '#nowhere'}}}",
             QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
-        row("$ref to a boolean schema",
-            "{'type': 'object', '$defs': {'f': false}, 'properties': {'a': {'$ref': '#/$defs/f'}}}",
-            QStringLiteral("/properties/a/$ref: \"$ref\" to a boolean schema is not supported. Use {} for true, or "
-                           "{\"not\": {}} for false"));
-        row("$ref into items beside prefixItems",
-            "{'type': 'object', 'prefixItems': [{}], 'items': {'type': 'string'}, 'properties': {'a': {'$ref': "
-            "'#/items'}}}",
-            QStringLiteral("/properties/a/$ref: \"$ref\" into \"items\" beside \"prefixItems\" is not supported, "
-                           "because the server's validator files that schema under another name. Move it to "
-                           "\"$defs\""));
-        row("$anchor starting with _", "{'type': 'object', '$defs': {'a': {'$anchor': '_a'}}}",
-            QStringLiteral("/$defs/a/$anchor: must be a name of letters, digits, \"-\", \"_\" and \".\" that starts "
-                           "with a letter"));
+        const QString anchorName = QStringLiteral(
+            ": must be a name of letters, digits, \"-\", \"_\" and \".\" that starts with a letter or \"_\"");
+        row("$anchor starting with a digit", "{'type': 'object', '$defs': {'a': {'$anchor': '1a'}}}",
+            QStringLiteral("/$defs/a/$anchor") + anchorName);
+        row("$anchor with a percent sign", "{'type': 'object', '$defs': {'a': {'$anchor': 'a%20'}}}",
+            QStringLiteral("/$defs/a/$anchor") + anchorName);
+        row("$anchor not a string", "{'type': 'object', '$anchor': 1}", QStringLiteral("/$anchor") + anchorName);
         row("$anchor twice", "{'type': 'object', '$defs': {'a': {'$anchor': 'x'}, 'b': {'$anchor': 'x'}}}",
             QStringLiteral("/$defs/b/$anchor: another schema has this $anchor"));
         row("$defs an array", "{'type': 'object', '$defs': []}",
             QStringLiteral("/$defs: must be an object of schemas"));
 
-        // A $ref that comes back to its schema on the same value recurses
-        // without end (jsoncons overflows the stack).
+        // A $ref that comes back to its schema on the same value would
+        // recurse without end: refused, whichever keywords lead back.
         const auto loop = [](const QString& pointer) {
             return pointer
                 + QStringLiteral(
@@ -383,32 +398,18 @@ private Q_SLOTS:
             loop(QStringLiteral("/$defs/a/if/$ref")));
         row("$ref loop through an anchor", "{'type': 'object', '$anchor': 'top', 'oneOf': [true, {'$ref': '#top'}]}",
             loop(QStringLiteral("/oneOf/1/$ref")));
+        // Through then, which applies to the value as if does.
+        row("$ref loop through then", "{'type': 'object', '$defs': {'a': {'if': true, 'then': {'$ref': '#/$defs/a'}}}}",
+            loop(QStringLiteral("/$defs/a/then/$ref")));
+        row("$ref loop through dependentSchemas", "{'type': 'object', 'dependentSchemas': {'k': {'$ref': '#'}}}",
+            loop(QStringLiteral("/dependentSchemas/k/$ref")));
+        row("$ref loop through a $ref to a $ref",
+            "{'type': 'object', '$defs': {'a': {'$ref': '#/$defs/b'}, 'b': {'$ref': '#/$defs/c'}, 'c': {'$ref': "
+            "'#/$defs/a'}}}",
+            loop(QStringLiteral("/$defs/a/$ref")));
 
-        // unevaluatedProperties and unevaluatedItems where jsoncons counts
-        // what 2020-12 does not.
-        row("unevaluatedProperties a schema", "{'type': 'object', 'unevaluatedProperties': {'type': 'string'}}",
-            QStringLiteral("/unevaluatedProperties: \"unevaluatedProperties\" is supported as true or false only, "
-                           "because the server's validator checks its schema at the wrong place"));
-        row("unevaluatedProperties beside not",
-            "{'type': 'object', 'not': {'required': ['a']}, 'unevaluatedProperties': false}",
-            QStringLiteral("/unevaluatedProperties: \"unevaluatedProperties\" is not supported beside a \"not\" that "
-                           "applies to the same value, because the server's validator counts what the subschema of not "
-                           "evaluated"));
-        row("unevaluatedItems beside a not through $ref",
-            "{'type': 'object', 'properties': {'a': {'allOf': [{'$ref': '#/$defs/n'}], 'unevaluatedItems': false}}, "
-            "'$defs': {'n': {'not': {'type': 'string'}}}}",
-            QStringLiteral(
-                "/properties/a/unevaluatedItems: \"unevaluatedItems\" is not supported beside a \"not\" "
-                "that applies to the same value, because the server's validator counts what the subschema of "
-                "not evaluated"));
-        row("unevaluatedItems beside contains",
-            "{'type': 'object', 'properties': {'a': {'contains': {}, 'unevaluatedItems': false}}}",
-            QStringLiteral(
-                "/properties/a/unevaluatedItems: \"unevaluatedItems\" is not supported beside a \"contains\" "
-                "that applies to the same value, because the server's validator counts the items of nested "
-                "arrays that contains matched"));
-
-        // Names the server cannot hold in UTF-8.
+        // Names and strings that no argument can have, since an unpaired
+        // surrogate in one is refused.
         row("property name with a surrogate", "{'type': 'object', 'properties': {'a\\ud800': {}}}",
             QStringLiteral("/properties/a") + QChar(0xd800)
                 + QStringLiteral(": a property name with an unpaired UTF-16 surrogate is not supported"));
@@ -419,6 +420,23 @@ private Q_SLOTS:
         row("dependentRequired name with a surrogate", "{'type': 'object', 'dependentRequired': {'a': ['\\ud800']}}",
             QStringLiteral(
                 "/dependentRequired/a/0: a property name with an unpaired UTF-16 surrogate is not supported"));
+        row("dependentRequired trigger with a surrogate", "{'type': 'object', 'dependentRequired': {'\\ud800': []}}",
+            QStringLiteral("/dependentRequired/") + QChar(0xd800)
+                + QStringLiteral(": a property name with an unpaired UTF-16 surrogate is not supported"));
+        row("dependentSchemas name with a surrogate", "{'type': 'object', 'dependentSchemas': {'\\udc00': {}}}",
+            QStringLiteral("/dependentSchemas/") + QChar(0xdc00)
+                + QStringLiteral(": a property name with an unpaired UTF-16 surrogate is not supported"));
+        row("$defs name with a surrogate", "{'type': 'object', '$defs': {'d\\ud800': {}}}",
+            QStringLiteral("/$defs/d") + QChar(0xd800)
+                + QStringLiteral(": a name with an unpaired UTF-16 surrogate is not supported"));
+        row("const string with a surrogate", "{'type': 'object', 'const': ['a', '\\udc00']}",
+            QStringLiteral("/const/1: a string with an unpaired UTF-16 surrogate is not supported"));
+        row("enum member name with a surrogate", "{'type': 'object', 'properties': {'a': {'enum': [{'k\\ud800': 1}]}}}",
+            QStringLiteral("/properties/a/enum/0/k") + QChar(0xd800)
+                + QStringLiteral(": a member name with an unpaired UTF-16 surrogate is not supported"));
+        row("const member name with a surrogate", "{'type': 'object', 'const': {'a': {'\\udc00': 1}}}",
+            QStringLiteral("/const/a/") + QChar(0xdc00)
+                + QStringLiteral(": a member name with an unpaired UTF-16 surrogate is not supported"));
 
         // The value of each keyword.
         row("required not an array", "{'type': 'object', 'required': 'a'}",
@@ -466,16 +484,8 @@ private Q_SLOTS:
             QStringLiteral("/properties/a/multipleOf: must be a number greater than 0"));
         row("multipleOf negative", "{'type': 'object', 'properties': {'a': {'multipleOf': -2}}}",
             QStringLiteral("/properties/a/multipleOf: must be a number greater than 0"));
-        // jsoncons compares an argument, a qint64, with a double as doubles,
-        // and the largest qint64 values round to 2^63.
-        const QString twoTo63 = QStringLiteral(
-            ": the number 2^63 is not supported, because the server would take the largest 64-bit integers for it");
-        row("maximum 2^63", "{'type': 'object', 'properties': {'a': {'maximum': 9223372036854775808}}}",
-            QStringLiteral("/properties/a/maximum") + twoTo63);
-        row("enum 2^63", "{'type': 'object', 'properties': {'a': {'enum': [1, 9223372036854775808]}}}",
-            QStringLiteral("/properties/a/enum/1") + twoTo63);
-        row("const 2^63 deep", "{'type': 'object', 'properties': {'a': {'const': {'x': [9223372036854775808]}}}}",
-            QStringLiteral("/properties/a/const/x/0") + twoTo63);
+        row("multipleOf a string", "{'type': 'object', 'properties': {'a': {'multipleOf': '2'}}}",
+            QStringLiteral("/properties/a/multipleOf: must be a number greater than 0"));
         row("maxLength a string", "{'type': 'object', 'properties': {'a': {'maxLength': '3'}}}",
             QStringLiteral("/properties/a/maxLength") + CountRefusal);
         row("maxLength negative", "{'type': 'object', 'properties': {'a': {'maxLength': -1}}}",
@@ -503,6 +513,24 @@ private Q_SLOTS:
         row("enum a string", "{'type': 'object', 'properties': {'a': {'enum': 'x'}}}",
             QStringLiteral("/properties/a/enum: must be an array"));
         row("examples a number", "{'type': 'object', 'examples': 1}", QStringLiteral("/examples: must be an array"));
+        row("deprecated a number", "{'type': 'object', 'deprecated': 0}",
+            QStringLiteral("/deprecated: must be a boolean"));
+        row("contentEncoding a boolean", "{'type': 'object', 'contentEncoding': true}",
+            QStringLiteral("/contentEncoding: must be a string"));
+        row("contentSchema a number", "{'type': 'object', 'contentSchema': 1}",
+            QStringLiteral("/contentSchema: a schema must be an object or a boolean"));
+        row("uniqueItems a string", "{'type': 'object', 'uniqueItems': 'yes'}",
+            QStringLiteral("/uniqueItems: must be a boolean"));
+        row("dependentSchemas an array", "{'type': 'object', 'dependentSchemas': []}",
+            QStringLiteral("/dependentSchemas: must be an object of schemas"));
+        row("dependentSchemas a number", "{'type': 'object', 'dependentSchemas': {'a': 1}}",
+            QStringLiteral("/dependentSchemas/a: a schema must be an object or a boolean"));
+        row("unevaluatedProperties a number", "{'type': 'object', 'unevaluatedProperties': 1}",
+            QStringLiteral("/unevaluatedProperties: a schema must be an object or a boolean"));
+        row("type of a number", "{'type': 'object', 'properties': {'a': {'type': 1}}}",
+            QStringLiteral("/properties/a/type: must be a type name or a non-empty array of them"));
+        row("type list with an unknown name", "{'type': 'object', 'properties': {'a': {'type': ['string', 'text']}}}",
+            QStringLiteral("/properties/a/type: must be a type name or an array of distinct type names"));
     }
 
     void refusedSchemas()
@@ -528,16 +556,18 @@ private Q_SLOTS:
 
     void acceptedSchemas()
     {
-        // Every keyword the server checks, names and values that look like
-        // refused keywords and are neither, references of each form, and a
-        // schema that recurses through properties.
+        // Every keyword the server checks (each assertion, each applicator
+        // and each annotation of 2020-12 but those the README lists as
+        // refused), names and values that look like refused keywords and are
+        // neither, references of each form, and a schema that recurses
+        // through properties.
         const QJsonObject schema = parse(
             "{ "
             "'$schema': 'https://json-schema.org/draft/2020-12/schema', "
             "'type': 'object', "
             "'title': 't', 'description': 'd', '$comment': 'c', "
             "'propertyNames': {'maxLength': 20}, "
-            "'$defs': {'name': {'$anchor': 'name', 'type': 'string', 'minLength': 1}, "
+            "'$defs': {'name': {'$anchor': 'name', 'type': 'string', 'minLength': 1}, 'never': false, "
             "'a b': {'type': 'integer'}, 'node': {'type': 'object', 'properties': {'next': {'$ref': "
             "'#/$defs/node'}}}}, "
             "'properties': { "
@@ -565,7 +595,23 @@ private Q_SLOTS:
             "'v': {'allOf': [true, {'not': {'type': 'null'}}]}, "
             "'w': {'if': {'required': ['a']}, 'then': {'required': ['b']}, 'else': {'maxProperties': 0}}, "
             "'tree': {'$ref': '#/$defs/node'}, "
-            "'closed': {'allOf': [{'properties': {'a': true}}], 'unevaluatedProperties': false} "
+            "'closed': {'allOf': [{'properties': {'a': true}}], 'unevaluatedProperties': false}, "
+            "'open': {'not': {'required': ['x']}, 'unevaluatedProperties': {'type': 'integer'}}, "
+            "'counted': {'contains': {'type': 'string'}, 'unevaluatedItems': false, 'maxItems': 9, "
+            "'uniqueItems': true}, "
+            "'plain': {'uniqueItems': false, 'patternProperties': {}, 'dependentSchemas': {}}, "
+            "'card': {'dependentSchemas': {'card': {'required': ['expiry']}}}, "
+            "'anchored': {'$anchor': '_private.v-1', 'contentMediaType': 'application/json', "
+            "'contentSchema': {'type': 'object'}}, "
+            "'toPrivate': {'$ref': '#_private.v-1'}, "
+            "'toFalse': {'$ref': '#/$defs/never'}, "
+            "'toRest': {'$ref': '#/properties/tuple/items'}, "
+            "'toContains': {'$ref': '#/properties/tuple/contains'}, "
+            "'toBranch': {'$ref': '#/properties/u/oneOf/1'}, "
+            "'toDependent': {'$ref': '#/properties/card/dependentSchemas/card'}, "
+            "'edge': {'maximum': 9223372036854775808, 'minimum': -9223372036854775808, 'enum': [9223372036854775807, "
+            "9223372036854775808]}, "
+            "'v2': {'if': {'type': 'string'}, 'else': {'type': 'integer'}} "
             "}, "
             "'required': ['$ref', 'a/b~c'], "
             "'dependentRequired': {'tuple': ['rest'], 'rest': []}, "
@@ -621,8 +667,9 @@ private Q_SLOTS:
     void badArgumentsAreToolErrors_data()
     {
         QTest::addColumn<QByteArray>("arguments");
-        // Every line after the first, exactly: no English of jsoncons's
-        // ("Expected integer, found string"), and each error once.
+        // Every line after the first, exactly, and each error once. The
+        // members of an object come in the order of their names (Qt's), each
+        // with its errors, then the properties that are missing.
         QTest::addColumn<QString>("expected");
         const auto row = [](const char* name, const char* arguments, const char* expected) {
             QTest::newRow(name) << QByteArray(arguments) << QString::fromUtf8(expected);
@@ -649,21 +696,30 @@ private Q_SLOTS:
         row("false subschema and another error", "{'pane': 0, 'gone': 1}",
             "- arguments/gone: does not match the schema\n- arguments/pane: must be at least 1");
         row("several", "{'text': 'toolong', 'tags': [1], 'colour': 'red'}",
-            "- arguments/tags/0: must be of type string\n- arguments/text: must be at most 5 characters long\n"
-            "- arguments/colour: is not a known property\n- arguments/pane: is required");
-        // What jsoncons would read differently from the handler, refused
-        // before it: an integer past qint64 (2^63 passes minimum 1 there,
-        // and the handler's toInteger() reads 0), an unpaired surrogate.
+            "- arguments/colour: is not a known property\n- arguments/tags/0: must be of type string\n"
+            "- arguments/text: must be at most 5 characters long\n- arguments/pane: is required");
+        // An integer that the handler's toInteger() would read as 0: 2^63
+        // (which Qt's parser holds as a double), and 1e300.
         row("integer 2^63", "{'pane': 9223372036854775808}",
             "- arguments/pane: must be from -9223372036854775808 to 9223372036854775807");
+        row("integer 1e300", "{'pane': 1e300}",
+            "- arguments/pane: must be from -9223372036854775808 to 9223372036854775807");
+        row("integer with a fraction", "{'pane': 1.5}", "- arguments/pane: must be of type integer");
+        // Refused before the check, which is not made then: an unpaired
+        // surrogate, which a reply would carry as U+FFFD.
         row("unpaired surrogate", "{'pane': 1, 'text': 'ab\\ud800'}",
             "- arguments/text: contains an unpaired UTF-16 surrogate");
         row("surrogate in a name", "{'pane': 1, 'x\\udc00': 1}",
             "- arguments/x\xef\xbf\xbd: the property name contains an unpaired UTF-16 surrogate");
         row("surrogates everywhere", "{'pane': 1e300, 'text': '\\ud800', 'tags': ['\\udc00']}",
-            "- arguments/pane: must be from -9223372036854775808 to 9223372036854775807\n"
             "- arguments/tags/0: contains an unpaired UTF-16 surrogate\n"
             "- arguments/text: contains an unpaired UTF-16 surrogate");
+        // A surrogate pair is one character, and stays whole in a name.
+        row("surrogate pair", "{'pane': 1, 'text': '\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00'}", "");
+        row("surrogate pairs too long",
+            "{'pane': 1, 'text': '\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00ab"
+            "c'}",
+            "- arguments/text: must be at most 5 characters long");
     }
 
     void badArgumentsAreToolErrors()
@@ -682,6 +738,11 @@ private Q_SLOTS:
         const QJsonObject reply = peer.readOne();
         // A result the model reads, not a protocol error.
         QVERIFY2(reply.contains(QLatin1StringView("result")), QJsonDocument(reply).toJson().constData());
+        if (expected.isEmpty()) {
+            QCOMPARE(firstText(reply), QStringLiteral("ran"));
+            QCOMPARE(calls, 1);
+            return;
+        }
         const QJsonObject result = resultOf(reply);
         QCOMPARE(result.value(QLatin1StringView("isError")).toBool(), true);
         QCOMPARE(result.value(QLatin1StringView("resultType")).toString(), QStringLiteral("complete"));
@@ -728,408 +789,67 @@ private Q_SLOTS:
                                       QJsonObject{{QLatin1StringView("pane"), 1}, {QLatin1StringView("tags"), tags}})));
         const QStringList lines = errorLines(peer.readOne()).split(QLatin1Char('\n'));
         QCOMPARE(lines.size(), 11);
-        QCOMPARE(lines.first(), QStringLiteral("- arguments/tags/0: must be of type string"));
-        QCOMPARE(lines.at(9), QStringLiteral("- arguments/tags/9: must be of type string"));
-        // 30 items and maxItems.
+        QCOMPARE(lines.first(), QStringLiteral("- arguments/tags: must have at most 2 items"));
+        QCOMPARE(lines.at(1), QStringLiteral("- arguments/tags/0: must be of type string"));
+        QCOMPARE(lines.at(9), QStringLiteral("- arguments/tags/8: must be of type string"));
+        // maxItems and 30 items.
         QCOMPARE(lines.last(), QStringLiteral("- arguments: and 21 more errors"));
-    }
 
-    void hugeArgumentsAnswerFast()
-    {
-        // The errors of large arguments are listed while they are few, and
-        // the check stops once there are too many to list. A check that would
-        // cost too much is not made at all.
-        QFETCH(QByteArray, arguments);
-        QFETCH(QString, expected);
-        Peer peer;
-        McpServer server;
-        int calls = 0;
-        QVERIFY(server.addTool(McpTool(QStringLiteral("env")).setInputSchema(envSchema()), [&](McpCall call) {
-            ++calls;
-            call.finish(McpResult::text(QStringLiteral("ran")));
-        }));
-        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(sendCall(peer, 1, QStringLiteral("env"), arguments));
-        // Each answer takes well under a second, about ten under valgrind.
-        // valijson took 152 s for the first with every error collected, and
-        // jsoncons would collect 150,000 errors of the anyOf (about 200 MB).
-        const int bound = 30000;
-        const QJsonObject reply = peer.readOne(bound);
-        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
-        QCOMPARE(errorLines(reply), expected);
-        QCOMPARE(calls, 0);
-    }
-
-    void hugeArgumentsAnswerFast_data()
-    {
-        QTest::addColumn<QByteArray>("arguments");
-        QTest::addColumn<QString>("expected");
-        const auto repeat = [](const QByteArray& item, int count) {
-            QByteArray list;
-            for (int i = 0; i < count; ++i) {
-                list += (i ? "," : "") + item;
-            }
-            return list;
-        };
-        const auto variables = [](int count) {
-            QByteArray env;
-            for (int i = 0; i < count; ++i) {
-                env += (i ? ",'V" : "'V") + QByteArray::number(i) + "':" + QByteArray::number(i);
-            }
-            return env;
-        };
-
-        // Each wrong twice (anyOf), and maxProperties.
-        QTest::newRow("50000 wrong variables")
-            << "{'where': 'tab', 'env': {" + variables(50000) + "}}" << TooLargeToCheck;
-        QTest::newRow("5000 wrong variables") << "{'where': 'tab', 'env': {" + variables(5000) + "}}" << TooLargeToList;
-        // One wrong value, however large.
-        QTest::newRow("400000 items for a string") << "{'where': [" + repeat("1", 400000) + "]}"
-                                                   << QStringLiteral(
-                                                          "- arguments/where: must be one of the values of enum\n"
-                                                          "- arguments/where: must be of type string");
-        // An unpaired surrogate in each: listed whatever the size, cheaply.
-        QTest::newRow("400000 surrogates") << "{'where': [" + repeat("'\\ud800'", 400000) + "]}"
-                                           << QStringLiteral(
-                                                  "- arguments/where/0: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/1: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/2: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/3: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/4: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/5: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/6: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/7: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/8: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments/where/9: contains an unpaired UTF-16 surrogate\n"
-                                                  "- arguments: and 399990 more errors");
-    }
-
-    void combinatorSchemasAnswerFast()
-    {
-        // jsoncons collects every error inside an allOf, anyOf or oneOf, and
-        // copies them into the combinator's own error, again for each one
-        // around it. So the schema counts as well as the size of the
-        // arguments, and a value that would make too many errors there is
-        // not checked.
-        QFETCH(QJsonObject, schema);
-        QFETCH(QJsonObject, arguments);
-        QFETCH(QString, expected);
-        Peer peer;
-        McpServer server;
-        int calls = 0;
-        QString error;
-        QVERIFY2(server.addTool(
-                     McpTool(QStringLiteral("heavy")).setInputSchema(schema),
-                     [&](McpCall call) {
-                         ++calls;
-                         call.finish(McpResult::text(QStringLiteral("ran")));
-                     },
-                     &error),
-                 qPrintable(error));
-        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(peer.send(callRequest(1, QStringLiteral("heavy"), arguments)));
-        // Each answer takes milliseconds. valijson took from seconds to
-        // minutes with every error listed (44 s for the first in a release
-        // build), and jsoncons would copy gigabytes of errors for the third.
-        const int bound = 30000;
-        const QJsonObject reply = peer.readOne(bound);
-        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
-        QCOMPARE(errorLines(reply), expected);
-        QCOMPARE(calls, 0);
-    }
-
-    void combinatorSchemasAnswerFast_data()
-    {
-        QTest::addColumn<QJsonObject>("schema");
-        QTest::addColumn<QJsonObject>("arguments");
-        QTest::addColumn<QString>("expected");
-        const auto object = [](const QString& name, const QJsonObject& property) {
-            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
-                               {QLatin1StringView("properties"), QJsonObject{{name, property}}}};
-        };
-        const auto items = [](const QJsonValue& item, int count) {
-            QJsonArray array;
-            for (int i = 0; i < count; ++i) {
-                array.append(item);
-            }
-            return array;
-        };
-
-        // A oneOf of 15 arrays, each with items that are an anyOf of 15
-        // objects, and items that match none of them.
-        QJsonArray objects;
-        QJsonArray arrays;
-        for (int i = 0; i < 15; ++i) {
-            QJsonObject inner = object(QStringLiteral("x"), QJsonObject{{QLatin1StringView("maximum"), i}});
-            inner.insert(QLatin1StringView("required"), QJsonArray{QStringLiteral("y%1").arg(i)});
-            objects.append(inner);
-        }
-        for (int i = 0; i < 15; ++i) {
-            arrays.append(
-                QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
-                            {QLatin1StringView("maxItems"), i},
-                            {QLatin1StringView("items"), QJsonObject{{QLatin1StringView("anyOf"), objects}}}});
-        }
-        const QJsonObject nested = object(QStringLiteral("v"), QJsonObject{{QLatin1StringView("oneOf"), arrays}});
-        const QJsonObject wrongItem{{QLatin1StringView("x"), 1000}};
-        QTest::newRow("oneOf of anyOf, 400 items")
-            << nested << QJsonObject{{QLatin1StringView("v"), items(wrongItem, 400)}} << TooLargeToCheck;
-        // The same schema lists the errors of a small value.
-        QTest::newRow("oneOf of anyOf, 1 item")
-            << nested << QJsonObject{{QLatin1StringView("v"), items(wrongItem, 1)}}
-            << QStringLiteral(
-                   "- arguments/v/0/x: must be at most 0\n- arguments/v/0/y0: is required\n"
-                   "- arguments/v/0/x: must be at most 1\n- arguments/v/0/y1: is required\n"
-                   "- arguments/v/0/x: must be at most 2\n- arguments/v/0/y2: is required\n"
-                   "- arguments/v/0/x: must be at most 3\n- arguments/v/0/y3: is required\n"
-                   "- arguments/v/0/x: must be at most 4\n- arguments/v/0/y4: is required\n"
-                   "- arguments: and 23 more errors");
-
-        // anyOf in anyOf, 50 deep, for each of 990 items, and for 1.
-        QJsonObject chain{{QLatin1StringView("type"), QStringLiteral("integer")}, {QLatin1StringView("maximum"), 0}};
-        for (int i = 0; i < 50; ++i) {
-            const QJsonObject other{{QLatin1StringView("type"), QStringLiteral("string")},
-                                    {QLatin1StringView("maxLength"), 0}};
-            chain = QJsonObject{{QLatin1StringView("anyOf"), QJsonArray{chain, other}}};
-        }
-        const QJsonObject deep = object(
-            QStringLiteral("v"),
-            QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")}, {QLatin1StringView("items"), chain}});
-        QTest::newRow("anyOf 50 deep, 990 items")
-            << deep << QJsonObject{{QLatin1StringView("v"), items(5, 990)}} << TooLargeToCheck;
-        QTest::newRow("anyOf 50 deep, 1 item") << deep << QJsonObject{{QLatin1StringView("v"), items(5, 1)}}
-                                               << QStringLiteral(
-                                                      "- arguments/v/0: must be at most 0\n"
-                                                      "- arguments/v/0: must be of type string\n"
-                                                      "- arguments/v/0: must match at least one schema of anyOf");
-
-        // An allOf of 200 anyOfs for each of 990 items, and for 10, with too
-        // many errors to list.
-        QJsonArray all;
-        for (int i = 0; i < 200; ++i) {
-            all.append(QJsonObject{{QLatin1StringView("anyOf"),
-                                    QJsonArray{QJsonObject{{QLatin1StringView("maximum"), i}},
-                                               QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")}}}}});
-        }
-        const QJsonObject wide =
-            object(QStringLiteral("v"),
-                   QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
-                               {QLatin1StringView("items"), QJsonObject{{QLatin1StringView("allOf"), all}}}});
-        QTest::newRow("allOf of 200 anyOfs, 990 items")
-            << wide << QJsonObject{{QLatin1StringView("v"), items(1000, 990)}} << TooLargeToCheck;
-        QTest::newRow("allOf of 200 anyOfs, 10 items")
-            << wide << QJsonObject{{QLatin1StringView("v"), items(1000, 10)}} << TooLargeToList;
-    }
-
-    void longStringsAnswerFast()
-    {
-        // Each string of the arguments is converted to UTF-8 once, however
-        // many values of an enum it is compared with. jsoncons counts the
-        // characters of a string for each minLength and maxLength, so the
-        // length of the strings counts in whether the check is made.
-        QFETCH(QJsonObject, schema);
-        QFETCH(QJsonObject, arguments);
-        QFETCH(QString, expected);
-        Peer peer;
-        McpServer server;
-        int calls = 0;
-        QString error;
-        QVERIFY2(server.addTool(
-                     McpTool(QStringLiteral("long")).setInputSchema(schema),
-                     [&](McpCall call) {
-                         ++calls;
-                         call.finish(McpResult::text(QStringLiteral("ran")));
-                     },
-                     &error),
-                 qPrintable(error));
-        QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(peer.send(callRequest(1, QStringLiteral("long"), arguments)));
-        // Each answer takes well under a second, in a debug build too. With
-        // the string converted for each comparison the first took 81 s in a
-        // debug build.
-        const int bound = 30000;
-        const QJsonObject reply = peer.readOne(bound);
-        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
-        QCOMPARE(errorLines(reply), expected);
-        QCOMPARE(calls, 0);
-    }
-
-    void longStringsAnswerFast_data()
-    {
-        QTest::addColumn<QJsonObject>("schema");
-        QTest::addColumn<QJsonObject>("arguments");
-        QTest::addColumn<QString>("expected");
-        const auto object = [](const QJsonObject& property) {
-            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
-                               {QLatin1StringView("properties"), QJsonObject{{QLatin1StringView("a"), property}}}};
-        };
-        const auto arrayOf = [](const QJsonObject& item) {
-            return QJsonObject{{QLatin1StringView("type"), QStringLiteral("array")},
-                               {QLatin1StringView("items"), item}};
-        };
-        // U+4E2D, three bytes in UTF-8.
-        const QChar cjk(0x4E2D);
-
-        // 15 MB of UTF-8 against each of 3000 values.
-        QJsonArray values;
-        for (int i = 0; i < 3000; ++i) {
-            values.append(QStringLiteral("v%1").arg(i));
-        }
-        QTest::newRow("CJK string against an enum")
-            << object(QJsonObject{{QLatin1StringView("enum"), values}})
-            << QJsonObject{{QLatin1StringView("a"), QString(5000000, cjk)}}
-            << QStringLiteral("- arguments/a: must be one of the values of enum");
-
-        // 7.2 MB of UTF-8 counted for each of 35 maxLength.
-        QJsonArray lengths;
-        for (int i = 1; i <= 35; ++i) {
-            lengths.append(QJsonObject{{QLatin1StringView("maxLength"), i}});
-        }
-        QJsonArray strings;
-        for (int i = 0; i < 24; ++i) {
-            strings.append(QString(100000, cjk));
-        }
-        QTest::newRow("CJK strings against maxLength in an anyOf")
-            << object(arrayOf(QJsonObject{{QLatin1StringView("anyOf"), lengths}}))
-            << QJsonObject{{QLatin1StringView("a"), strings}} << TooLargeToCheck;
-
-        // Each error that says a property is missing names it in full in its
-        // place, which the server keeps to tell it from the others.
-        QJsonArray names;
+        // One more than the list holds: "error", not "errors".
+        QJsonArray eleven;
         for (int i = 0; i < 10; ++i) {
-            names.append(QString(QStringLiteral("r%1").arg(i) + QString(65536, QLatin1Char('x'))));
+            eleven.append(i);
         }
-        QJsonArray empties;
-        for (int i = 0; i < 100; ++i) {
-            empties.append(QJsonObject());
-        }
-        QTest::newRow("long required names") << object(arrayOf(
-            QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")}, {QLatin1StringView("required"), names}}))
-                                             << QJsonObject{{QLatin1StringView("a"), empties}} << TooLargeToList;
-        // The same schema lists the errors of a small value.
-        QTest::newRow("long required names, 1 item")
-            << object(arrayOf(QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
-                                          {QLatin1StringView("required"), QJsonArray{names.at(0)}}}))
-            << QJsonObject{{QLatin1StringView("a"), QJsonArray{QJsonObject()}}}
-            << QString(QStringLiteral("- arguments/a/0/r0") + QString(59, QLatin1Char('x'))
-                       + QStringLiteral("...: is required"));
+        QJsonObject arguments{{QLatin1StringView("pane"), 1}, {QLatin1StringView("tags"), eleven}};
+        QVERIFY(peer.send(callRequest(2, QStringLiteral("pane_tool"), arguments)));
+        const QStringList more = errorLines(peer.readOne()).split(QLatin1Char('\n'));
+        QCOMPARE(more.size(), 11);
+        QCOMPARE(more.last(), QStringLiteral("- arguments: and 1 more error"));
 
-        // A tool that takes a long text, with a dozen other properties, still
-        // says why 4.4 MB of emoji is refused.
-        QJsonObject properties{
-            {QLatin1StringView("text"),
-             QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")},
-                         {QLatin1StringView("maxLength"), 1048576}}},
-            {QLatin1StringView("pane"), QJsonObject{{QLatin1StringView("type"), QStringLiteral("integer")}}}};
-        for (int i = 0; i < 12; ++i) {
-            properties.insert(QStringLiteral("p%1").arg(i),
-                              QJsonObject{{QLatin1StringView("type"), QStringLiteral("string")}});
+        // The checks before the schema's count as the others do: a thousand
+        // places, and one line for more.
+        QJsonArray surrogates;
+        for (int i = 0; i < 1000; ++i) {
+            surrogates.append(QString(QChar(0xd800)));
         }
-        QString emoji;
-        emoji.reserve(2 * 1100000);
-        for (int i = 0; i < 1100000; ++i) {
-            emoji += QString::fromUcs4(U"\U0001F600", 1);
-        }
-        QTest::newRow("a few megabytes of text still list")
-            << QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
-                           {QLatin1StringView("properties"), properties}}
-            << QJsonObject{{QLatin1StringView("text"), emoji}}
-            << QStringLiteral("- arguments/text: must be at most 1048576 characters long");
+        arguments.insert(QLatin1StringView("tags"), surrogates);
+        QVERIFY(peer.send(callRequest(3, QStringLiteral("pane_tool"), arguments)));
+        const QStringList thousand = errorLines(peer.readOne()).split(QLatin1Char('\n'));
+        QCOMPARE(thousand.size(), 11);
+        QCOMPARE(thousand.first(), QStringLiteral("- arguments/tags/0: contains an unpaired UTF-16 surrogate"));
+        QCOMPARE(thousand.last(), QStringLiteral("- arguments: and 990 more errors"));
+        surrogates.append(QString(QChar(0xdc00)));
+        arguments.insert(QLatin1StringView("tags"), surrogates);
+        QVERIFY(peer.send(callRequest(4, QStringLiteral("pane_tool"), arguments)));
+        QCOMPARE(errorLines(peer.readOne()), TooLargeToList);
     }
 
-    void checksHaveABound()
+    void namesAreComparedWhole()
     {
-        // A check whose work the server cannot bound is not made: a value
-        // nested deeper under a recursive schema than jsoncons can walk
-        // without growing its memory with the square of the depth, a schema
-        // whose references double the work at each level, and a large value
-        // under a schema of many checks. A number that multipleOf cannot
-        // check is refused by name.
-        QFETCH(QJsonObject, schema);
-        QFETCH(QJsonValue, arguments);
-        QFETCH(QString, expected);
+        // A name is compared with every code unit, U+0000 too: "path\0x" is
+        // not "path", nor "a\0x" the property "a".
         Peer peer;
         McpServer server;
-        QString error;
-        QVERIFY2(server.addTool(McpTool(QStringLiteral("bound")).setInputSchema(schema), noop(), &error),
-                 qPrintable(error));
+        QVERIFY(server.addTool(
+            McpTool(QStringLiteral("t"))
+                .setInputSchema(
+                    parse("{'type': 'object', 'properties': {'path': {'type': 'string'}, 'a': {'type': 'integer'}}, "
+                          "'additionalProperties': false}")),
+            noop()));
+        QVERIFY(
+            server.addTool(McpTool(QStringLiteral("u"))
+                               .setInputSchema(parse(
+                                   "{'type': 'object', 'properties': {'a': {'type': 'integer'}}, 'required': ['a']}")),
+                           noop()));
         QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
-        QElapsedTimer timer;
-        timer.start();
-        QVERIFY(peer.send(callRequest(1, QStringLiteral("bound"), arguments.toObject())));
-        const int bound = 30000;
-        const QJsonObject reply = peer.readOne(bound);
-        QVERIFY2(timer.elapsed() < bound, qPrintable(QString::number(timer.elapsed())));
-        if (expected.isEmpty()) {
-            QCOMPARE(firstText(reply), QStringLiteral("ok"));
-        } else {
-            QCOMPARE(errorLines(reply), expected);
-        }
-    }
-
-    void checksHaveABound_data()
-    {
-        QTest::addColumn<QJsonObject>("schema");
-        QTest::addColumn<QJsonValue>("arguments");
-        // Empty: the handler runs.
-        QTest::addColumn<QString>("expected");
-        const auto nest = [](int depth, const QString& key) {
-            QJsonValue value = 1;
-            for (int i = 0; i < depth; ++i) {
-                value = key.isEmpty() ? QJsonValue(QJsonArray{value}) : QJsonValue(QJsonObject{{key, value}});
-            }
-            return value;
-        };
-        // A list of lists, which recurses through items and $ref: two tokens
-        // of path for each level of the value.
-        const QJsonObject lists = parse(
-            "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'type': ['array', "
-            "'integer'], 'items': {'$ref': '#/$defs/n'}}}}");
-        QTest::newRow("lists 300 deep") << lists << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(300, {})}})
-                                        << QString();
-        QTest::newRow("lists 600 deep") << lists << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(600, {})}})
-                                        << TooLargeToCheck;
-        // Two references to the schema at each level: 2^depth checks.
-        const QJsonObject doubling = parse(
-            "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'properties': {'x': "
-            "{'allOf': [{'$ref': '#/$defs/n'}, {'$ref': '#/$defs/n'}]}}}}}");
-        QTest::newRow("doubling 5 deep") << doubling
-                                         << QJsonValue(
-                                                QJsonObject{{QLatin1StringView("a"), nest(5, QStringLiteral("x"))}})
-                                         << QString();
-        QTest::newRow("doubling 40 deep")
-            << doubling << QJsonValue(QJsonObject{{QLatin1StringView("a"), nest(40, QStringLiteral("x"))}})
-            << TooLargeToCheck;
-        // Three million integers, which jsoncons would check in about a
-        // second, refused, and a hundred thousand checked.
-        const QJsonObject integers =
-            parse("{'type': 'object', 'properties': {'a': {'type': 'array', 'items': {'type': 'integer'}}}}");
-        QJsonArray many;
-        for (int i = 0; i < 3000000; ++i) {
-            many.append(1);
-        }
-        QTest::newRow("3000000 integers")
-            << integers << QJsonValue(QJsonObject{{QLatin1StringView("a"), many}}) << TooLargeToCheck;
-        QTest::newRow("100000 integers")
-            << integers
-            << QJsonValue(QJsonObject{{QLatin1StringView("a"), QJsonArray::fromVariantList(QVariantList(100000, 1))}})
-            << QString();
-        // jsoncons checks multipleOf with doubles, which do not tell 10^17
-        // from a multiple of 3.
-        const QJsonObject multiple = parse("{'type': 'object', 'properties': {'a': {'multipleOf': 3}}}");
-        QTest::newRow("multipleOf past 2^53")
-            << multiple << QJsonValue(parse("{'a': 100000000000000000}"))
-            << QStringLiteral(
-                   "- arguments/a: must be less than 2^53 in magnitude, because the server checks "
-                   "multipleOf with doubles");
-        QTest::newRow("multipleOf below 2^53") << multiple << QJsonValue(parse("{'a': 9007199254740989}"))
-                                               << QStringLiteral("- arguments/a: must be a multiple of 3");
+        QVERIFY(sendCall(peer, 1, QStringLiteral("t"), "{'path\\u0000; rm -rf /': 1}"));
+        QCOMPARE(errorLines(peer.readOne()),
+                 QStringLiteral("- arguments/path") + QChar(0)
+                     + QStringLiteral("; rm -rf ~1: is not a known property"));
+        QVERIFY(sendCall(peer, 2, QStringLiteral("u"), "{'a': 1, 'a\\u0000x': 's'}"));
+        QCOMPARE(firstText(peer.readOne()), QStringLiteral("ok"));
+        QVERIFY(sendCall(peer, 3, QStringLiteral("u"), "{'a\\u0000': 1}"));
+        QCOMPARE(errorLines(peer.readOne()), QStringLiteral("- arguments/a: is required"));
     }
 
     void longNamesAreShortInErrors()
@@ -1164,9 +884,19 @@ private Q_SLOTS:
 
     void boundsAreTheSameInEveryLocale()
     {
-        // QCoreApplication sets the locale of the environment, and jsoncons
-        // writes bounds with std::to_string: "2,500000" under de_DE.
-        const std::string saved = std::setlocale(LC_NUMERIC, nullptr);
+        // QCoreApplication sets the locale of the environment, and a number
+        // written with the C library (std::to_string, printf) would read
+        // "2,500000" under de_DE. The lines are written with
+        // QString::number, the same in every locale. Without a locale that
+        // has a decimal comma this checks the C locale only, and says so.
+        struct RestoreLocale
+        {
+            std::string saved = std::setlocale(LC_NUMERIC, nullptr);
+            ~RestoreLocale()
+            {
+                std::setlocale(LC_NUMERIC, saved.c_str());
+            }
+        } restore;
         bool commaLocale = false;
         for (const char* name : {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"}) {
             if (!commaLocale) {
@@ -1184,7 +914,6 @@ private Q_SLOTS:
         const QString high = errorLines(peer.readOne());
         QVERIFY(sendCall(peer, 2, QStringLiteral("v"), "{'v': 0}"));
         const QString low = errorLines(peer.readOne());
-        std::setlocale(LC_NUMERIC, saved.c_str());
         QCOMPARE(high, QStringLiteral("- arguments/v: must be at most 2.5"));
         QCOMPARE(low, QStringLiteral("- arguments/v: must be greater than 1e-07"));
         if (!commaLocale) {
@@ -1196,7 +925,11 @@ private Q_SLOTS:
     {
         // For each keyword addTool allows, a value that JSON Schema 2020-12
         // accepts passes and one it refuses fails. The annotations, format
-        // among them, never refuse.
+        // among them, never refuse. The rows marked "departure" are the
+        // server's own verdicts, which the README gives: an integer past
+        // qint64 where the schema asks for an integer, and an unpaired
+        // surrogate, are refused. Python's jsonschema agrees with every
+        // other row.
         QTest::addColumn<QByteArray>("property");
         QTest::addColumn<QByteArray>("value");
         QTest::addColumn<bool>("accepted");
@@ -1212,17 +945,20 @@ private Q_SLOTS:
         row("integer fraction past int", "{'type': 'integer'}", "3000000000.5", false);
         row("integer qint64 max", "{'type': 'integer'}", "9223372036854775807", true);
         row("integer qint64 min", "{'type': 'integer'}", "-9223372036854775808", true);
-        // jsoncons would take 2^63 for an integer of at least 1, and
-        // toInteger() gives the handler 0: refused before jsoncons.
+        // Departures: toInteger() gives the handler 0 for these.
         row("integer 2^63 with a minimum", "{'type': 'integer', 'minimum': 1}", "9223372036854775808", false);
         row("integer 1e19", "{'type': 'integer'}", "1e19", false);
+        row("integer or string 1e19", "{'type': ['integer', 'string']}", "1e19", false);
+        // A number, which the handler reads with toDouble().
+        row("integer or number 1e19", "{'type': ['integer', 'number']}", "1e19", true);
         // Qt's parser rounds these to a double, as the README says: the
         // first arrives as qint64's minimum, the second as 2^63.
         row("integer rounded to qint64 min", "{'type': 'integer'}", "-9223372036854775809", true);
         row("integer qint64 max with a fraction", "{'type': 'integer'}", "9223372036854775807.0", false);
         row("number", "{'type': 'number'}", "2.5", true);
         row("number not a string", "{'type': 'number'}", "'2'", false);
-        row("number past qint64", "{'type': 'number'}", "1e300", false);
+        row("number past qint64", "{'type': 'number'}", "1e300", true);
+        row("number 2^63", "{'type': 'number', 'minimum': 9223372036854775807}", "9223372036854775808", true);
         row("type list", "{'type': ['string', 'null']}", "null", true);
         row("type list refuses", "{'type': ['string', 'null']}", "1", false);
         row("const", "{'const': 'x'}", "'x'", true);
@@ -1230,8 +966,14 @@ private Q_SLOTS:
         row("enum number", "{'enum': [1, 2]}", "2", true);
         row("enum refuses", "{'enum': [1, 2]}", "3", false);
         row("enum string", "{'enum': ['tab', 'split']}", "'tab'", true);
-        // UTF-8 cannot hold 't\ud800ab', which the handler reads.
+        // Departure: an unpaired surrogate.
         row("enum unpaired surrogate", "{'enum': ['tab', 'split']}", "'t\\ud800ab'", false);
+        row("enum of many strings", "{'enum': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']}", "'j'", true);
+        row("enum of many strings refuses", "{'enum': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']}", "'k'",
+            false);
+        row("enum mixed", "{'enum': ['1', 1, null, [1]]}", "[1.0]", true);
+        row("enum mixed refuses", "{'enum': ['1', 1, null, [1]]}", "true", false);
+        row("enum empty", "{'enum': []}", "1", false);
         row("minimum", "{'minimum': 1}", "1", true);
         row("minimum refuses", "{'minimum': 1}", "0.5", false);
         row("maximum", "{'maximum': 1}", "1", true);
@@ -1243,6 +985,8 @@ private Q_SLOTS:
         row("minLength", "{'type': 'string', 'minLength': 2}", "'a'", false);
         row("minLength accepts", "{'type': 'string', 'minLength': 2}", "'ab'", true);
         row("minLength unpaired surrogate", "{'type': 'string', 'minLength': 1}", "'\\ud800'", false);
+        row("minLength of a pair", "{'type': 'string', 'minLength': 2}", "'\\ud83d\\ude00'", false);
+        row("maxLength of pairs", "{'type': 'string', 'maxLength': 2}", "'\\ud83d\\ude00\\ud83d\\ude00'", true);
         // Characters are code points in both dialects.
         row("maxLength code points", "{'type': 'string', 'maxLength': 5}", "'na\\u00efve'", true);
         row("maxLength refuses", "{'type': 'string', 'maxLength': 4}", "'na\\u00efve'", false);
@@ -1302,8 +1046,9 @@ private Q_SLOTS:
         row("annotations",
             "{'title': 't', 'description': 'd', 'default': 1, 'examples': [1], 'readOnly': true, "
             "'writeOnly': false, 'deprecated': true, '$comment': 'c', 'contentMediaType': 'image/png', "
-            "'contentEncoding': 'base64'}",
+            "'contentEncoding': 'base64', 'contentSchema': false}",
             "1", true);
+        row("patternProperties empty", "{'patternProperties': {}, 'additionalProperties': false}", "{'a': 1}", false);
         // format is an annotation in 2020-12, as a client reads it.
         row("format", "{'type': 'string', 'format': 'email'}", "'not an address'", true);
         // Integers compare exactly, past 2^53 too.
@@ -1312,6 +1057,25 @@ private Q_SLOTS:
         row("enum past 2^53", "{'enum': [9007199254740993]}", "9007199254740992", false);
         row("enum past 2^53 accepts", "{'enum': [9007199254740993]}", "9007199254740993", true);
         row("const 1 and 1.0", "{'const': 1}", "1.0", true);
+        row("const 1 and true", "{'const': 1}", "true", false);
+        row("const false and 0", "{'const': false}", "0", false);
+        row("const null", "{'const': null}", "null", true);
+        // Exactly: the largest qint64 is not 2^63, whatever a double says.
+        row("const qint64 max and 2^63", "{'const': 9223372036854775807}", "9223372036854775808", false);
+        row("maximum 2^63", "{'maximum': 9223372036854775808}", "9223372036854775807", true);
+        row("exclusiveMaximum 2^63", "{'exclusiveMaximum': 9223372036854775808}", "9223372036854775807", true);
+        row("exclusiveMaximum qint64 max", "{'exclusiveMaximum': 9223372036854775807}", "9223372036854775806", true);
+        row("exclusiveMaximum qint64 max refuses", "{'exclusiveMaximum': 9223372036854775807}", "9223372036854775807",
+            false);
+        row("minimum qint64 min", "{'minimum': -9223372036854775808}", "-9223372036854775808", true);
+        row("exclusiveMinimum qint64 min", "{'exclusiveMinimum': -9223372036854775808}", "-9223372036854775808", false);
+        row("exclusiveMinimum below qint64 min", "{'exclusiveMinimum': -9223372036854777856}", "-9223372036854775808",
+            true);
+        row("minimum 2^53 + 1", "{'minimum': 9007199254740993}", "9007199254740992", false);
+        row("minimum 2^53 + 1 accepts", "{'minimum': 9007199254740993}", "9007199254740993", true);
+        row("maximum 2^53 as a double", "{'maximum': 9007199254740992.0}", "9007199254740993", false);
+        row("maximum 0.5 against an integer", "{'maximum': 0.5}", "1", false);
+        row("minimum 0.5 against an integer", "{'minimum': 0.5}", "1", true);
         // Members compare by name, whatever their order.
         row("const object", "{'const': {'a': 1, 'b': [true]}}", "{'b': [true], 'a': 1}", true);
         row("const object refuses", "{'const': {'a': 1, 'b': [true]}}", "{'b': [false], 'a': 1}", false);
@@ -1319,12 +1083,22 @@ private Q_SLOTS:
         row("multipleOf refuses", "{'multipleOf': 2}", "3", false);
         row("multipleOf a fraction", "{'multipleOf': 1}", "2.5", false);
         row("multipleOf of a fraction", "{'multipleOf': 2.5}", "7.5", true);
-        // jsoncons allows an error of one unit in the last place, so the
-        // decimal 0.3 passes where (0.3 / 0.1) % 1 in doubles does not.
-        row("multipleOf 0.1", "{'multipleOf': 0.1}", "0.3", true);
-        // Past 2^53 doubles do not tell 10^17 from a multiple of 3: refused.
+        // A divisor with a fraction divides as doubles, as Python's
+        // jsonschema and JavaScript validators do: 0.5 / 0.1 is 5, and
+        // 0.3 / 0.1 is 2.9999999999999996.
+        row("multipleOf 0.1", "{'multipleOf': 0.1}", "0.3", false);
+        row("multipleOf 0.1 of 0.5", "{'multipleOf': 0.1}", "0.5", true);
+        row("multipleOf 0.01 of 0.07", "{'multipleOf': 0.01}", "0.07", false);
+        // An integer divisor divides exactly, past 2^53 too.
         row("multipleOf past 2^53", "{'multipleOf': 3}", "100000000000000000", false);
-        row("multipleOf past 2^53 of a multiple", "{'multipleOf': 1}", "100000000000000000", false);
+        row("multipleOf past 2^53 of a multiple", "{'multipleOf': 1}", "100000000000000000", true);
+        row("multipleOf qint64 max", "{'multipleOf': 7}", "9223372036854775807", true);
+        row("multipleOf qint64 max refuses", "{'multipleOf': 2}", "9223372036854775807", false);
+        row("multipleOf qint64 min", "{'multipleOf': 2}", "-9223372036854775808", true);
+        row("multipleOf 1e300 of 2", "{'type': 'number', 'multipleOf': 2}", "1e300", true);
+        // The quotient overflows: the binary values divide exactly.
+        row("multipleOf 0.5 of 1e308", "{'type': 'number', 'multipleOf': 0.5}", "1e308", true);
+        row("multipleOf 0.1 of 1e308", "{'type': 'number', 'multipleOf': 0.1}", "1e308", false);
         row("contains", "{'contains': {'type': 'string'}}", "[1, 'x']", true);
         row("contains refuses", "{'contains': {'type': 'string'}}", "[1, 2]", false);
         row("contains not an array", "{'contains': {'type': 'string'}}", "{'a': 1}", true);
@@ -1340,9 +1114,33 @@ private Q_SLOTS:
         row("prefixItems and items refuses", "{'prefixItems': [{'type': 'string'}], 'items': {'type': 'integer'}}",
             "['a', 1, 'b']", false);
         row("prefixItems and items false", "{'prefixItems': [{}], 'items': false}", "[1, 2]", false);
+        row("uniqueItems", "{'uniqueItems': true}", "[1, 'a', [1], {'a': 1}, null, true]", true);
+        row("uniqueItems refuses", "{'uniqueItems': true}", "[1, 2, 1]", false);
+        row("uniqueItems 1 and 1.0", "{'uniqueItems': true}", "[1, 1.0]", false);
+        row("uniqueItems 1 and true", "{'uniqueItems': true}", "[1, true, 0, false]", true);
+        row("uniqueItems objects in any order", "{'uniqueItems': true}", "[{'a': 1, 'b': 2}, {'b': 2, 'a': 1}]", false);
+        row("uniqueItems nested", "{'uniqueItems': true}", "[[1, [true]], [1, [1]]]", true);
+        row("uniqueItems nested refuses", "{'uniqueItems': true}", "[[1, {'x': [2.0]}], [1, {'x': [2]}]]", false);
+        row("uniqueItems false", "{'uniqueItems': false}", "[1, 1]", true);
+        row("uniqueItems qint64 max and 2^63", "{'uniqueItems': true}", "[9223372036854775807, 9223372036854775808]",
+            true);
         row("dependentRequired", "{'dependentRequired': {'a': ['b']}}", "{'a': 1}", false);
         row("dependentRequired accepts", "{'dependentRequired': {'a': ['b']}}", "{'a': 1, 'b': 2}", true);
         row("dependentRequired absent", "{'dependentRequired': {'a': ['b']}}", "{'c': 1}", true);
+        row("dependentRequired of many triggers",
+            "{'dependentRequired': {'a': ['b'], 'c': ['d'], 'e': ['f'], 'g': ['h'], 'i': ['j']}}", "{'i': 1}", false);
+        row("dependentSchemas", "{'dependentSchemas': {'a': {'required': ['b']}}}", "{'a': 1}", false);
+        row("dependentSchemas accepts", "{'dependentSchemas': {'a': {'required': ['b']}}}", "{'a': 1, 'b': 2}", true);
+        row("dependentSchemas absent", "{'dependentSchemas': {'a': false}}", "{'b': 1}", true);
+        row("dependentSchemas present", "{'dependentSchemas': {'a': false}}", "{'a': 1}", false);
+        row("dependentSchemas not an object", "{'dependentSchemas': {'a': false}}", "['a']", true);
+        row("dependentSchemas evaluates",
+            "{'dependentSchemas': {'a': {'properties': {'b': true}}}, 'properties': {'a': true}, "
+            "'unevaluatedProperties': false}",
+            "{'a': 1, 'b': 2}", true);
+        row("dependentSchemas evaluates when present",
+            "{'dependentSchemas': {'a': {'properties': {'b': true}}}, 'unevaluatedProperties': false}", "{'b': 2}",
+            false);
         row("if then", "{'if': {'required': ['a']}, 'then': {'required': ['b']}, 'else': {'required': ['c']}}",
             "{'a': 1}", false);
         row("if then accepts", "{'if': {'required': ['a']}, 'then': {'required': ['b']}, 'else': {'required': ['c']}}",
@@ -1360,6 +1158,43 @@ private Q_SLOTS:
         row("unevaluatedProperties failed branch",
             "{'anyOf': [{'properties': {'a': true}, 'required': ['z']}, true], 'unevaluatedProperties': false}",
             "{'a': 1}", false);
+        row("unevaluatedProperties a schema",
+            "{'properties': {'a': true}, 'unevaluatedProperties': {'type': 'integer'}}", "{'a': 'x', 'b': 1}", true);
+        row("unevaluatedProperties a schema refuses",
+            "{'properties': {'a': true}, 'unevaluatedProperties': {'type': 'integer'}}", "{'a': 'x', 'b': 'y'}", false);
+        // not drops what its subschema evaluated, whether it passed or not.
+        row("unevaluatedProperties beside not",
+            "{'not': {'not': {'properties': {'a': true}}}, 'unevaluatedProperties': false}", "{'a': 1}", false);
+        row("unevaluatedProperties beside not accepts",
+            "{'not': {'required': ['b']}, 'properties': {'a': true}, 'unevaluatedProperties': false}", "{'a': 1}",
+            true);
+        // The branch of if that is not taken evaluates nothing, and if's
+        // condition evaluates when it holds.
+        row("unevaluatedProperties if holds",
+            "{'if': {'properties': {'a': {'const': 1}}}, 'then': {'properties': {'b': true}}, 'else': "
+            "{'properties': {'c': true}}, 'unevaluatedProperties': false}",
+            "{'a': 1, 'b': 2}", true);
+        row("unevaluatedProperties if holds refuses",
+            "{'if': {'properties': {'a': {'const': 1}}}, 'then': {'properties': {'b': true}}, 'else': "
+            "{'properties': {'c': true}}, 'unevaluatedProperties': false}",
+            "{'a': 1, 'c': 2}", false);
+        row("unevaluatedProperties if fails",
+            "{'if': {'properties': {'a': {'const': 1}}}, 'then': {'properties': {'b': true}}, 'else': "
+            "{'properties': {'c': true}}, 'unevaluatedProperties': false}",
+            "{'a': 2, 'c': 2}", false);
+        row("unevaluatedProperties if fails accepts",
+            "{'if': {'properties': {'a': {'const': 1}}}, 'then': {'properties': {'b': true}}, 'else': "
+            "{'properties': {'a': true, 'c': true}}, 'unevaluatedProperties': false}",
+            "{'a': 2, 'c': 2}", true);
+        // Each branch of oneOf that passed, the one.
+        row("unevaluatedProperties oneOf",
+            "{'oneOf': [{'properties': {'a': true}, 'required': ['a']}, {'properties': {'b': true}, 'required': "
+            "['b']}], 'unevaluatedProperties': false}",
+            "{'b': 1}", true);
+        row("unevaluatedProperties nested",
+            "{'allOf': [{'unevaluatedProperties': true}], 'unevaluatedProperties': false}", "{'z': 1}", true);
+        row("unevaluatedProperties additionalProperties",
+            "{'additionalProperties': {'type': 'integer'}, 'unevaluatedProperties': false}", "{'z': 1}", true);
         row("unevaluatedProperties through $ref",
             "{'$defs': {'p': {'properties': {'a': true}}}, '$ref': '#/properties/v/$defs/p', "
             "'unevaluatedProperties': false}",
@@ -1368,6 +1203,21 @@ private Q_SLOTS:
         row("unevaluatedItems accepts", "{'prefixItems': [true], 'unevaluatedItems': false}", "[1]", true);
         row("unevaluatedItems schema", "{'prefixItems': [true], 'unevaluatedItems': {'type': 'string'}}", "[1, 'x', 2]",
             false);
+        // contains evaluates the items it matched.
+        row("unevaluatedItems beside contains", "{'contains': {'type': 'string'}, 'unevaluatedItems': false}",
+            "['a', 'b']", true);
+        row("unevaluatedItems beside contains refuses", "{'contains': {'type': 'string'}, 'unevaluatedItems': false}",
+            "['a', 1]", false);
+        row("unevaluatedItems beside not", "{'not': {'not': {'items': true}}, 'unevaluatedItems': false}", "[1]",
+            false);
+        row("unevaluatedItems in a failed anyOf branch",
+            "{'anyOf': [{'prefixItems': [true, true], 'minItems': 3}, {'prefixItems': [true]}], 'unevaluatedItems': "
+            "false}",
+            "[1, 2]", false);
+        row("unevaluatedItems through $ref into items",
+            "{'$defs': {'t': {'prefixItems': [{}], 'items': {'type': 'integer'}}}, 'allOf': [{'$ref': "
+            "'#/properties/v/$defs/t'}], 'unevaluatedItems': false}",
+            "['a', 1, 2]", true);
         row("$ref", "{'$defs': {'s': {'type': 'string'}}, '$ref': '#/properties/v/$defs/s'}", "1", false);
         row("$ref accepts", "{'$defs': {'s': {'type': 'string'}}, '$ref': '#/properties/v/$defs/s'}", "'x'", true);
         row("$ref beside a keyword",
@@ -1375,6 +1225,28 @@ private Q_SLOTS:
             "'maxLength': 1}",
             "'xy'", false);
         row("$ref to an anchor", "{'$defs': {'s': {'$anchor': 'str', 'type': 'string'}}, '$ref': '#str'}", "1", false);
+        row("$ref to an anchor with _", "{'$defs': {'s': {'$anchor': '_s', 'type': 'string'}}, '$ref': '#_s'}", "'x'",
+            true);
+        row("$ref to false", "{'$defs': {'f': false}, '$ref': '#/properties/v/$defs/f'}", "1", false);
+        row("$ref to true", "{'$defs': {'t': true}, '$ref': '#/properties/v/$defs/t'}", "1", true);
+        row("$ref into items beside prefixItems",
+            "{'type': 'array', 'prefixItems': [{'type': 'integer'}], 'items': {'type': 'string'}, "
+            "'contains': {'$ref': '#/properties/v/items'}}",
+            "[1, 2]", false);
+        row("$ref into items beside prefixItems accepts",
+            "{'type': 'array', 'prefixItems': [{'type': 'integer'}], 'items': {'type': 'string'}, "
+            "'contains': {'$ref': '#/properties/v/items'}}",
+            "[1, 'a']", true);
+        row("$ref percent-encoded",
+            "{'$defs': {'a b%': {'type': 'string'}, 'c/d~': {'type': 'integer'}}, 'anyOf': [{'$ref': "
+            "'#/properties/v/$defs/a%20b%25'}, {'$ref': '#/properties/v/$defs/c~1d~0'}]}",
+            "true", false);
+        row("$ref percent-encoded accepts",
+            "{'$defs': {'a b%': {'type': 'string'}, 'c/d~': {'type': 'integer'}}, 'anyOf': [{'$ref': "
+            "'#/properties/v/$defs/a%20b%25'}, {'$ref': '#/properties/v/$defs/c~1d~0'}]}",
+            "3", true);
+        row("$ref to non-ASCII", "{'$defs': {'\\u00e9': {'type': 'string'}}, '$ref': '#/properties/v/$defs/%C3%A9'}",
+            "1", false);
         row("$ref recursion",
             "{'$defs': {'n': {'type': 'object', 'properties': {'next': {'$ref': '#/properties/v/$defs/n'}, "
             "'id': {'type': 'integer'}}}}, '$ref': '#/properties/v/$defs/n'}",
@@ -1559,12 +1431,19 @@ private Q_SLOTS:
             "{'type': 'object', 'properties': {'v': {'type': 'string', 'allOf': [{'anyOf': [{'type': 'boolean'}, "
             "{'type': 'integer'}]}]}}}",
             "{'v': 3}", "- arguments/v: must be of type string");
-        // Every branch failed: each is named, and the anyOf.
+        // Every branch failed: each is named, and the anyOf. The keywords of
+        // a schema come before the subschemas it applies to the same value.
         row("anyOf failed",
             "{'type': 'object', 'properties': {'v': {'maximum': 5, 'anyOf': [{'maximum': 0}, {'minimum': 9}]}}}",
             "{'v': 7}",
-            "- arguments/v: must be at most 0\n- arguments/v: must be at least 9\n"
-            "- arguments/v: must match at least one schema of anyOf\n- arguments/v: must be at most 5");
+            "- arguments/v: must be at most 5\n- arguments/v: must be at most 0\n- arguments/v: must be at least 9\n"
+            "- arguments/v: must match at least one schema of anyOf");
+        // An integer that qint64 does not hold, in a branch.
+        row("anyOf of an integer past qint64",
+            "{'type': 'object', 'properties': {'v': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}}}",
+            "{'v': 1e19}",
+            "- arguments/v: must be from -9223372036854775808 to 9223372036854775807\n"
+            "- arguments/v: must be of type string\n- arguments/v: must match at least one schema of anyOf");
         row("oneOf failed",
             "{'type': 'object', 'properties': {'v': {'oneOf': [{'type': 'string'}, {'type': 'null'}]}}}", "{'v': 7}",
             "- arguments/v: must be of type string\n- arguments/v: must be of type null\n"
@@ -1582,18 +1461,22 @@ private Q_SLOTS:
         // A false subschema has no reason of its own.
         row("false below items", "{'type': 'object', 'properties': {'v': {'items': {'properties': {'a': false}}}}}",
             "{'v': [{'a': 1}]}", "- arguments/v/0/a: does not match the schema");
-        // jsoncons names the first item that a false items refuses only.
+        // Each item that a false items refuses.
         row("items false", "{'type': 'object', 'properties': {'v': {'items': false}}}", "{'v': [1, 2]}",
-            "- arguments/v/0: is not allowed, because the schema allows no items");
+            "- arguments/v/0: is not allowed, because the schema allows no items\n"
+            "- arguments/v/1: is not allowed, because the schema allows no items");
         row("items false after prefixItems",
             "{'type': 'object', 'properties': {'v': {'prefixItems': [{}, {}], 'items': false}}}", "{'v': [1, 2, 3, 4]}",
-            "- arguments/v/2: is not allowed, because the schema allows at most 2 items");
+            "- arguments/v/2: is not allowed, because the schema allows at most 2 items\n"
+            "- arguments/v/3: is not allowed, because the schema allows at most 2 items");
+        row("items false after one prefixItem",
+            "{'type': 'object', 'properties': {'v': {'prefixItems': [{}], 'items': false}}}", "{'v': [1, 2]}",
+            "- arguments/v/1: is not allowed, because the schema allows at most 1 item");
         row("items after prefixItems",
             "{'type': 'object', 'properties': {'v': {'prefixItems': [{'type': 'string'}], 'items': {'type': "
             "'integer'}}}}",
             "{'v': [1, 'a']}", "- arguments/v/0: must be of type string\n- arguments/v/1: must be of type integer");
-        // jsoncons collects the errors of additionalProperties and gives
-        // none: each member is checked again to name them.
+        // The errors of additionalProperties, at each member.
         row("false below additionalProperties",
             "{'type': 'object', 'additionalProperties': {'properties': {'x': false}}}", "{'c': {'x': 1}}",
             "- arguments/c/x: does not match the schema");
@@ -1640,6 +1523,123 @@ private Q_SLOTS:
         row("big bounds",
             "{'type': 'object', 'properties': {'v': {'minimum': 9007199254740993, 'exclusiveMaximum': 1e300}}}",
             "{'v': 9007199254740992}", "- arguments/v: must be at least 9007199254740993");
+        row("2^53 + 1 not a multiple", "{'type': 'object', 'properties': {'v': {'multipleOf': 2}}}",
+            "{'v': 9007199254740993}", "- arguments/v: must be a multiple of 2");
+        row("qint64 max", "{'type': 'object', 'properties': {'v': {'exclusiveMaximum': 9223372036854775807}}}",
+            "{'v': 9223372036854775807}", "- arguments/v: must be less than 9223372036854775807");
+        row("2^63 bound", "{'type': 'object', 'properties': {'v': {'type': 'number', 'maximum': 9223372036854775807}}}",
+            "{'v': 9223372036854775808}", "- arguments/v: must be at most 9223372036854775807");
+        // A bound past qint64 with all its digits, not 9223372036854776000.
+        row("2^63 written whole",
+            "{'type': 'object', 'properties': {'v': {'type': 'number', 'exclusiveMinimum': 9223372036854775808}}}",
+            "{'v': 9223372036854775808}", "- arguments/v: must be greater than 9223372036854775808");
+        row("1e300 written short", "{'type': 'object', 'properties': {'v': {'maximum': -1e300}}}", "{'v': 0}",
+            "- arguments/v: must be at most -1e+300");
+        row("exclusiveMinimum", "{'type': 'object', 'properties': {'v': {'exclusiveMinimum': 0.5}}}", "{'v': 0.5}",
+            "- arguments/v: must be greater than 0.5");
+        row("exclusiveMaximum", "{'type': 'object', 'properties': {'v': {'exclusiveMaximum': 3}}}", "{'v': 3}",
+            "- arguments/v: must be less than 3");
+        // Each text of a count, and its singular.
+        row("minItems", "{'type': 'object', 'properties': {'v': {'minItems': 2}}}", "{'v': [1]}",
+            "- arguments/v: must have at least 2 items");
+        row("minItems 1", "{'type': 'object', 'properties': {'v': {'minItems': 1}}}", "{'v': []}",
+            "- arguments/v: must have at least 1 item");
+        row("maxItems 1", "{'type': 'object', 'properties': {'v': {'maxItems': 1}}}", "{'v': [1, 2]}",
+            "- arguments/v: must have at most 1 item");
+        row("minProperties", "{'type': 'object', 'properties': {'v': {'minProperties': 2}}}", "{'v': {'a': 1}}",
+            "- arguments/v: must have at least 2 properties");
+        row("minProperties 1", "{'type': 'object', 'properties': {'v': {'minProperties': 1}}}", "{'v': {}}",
+            "- arguments/v: must have at least 1 property");
+        row("maxProperties", "{'type': 'object', 'properties': {'v': {'maxProperties': 2}}}",
+            "{'v': {'a': 1, 'b': 2, 'c': 3}}", "- arguments/v: must have at most 2 properties");
+        row("maxProperties 1", "{'type': 'object', 'properties': {'v': {'maxProperties': 1}}}",
+            "{'v': {'a': 1, 'b': 2}}", "- arguments/v: must have at most 1 property");
+        row("minLength 1", "{'type': 'object', 'properties': {'v': {'minLength': 1}}}", "{'v': ''}",
+            "- arguments/v: must be at least 1 character long");
+        row("minLength", "{'type': 'object', 'properties': {'v': {'minLength': 3}}}", "{'v': 'ab'}",
+            "- arguments/v: must be at least 3 characters long");
+        row("maxLength 1", "{'type': 'object', 'properties': {'v': {'maxLength': 1}}}", "{'v': 'ab'}",
+            "- arguments/v: must be at most 1 character long");
+        row("maxContains 2",
+            "{'type': 'object', 'properties': {'v': {'contains': {'type': 'string'}, 'maxContains': 2}}}",
+            "{'v': ['a', 'b', 'c']}", "- arguments/v: must have at most 2 items that match contains");
+        row("minContains 1",
+            "{'type': 'object', 'properties': {'v': {'contains': {'type': 'string'}, 'minContains': 1}}}", "{'v': [1]}",
+            "- arguments/v: must have an item that matches contains");
+        row("type of three", "{'type': 'object', 'properties': {'v': {'type': ['string', 'null', 'boolean']}}}",
+            "{'v': 1}", "- arguments/v: must be of type string, null or boolean");
+        row("type of two", "{'type': 'object', 'properties': {'v': {'type': ['integer', 'array']}}}", "{'v': 'x'}",
+            "- arguments/v: must be of type integer or array");
+        // A false branch of allOf has no reason of its own either.
+        row("allOf of false", "{'type': 'object', 'properties': {'v': {'allOf': [true, false]}}}", "{'v': 1}",
+            "- arguments/v: does not match the schema");
+        row("uniqueItems", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
+            "{'v': [1, 2, 'a', 2.0, 1]}", "- arguments/v: must have unique items, and items 1 and 3 are equal");
+        row("uniqueItems of objects", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
+            "{'v': [{'a': [1], 'b': 2}, {'b': 2.0, 'a': [1.0]}]}",
+            "- arguments/v: must have unique items, and items 0 and 1 are equal");
+        row("dependentSchemas",
+            "{'type': 'object', 'properties': {'v': {'dependentSchemas': {'card': {'required': ['expiry'], "
+            "'properties': {'card': {'type': 'string'}}}}}}}",
+            "{'v': {'card': 1}}", "- arguments/v/card: must be of type string\n- arguments/v/expiry: is required");
+        row("dependentRequired of a long name",
+            "{'type': 'object', 'dependentRequired': "
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn': "
+            "['b']}}",
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn': 1}",
+            "- arguments/b: is required when \"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn...\" is "
+            "present");
+        // Every member and item that unevaluatedProperties or
+        // unevaluatedItems refuses, and none that another keyword
+        // evaluated, though its value failed there.
+        row("unevaluatedProperties each",
+            "{'type': 'object', 'allOf': [{'properties': {'a': {}}}], 'unevaluatedProperties': false}",
+            "{'a': 1, 'b': 2, 'c': 3}",
+            "- arguments/b: is not a known property\n- arguments/c: is not a known property");
+        row("unevaluatedProperties beside a failed property",
+            "{'type': 'object', 'properties': {'a': {'type': 'string'}}, 'unevaluatedProperties': false}",
+            "{'a': 1, 'b': 2}", "- arguments/a: must be of type string\n- arguments/b: is not a known property");
+        row("unevaluatedProperties beside a failed allOf",
+            "{'type': 'object', 'allOf': [{'properties': {'a': {'type': 'string'}}}], 'unevaluatedProperties': false}",
+            "{'a': 1}", "- arguments/a: must be of type string");
+        row("unevaluatedProperties beside a failed anyOf",
+            "{'type': 'object', 'anyOf': [{'properties': {'a': {'type': 'string'}}}, {'properties': {'b': {'type': "
+            "'string'}}}], 'unevaluatedProperties': false}",
+            "{'a': 1, 'b': 2, 'c': 3}",
+            "- arguments/a: must be of type string\n- arguments/b: must be of type string\n"
+            "- arguments: must match at least one schema of anyOf\n- arguments/c: is not a known property");
+        row("unevaluatedProperties a schema",
+            "{'type': 'object', 'properties': {'a': {}}, 'unevaluatedProperties': {'type': 'integer', 'maximum': 3}}",
+            "{'a': 'x', 'b': 'y', 'c': 4, 'd': 1}",
+            "- arguments/b: must be of type integer\n- arguments/c: must be at most 3");
+        row("unevaluatedItems beside a failed prefixItem",
+            "{'type': 'object', 'properties': {'v': {'prefixItems': [{'type': 'string'}], 'unevaluatedItems': false}}}",
+            "{'v': [1]}", "- arguments/v/0: must be of type string");
+        row("unevaluatedItems each",
+            "{'type': 'object', 'properties': {'v': {'prefixItems': [{}], 'unevaluatedItems': false}}}",
+            "{'v': [1, 2, 3]}",
+            "- arguments/v/1: is not allowed, because the schema allows no more items\n"
+            "- arguments/v/2: is not allowed, because the schema allows no more items");
+        row("unevaluatedItems beside contains",
+            "{'type': 'object', 'properties': {'v': {'contains': {'type': 'string'}, 'unevaluatedItems': false}}}",
+            "{'v': [1, 'a', 2]}",
+            "- arguments/v/0: is not allowed, because the schema allows no more items\n"
+            "- arguments/v/2: is not allowed, because the schema allows no more items");
+        // Names cut at 64 code units, never between the halves of a
+        // surrogate pair or of an escape.
+        row("cut before a surrogate pair", "{'type': 'object', 'additionalProperties': false}",
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\\ud83d\\ude00nnnnnn': 1}",
+            "- arguments/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn...: is not a known property");
+        row("cut after a surrogate pair", "{'type': 'object', 'additionalProperties': false}",
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\\ud83d\\ude00nnnnnn': 1}",
+            "- arguments/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\xf0\x9f\x98\x80...: is not a "
+            "known property");
+        row("cut before an escape", "{'type': 'object', 'additionalProperties': false}",
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn/nnnnnn': 1}",
+            "- arguments/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn...: is not a known property");
+        row("name of 64", "{'type': 'object', 'additionalProperties': false}",
+            "{'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn': 1}",
+            "- arguments/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn: is not a known property");
     }
 
     void errorsNameWhatRejects()
