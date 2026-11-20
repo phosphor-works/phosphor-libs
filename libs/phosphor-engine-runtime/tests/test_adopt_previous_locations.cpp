@@ -5,7 +5,7 @@
 // config directory and user data trees into the new places once, and the old
 // places are gone afterwards.
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 #include <PhosphorEngineRuntime/ConfigDefaults.h>
 #include <PhosphorEngineRuntime/ConfigKeys.h>
 #include <PhosphorEngineRuntime/ConfigMigration.h>
@@ -47,7 +47,7 @@ private Q_SLOTS:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);
-        setAppDirectoryName(QStringLiteral("adopttest"));
+        PhosphorPaths::setAppDirectoryName(QStringLiteral("adopttest"));
         m_configRoot = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
         m_dataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     }
@@ -76,7 +76,7 @@ private Q_SLOTS:
         QVERIFY(QFileInfo::exists(ConfigDefaults::configFilePath()));
         QCOMPARE(ConfigDefaults::configFilePath(),
                  m_configRoot + QStringLiteral("/phosphor-works/adopttest/config.json"));
-        QCOMPARE(readFile(appConfigDir() + QStringLiteral("/notes.txt")), QByteArrayLiteral("kept"));
+        QCOMPARE(readFile(PhosphorPaths::appConfigDir() + QStringLiteral("/notes.txt")), QByteArrayLiteral("kept"));
         const QString movedLayout =
             m_dataRoot + QLatin1Char('/') + ConfigKeys::layoutsSubdir() + QStringLiteral("/mine.json");
         QCOMPARE(readFile(movedLayout), QByteArrayLiteral("{\"id\":1}"));

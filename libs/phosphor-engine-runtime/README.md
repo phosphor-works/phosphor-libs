@@ -52,7 +52,6 @@ interfaces.
 | `HostSettingsExtension` | `SettingsSchema.h` | A host's own keys, machine-scoped keys and labels |
 | `ConfigMigration` | `ConfigMigration.h` | The schema-version migration chain run at startup |
 | `PerScreenResolver` | `PerScreenResolver.h` | Per-screen overrides resolved over the global values |
-| `setAppDirectoryName`, `appConfigDir`, `commonDataSubdir` | `AppDirectoryName.h` | The host's folder in `phosphor-works` and the trees every app shares |
 | `IOverlayService` | `IOverlayService.h` | The overlays, zone selector, snap assist, OSDs and pickers the runtime shows |
 | `ScreenModeRouter` | `ScreenModeRouter.h` | Which placement mode each screen runs, per desktop and activity |
 | `AnimationBootstrap` | `AnimationBootstrap.h` | Loads the curve and motion-profile registries the overlays animate with |
@@ -74,7 +73,7 @@ interfaces.
 
 ```cpp
 // At the top of main(), before anything reads a path or builds a Settings.
-PhosphorEngineRuntime::setAppDirectoryName(QStringLiteral("myhost"));
+PhosphorPaths::setAppDirectoryName(QStringLiteral("myhost"));
 PhosphorEngineRuntime::setHostSettingsExtension({&appendMyHostSchema, &isMyMachineScopedKey, &myHostLabels});
 
 PhosphorEngineRuntime::Settings settings;
@@ -106,7 +105,8 @@ however it came about. PlasmaZones serves its KWin choices and its rendering pin
 
 ## Dependencies
 
-Qt Core, Gui, Qml and Quick, and PhosphorConfig (the store), PhosphorAnimation (motion profiles), PhosphorSurface and
+Qt Core, Gui, Qml and Quick, and PhosphorPaths (where the config and data live, named by the host's
+`PhosphorPaths::setAppDirectoryName`), PhosphorConfig (the store), PhosphorAnimation (motion profiles), PhosphorSurface and
 PhosphorRegistry (decoration and overlay trees), PhosphorRules (per-mode disable rules), PhosphorZones,
 PhosphorScreens, PhosphorEngine and the three engines' settings interfaces, PhosphorTiles, PhosphorShaders,
 PhosphorCompositor, PhosphorIdentity, PhosphorLayoutApi and PhosphorProtocol, whose types the settings expose;

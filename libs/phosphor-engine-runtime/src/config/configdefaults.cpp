@@ -13,7 +13,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 namespace PhosphorEngineRuntime {
 
@@ -28,32 +28,32 @@ static QString configDir()
 
 QString ConfigDefaults::configFilePath()
 {
-    return appConfigDir() + QStringLiteral("/config.json");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/config.json");
 }
 
 QString ConfigDefaults::sessionFilePath()
 {
-    return appConfigDir() + QStringLiteral("/session.json");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/session.json");
 }
 
 QString ConfigDefaults::rulesFilePath()
 {
-    return appConfigDir() + QStringLiteral("/rules.json");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/rules.json");
 }
 
 QString ConfigDefaults::profilesDir()
 {
-    return appConfigDir() + QStringLiteral("/profiles");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/profiles");
 }
 
 QString ConfigDefaults::quickLayoutsFilePath()
 {
-    return appConfigDir() + QStringLiteral("/quicklayouts.json");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/quicklayouts.json");
 }
 
 QString ConfigDefaults::layoutSettingsFilePath()
 {
-    return appConfigDir() + QStringLiteral("/layout-settings.json");
+    return PhosphorPaths::appConfigDir() + QStringLiteral("/layout-settings.json");
 }
 
 QString ConfigDefaults::layoutsDirPath()
@@ -123,7 +123,7 @@ QString ConfigDefaults::legacyConfigFilePath()
 {
     // The single-file INI the v1 config lived in, beside 3.x's own config
     // directory at the config root. Only the migration chain reads it, once.
-    return configDir() + QLatin1Char('/') + appDirectoryName() + QStringLiteral("rc");
+    return configDir() + QLatin1Char('/') + PhosphorPaths::appDirectoryName() + QStringLiteral("rc");
 }
 
 PhosphorAnimation::CurveRegistry& ConfigDefaults::fallbackCurveRegistry()

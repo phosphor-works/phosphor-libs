@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 #include <QDir>
 #include <QStandardPaths>
 #include <QtGlobal>
 
-namespace PhosphorEngineRuntime {
+namespace PhosphorPaths {
 
 namespace {
 QString& storedName()
@@ -27,7 +27,7 @@ QString genericLocation(QStandardPaths::StandardLocation location, const char* h
 
 QString suiteDirectoryName()
 {
-    return QStringLiteral("phosphor-works");
+    return QStringLiteral(PHOSPHORPATHS_SUITE_DIRECTORY_NAME);
 }
 
 QString commonDataSubdir(const QString& tree)
@@ -35,12 +35,29 @@ QString commonDataSubdir(const QString& tree)
     return suiteDirectoryName() + QLatin1Char('/') + tree;
 }
 
-void setAppDirectoryName(const QString& name)
+bool isValidDirectoryName(const QString& name)
 {
     // One path segment: empty would put the files at the root of the user's
-    // config directory, and a separator would reach outside it.
-    if (name.isEmpty() || name.contains(QLatin1Char('/')) || name == QLatin1String(".")
-        || name == QLatin1String("..")) {
+    // config directory, and a separator or a dot pair would reach outside it.
+    if (name.trimmed().isEmpty() || name == QLatin1String(".") || name == QLatin1String("..")) {
+        return false;
+    }
+    if (name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\'))) {
+        return false;
+    }
+    // Control characters (NUL, newline, ...) never belong in a directory
+    // name: they corrupt log output and path comparisons.
+    for (const QChar ch : name) {
+        if (ch.category() == QChar::Other_Control) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void setAppDirectoryName(const QString& name)
+{
+    if (!isValidDirectoryName(name)) {
         qFatal("setAppDirectoryName: \"%s\" is not a single directory name", qPrintable(name));
     }
     storedName() = name;
@@ -65,6 +82,11 @@ QString appConfigDir()
     return genericLocation(QStandardPaths::GenericConfigLocation, ".config") + QLatin1Char('/') + appSubdir();
 }
 
+QString appDataDir()
+{
+    return genericLocation(QStandardPaths::GenericDataLocation, ".local/share") + QLatin1Char('/') + appSubdir();
+}
+
 QString appStateDir()
 {
     return genericLocation(QStandardPaths::GenericStateLocation, ".local/state") + QLatin1Char('/') + appSubdir();
@@ -75,4 +97,4 @@ QString appCacheDir()
     return genericLocation(QStandardPaths::GenericCacheLocation, ".cache") + QLatin1Char('/') + appSubdir();
 }
 
-} // namespace PhosphorEngineRuntime
+} // namespace PhosphorPaths

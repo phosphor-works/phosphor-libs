@@ -5,7 +5,7 @@
 // directory and extends the schema with keys of its own, and a value saved
 // by one Settings is what the next one reads.
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 #include <PhosphorEngineRuntime/ConfigDefaults.h>
 #include <PhosphorEngineRuntime/Settings.h>
 #include <PhosphorEngineRuntime/SettingsSchema.h>
@@ -43,7 +43,7 @@ class TestSettingsModel : public QObject
 private Q_SLOTS:
     void initTestCase()
     {
-        setAppDirectoryName(QStringLiteral("phosphor-engine-runtime-test"));
+        PhosphorPaths::setAppDirectoryName(QStringLiteral("phosphor-engine-runtime-test"));
         setHostSettingsExtension({&appendTestHostSchema, &testHostMachineScoped, nullptr});
     }
 
