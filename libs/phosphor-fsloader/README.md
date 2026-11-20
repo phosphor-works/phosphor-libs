@@ -224,14 +224,47 @@ parse(mesh->bytes);
 - `QtCore`
 - jsoncons 1.10.0 (BSL-1.0), header-only. By default it comes from the
   archive that `cmake/PhosphorDependencies.cmake` pins, is compiled into the
-  library, and its licence installs as
+  library (whose symbols are hidden but for its own exports, so none of
+  jsoncons' leaves it), and its licence installs as
   `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with any
   distribution. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
   headers are used instead, found through `JSONCONS_INCLUDE_DIR`, and the
-  configure checks that they have the JSON Schema API the library uses,
-  which jsoncons has from 1.7.0.
-  `SchemaValidator` reads a schema without `$schema` as JSON Schema 2020-12,
-  and asserts `format` (a `date` that is not a date fails).
+  configure checks that they compile against the JSON Schema API the library
+  uses, which needs jsoncons 1.7.0 or later. The check runs again when
+  `JSONCONS_INCLUDE_DIR` changes and after it fails.
+
+## Schema validation
+
+`SchemaValidator` checks a document against a JSON Schema 2020-12 schema.
+`SchemaValidator.h` is the full contract; in short:
+
+- A schema is read as Qt reads JSON (no comments, the last of two members
+  with one name kept) and must be 2020-12: `$schema` absent or
+  `https://json-schema.org/draft/2020-12/schema` (a trailing `#` allowed),
+  with no keyword of another draft (`definitions`, `dependencies`,
+  `additionalItems`, `$recursiveRef`, `$recursiveAnchor`, an array under
+  `items`). It is checked against the 2020-12 meta-schema when it is
+  constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there.
+  A refused schema refuses every document, with the reason.
+- `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex,
+  json-pointer, uri and uri-reference, as jsoncons reads each (it takes the
+  year 0000). A schema naming another format is refused, since jsoncons
+  would ignore it, and so is `hostname`, whose jsoncons check refuses the
+  digit 9 and reads past the end of an empty string.
+- A string or member name holding U+0000 or an unpaired UTF-16 surrogate,
+  and a number of magnitude 2^63 or more, are refused at their path before
+  jsoncons sees them. Python's 2020-12, which CI runs, accepts such numbers
+  under `number`.
+- Integers within int64 are exact, and so are `minimum`, `maximum` and
+  their exclusive forms between them. `multipleOf` works in doubles with a
+  tolerance of one ulp: 0.07 is a multiple of 0.01 here, not in Python.
+- `pattern` is an ECMAScript `std::regex` matched against UTF-8 bytes, so a
+  dot, a class or a quantifier applies to one byte of a character past
+  U+007F (`^.$` does not match "é").
+- `validate()` returns at most 100 errors, then one entry with an empty path
+  that counts the rest. Each path and message is cut to 500 characters. The
+  reasons an `anyOf`, `oneOf` or `allOf` failed follow its error, prefixed
+  with the branch (`anyOf/1: ...`).
 
 ## See also
 
