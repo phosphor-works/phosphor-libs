@@ -355,8 +355,8 @@ PHOSPHORENGINERUNTIME_EXPORT QScreen* resolvePhysicalQScreen(PhosphorScreens::Sc
  * A virtual screen id the manager does not resolve is never widened to its
  * physical monitor. Returns an invalid QRectF if no geometry can be resolved.
  */
-QRectF resolveScreenGeometry(PhosphorScreens::ScreenManager* mgr, PhosphorZones::Layout* layout,
-                             const QString& screenId);
+PHOSPHORENGINERUNTIME_EXPORT QRectF resolveScreenGeometry(PhosphorScreens::ScreenManager* mgr,
+                                                          PhosphorZones::Layout* layout, const QString& screenId);
 
 } // namespace Lookups
 } // namespace PhosphorEngineRuntime

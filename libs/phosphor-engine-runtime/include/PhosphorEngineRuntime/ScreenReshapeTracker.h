@@ -229,10 +229,9 @@ using ReportScaleReader =
  * left pending. Reacting to the reshape an apply causes is the caller's.
  * Returns the tracker's verdict.
  */
-ScreenReshapeTracker::ReportVerdict admitPixelSizeReport(ScreenReshapeTracker& tracker,
-                                                         PhosphorScreens::ScreenManager& screens,
-                                                         const QString& connectorName,
-                                                         const PixelSizePersistSink& persist,
-                                                         const ReportScaleReader& readScale = {});
+PHOSPHORENGINERUNTIME_EXPORT ScreenReshapeTracker::ReportVerdict
+admitPixelSizeReport(ScreenReshapeTracker& tracker, PhosphorScreens::ScreenManager& screens,
+                     const QString& connectorName, const PixelSizePersistSink& persist,
+                     const ReportScaleReader& readScale = {});
 
 } // namespace PhosphorEngineRuntime
