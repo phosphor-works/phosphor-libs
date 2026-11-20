@@ -14,10 +14,10 @@ Each library lives in `libs/<name>/` with its own `CMakeLists.txt`, headers, sou
 
 ## Build
 
-Needs CMake 3.25, Qt 6.10 with its private headers (Gui, Quick, ShaderTools, WaylandClient), extra-cmake-modules
-and Wayland, plus the Vulkan headers when Qt was built with Vulkan support, as most distributions build it. The
-first configure downloads the pinned Luau and jsoncons archives (`cmake/PhosphorDependencies.cmake`) into
-`.cache/cpm`, and with the tests on, the pinned
+Needs CMake 3.21 (3.25 for the presets below), Qt 6.10 with its private headers (Gui, Quick, ShaderTools,
+WaylandClient), extra-cmake-modules and Wayland, plus the Vulkan headers when Qt was built with Vulkan support, as most
+distributions build it. The first configure downloads the pinned Luau and jsoncons archives
+(`cmake/PhosphorDependencies.cmake`) into `.cache/cpm`, and with the tests on, the pinned
 [phosphor-surface-packs](https://github.com/phosphor-works/phosphor-surface-packs) commit the surface tests load.
 
 ```sh
