@@ -33,7 +33,7 @@ class Settings;
 /// because the registry goes away with the process.
 extern PHOSPHORENGINERUNTIME_EXPORT const QLatin1StringView kShellAnimationFamilySeedsOwnerTag;
 
-/// XDG-discovered curve directories — `plasmazones/curves` resolved against
+/// XDG-discovered curve directories — `phosphor-works/curves` resolved against
 /// `XDG_DATA_DIRS` (lowest-
 /// priority first), with the user-writable dir appended last, giving
 /// `sys-lowest, ..., sys-highest, user`. The scan reverse-iterates that and
@@ -66,11 +66,11 @@ struct AnimationLoaderHandles
     AnimationLoaderDirs dirs;
 };
 
-/// Discover the XDG `plasmazones/curves` directories, materialise the
+/// Discover the XDG `phosphor-works/curves` directories, materialise the
 /// user-writable ones, and construct the CurveLoader bound to
 /// @p curveRegistry.
 ///
-/// The `plasmazones/profiles` directory is materialised too, but is NOT
+/// The `phosphor-works/profiles` directory is materialised too, but is NOT
 /// discovered or watched: it holds the user's saved-curve preset library, which
 /// the animations page creates on demand, and the pre-v8 override files the v8
 /// migration reads once.
@@ -171,7 +171,7 @@ PHOSPHORENGINERUNTIME_EXPORT void seedShellAnimationFamilies(PhosphorAnimation::
 /// need the rest of the runtime.
 ///
 /// This is the PlasmaZones-flavoured wrapper — it scans
-/// `${XDG_DATA_DIRS}/plasmazones/{curves,profiles}` and the user-writable
+/// `${XDG_DATA_DIRS}/phosphor-works/{curves,profiles}` and the user-writable
 /// equivalents, mirroring the daemon. Library-level loaders stay
 /// consumer-agnostic per Phase-4 decision U.
 ///

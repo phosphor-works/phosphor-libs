@@ -22,7 +22,7 @@ namespace PhosphorConfig {
 /// in `<datadir>/phosphor-works/<api>-hosts/` describes it:
 ///
 ///     { "Id": "plasmazones", "Name": "PlasmaZones", "BusName": "org.phosphor_works.Placement",
-///       "Backend": "json", "ConfigPath": "$XDG_CONFIG_HOME/plasmazones/config.json",
+///       "Backend": "json", "ConfigPath": "$XDG_CONFIG_HOME/phosphor-works/plasmazones/config.json",
 ///       "Desktops": ["KDE"] }
 ///
 /// Several hosts can serve one API, each keeping its settings in its own

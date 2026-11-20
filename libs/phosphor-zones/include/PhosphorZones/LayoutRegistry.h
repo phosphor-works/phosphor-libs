@@ -106,7 +106,7 @@ public:
      *                via @c ContextRuleBridge and persist through the store.
      *                The caller owns the store and must outlive the registry.
      * @param layoutSubdirectory XDG-relative path used for layout JSON
-     *                discovery (e.g. @c "plasmazones/layouts"). The registry
+     *                discovery (e.g. @c "phosphor-works/layouts"). The registry
      *                writes to
      *                @c QStandardPaths::writableLocation(GenericDataLocation)/\<subdir\>
      *                and reads the union of every @c GenericDataLocation
@@ -1642,7 +1642,7 @@ private:
     PhosphorRules::RuleStore* m_ruleStore = nullptr;
     /// Evaluator bound to m_ruleStore->ruleSet(); the one resolution model.
     std::unique_ptr<PhosphorRules::RuleEvaluator> m_evaluator;
-    QString m_layoutSubdirectory; ///< XDG-relative (e.g. "plasmazones/layouts") - drives locateAll discovery
+    QString m_layoutSubdirectory; ///< XDG-relative (e.g. "phosphor-works/layouts") - drives locateAll discovery
     QString m_layoutDirectory; ///< Absolute user-writable path derived from m_layoutSubdirectory
     QVector<Layout*> m_layouts;
     Layout* m_activeLayout = nullptr;

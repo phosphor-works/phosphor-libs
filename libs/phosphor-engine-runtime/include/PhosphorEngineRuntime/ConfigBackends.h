@@ -18,10 +18,10 @@
 
 namespace PhosphorEngineRuntime {
 
-/// Primary user config (~/.config/plasmazones/config.json).
+/// Primary user config (~/.config/phosphor-works/plasmazones/config.json).
 PHOSPHORENGINERUNTIME_EXPORT std::unique_ptr<PhosphorConfig::IBackend> createDefaultConfigBackend();
 
-/// Ephemeral window-tracking session state (~/.config/plasmazones/session.json).
+/// Ephemeral window-tracking session state (~/.config/phosphor-works/plasmazones/session.json).
 /// Separate file from config.json to avoid write contention.
 PHOSPHORENGINERUNTIME_EXPORT std::unique_ptr<PhosphorConfig::IBackend> createSessionBackend();
 

@@ -233,7 +233,7 @@ void EngineRuntime::stop()
     // QFileSystemWatcher) still live — exactly the construct-without-start fixture the reset
     // comment below names. NOTE the deliberate asymmetry this creates for a stop() → start()
     // cycle: nothing rebuilds the loader, nor the m_ruleStoreWatcher reset beside it below (both
-    // are ctor-only), so live reload of `plasmazones/curves` and of rules.json does not survive
+    // are ctor-only), so live reload of `phosphor-works/curves` and of rules.json does not survive
     // the cycle. The profile seeds and the low-precedence tag survive, but the named curves do
     // not: the loader's destructor unregisters every curve it registered (the bundled set too),
     // so a curve named after the cycle resolves to the library default. Nothing re-reads

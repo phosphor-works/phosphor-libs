@@ -421,7 +421,7 @@ public:
     PHOSPHORENGINERUNTIME_EXPORT static QString rulesFilePath();
 
     // Returns the absolute path to the settings-profiles directory
-    // (~/.config/plasmazones/profiles). Each profile is a single <uuid>.json
+    // (~/.config/phosphor-works/plasmazones/profiles). Each profile is a single <uuid>.json
     // file holding a sparse config delta (and user-rule subset) relative to its
     // parent profile, plus an index.json sidecar tracking the active profile and
     // display order. Sits under the config dir (not the data dir) so it never

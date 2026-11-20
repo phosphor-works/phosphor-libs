@@ -20,7 +20,7 @@ namespace PhosphorZones {
  *
  * The persistence peer of LayoutRegistry's layout loading, for the
  * ScrollingTemplate object: JSON files in the app's template subdirectory
- * (PlasmaZones uses "plasmazones/scrolling-templates") under every
+ * (PlasmaZones uses "phosphor-works/scrolling-templates") under every
  * GenericDataLocation. System directories load first and the
  * user directory last, so a user file sharing a bundled template's id
  * SHADOWS it (edit-a-bundled-template writes a user copy; deleting that

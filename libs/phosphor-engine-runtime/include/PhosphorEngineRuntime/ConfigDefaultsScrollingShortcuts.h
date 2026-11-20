@@ -275,7 +275,7 @@ public:
         // registers with KGlobalAccel (the registry skips empty sequences),
         // so it does NOT appear in the system Shortcuts KCM — binding one
         // means writing its Shortcuts.Scrolling key in
-        // ~/.config/plasmazones/config.json or over the settings D-Bus
+        // ~/.config/phosphor-works/plasmazones/config.json or over the settings D-Bus
         // surface; the daemon rebinds live on the settings change.
         return QString();
     }
