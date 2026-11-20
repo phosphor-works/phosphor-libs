@@ -23,7 +23,7 @@ using LiveReload = PhosphorFsLoader::LiveReload;
 /// The standard root for user-saved shader presets:
 /// `<XDG_DATA_HOME>/<subdirectory>`, where @p subdirectory is the app's preset
 /// directory relative to the user data dir, no leading slash (PlasmaZones
-/// passes `plasmazones/shader-presets`). One subdirectory per family, named by
+/// passes `phosphor-works/shaders/presets`). One subdirectory per family, named by
 /// `shaderFamilyToken`. Empty @p subdirectory answers an empty string, which
 /// `ShaderPresetStore::load()` refuses, so an app that names no directory
 /// loads and saves no presets rather than writing into the data dir's root.

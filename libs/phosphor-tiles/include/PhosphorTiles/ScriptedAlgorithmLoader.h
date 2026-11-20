@@ -36,7 +36,7 @@ class ITileAlgorithmRegistry;
  *
  * The application injects the subdirectory name (relative to
  * `QStandardPaths::GenericDataLocation`) at construction — the library is
- * brand-agnostic. PlasmaZones passes `"plasmazones/algorithms"`.
+ * brand-agnostic. PlasmaZones passes `"phosphor-works/algorithms"`.
  *
  * User scripts under `writableLocation/<subdirectory>/` override system
  * scripts declaring the same script ID (which defaults to `script:<basename>`
@@ -164,7 +164,7 @@ private:
     /// which case bundled scripts fall back to their own per-script VMs.
     std::shared_ptr<PhosphorScripting::LuauEngine> ensureSharedEngine();
 
-    QString m_subdirectory; ///< XDG-relative path (e.g. "plasmazones/algorithms")
+    QString m_subdirectory; ///< XDG-relative path (e.g. "phosphor-works/algorithms")
     ITileAlgorithmRegistry* m_registry = nullptr; ///< Borrowed; owner outlives loader
     /// Per-loader watchdog. Held via shared_ptr because the registry's
     /// unregisterAlgorithm uses deleteLater() — the algorithm's dtor

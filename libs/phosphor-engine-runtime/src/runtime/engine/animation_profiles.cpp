@@ -101,7 +101,7 @@ void EngineRuntime::setupAnimationProfiles()
     // internal lock.
     registry.setLowPrecedenceOwnerTag(QString(kShellAnimationFamilySeedsOwnerTag));
 
-    // Discover the XDG `plasmazones/curves` dirs, materialise the
+    // Discover the XDG `phosphor-works/curves` dirs, materialise the
     // user-writable ones, and construct the curve loader. Shared with the
     // secondary composition roots (settings / editor) via
     // `AnimationBootstrap`, so dir discovery and loader construction exist in

@@ -463,7 +463,7 @@ private:
      *        so QML `PhosphorMotionAnimation { profile: "<path>" }` resolves
      *        to the user's active animation settings and live-updates on edit.
      *
-     * Scans the XDG `plasmazones/curves` directories for user-authored curves
+     * Scans the XDG `phosphor-works/curves` directories for user-authored curves
      * and installs live-reload watchers (via constructAnimationLoaders); seeds
      * the shell animation family defaults
      * (`seedShellAnimationFamilies`) and installs their owner tag as the
@@ -1681,7 +1681,7 @@ private:
     AutotileService* m_autotileService = nullptr;
 
     /// Phase 6: animation shader effect discovery. Scans
-    /// `plasmazones/animations` from XDG data dirs and monitors for
+    /// `phosphor-works/shaders/animations` from XDG data dirs and monitors for
     /// user-dropped packs via QFileSystemWatcher. Declared AFTER
     /// m_overlayService — lifetime is managed explicitly in stop():
     /// the overlay service's borrowed registry pointer is nulled
@@ -1709,7 +1709,7 @@ private:
     /// borrow before this resets.
     std::unique_ptr<PhosphorShaders::ShaderPresetStore> m_presetStore;
 
-    /// User-authored curve scanner. Scans `plasmazones/curves` from the XDG
+    /// User-authored curve scanner. Scans `phosphor-works/curves` from the XDG
     /// data dirs and registers what it finds with `CurveRegistry`, with
     /// live-reload enabled. Owned by the daemon for process lifetime; the
     /// QFileSystemWatcher survives as long as the loader.

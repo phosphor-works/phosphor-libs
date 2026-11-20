@@ -137,7 +137,7 @@ public:
     /// pack dir, followed by `<packDataSubdir>/shared` under each XDG data
     /// dir. @p packDataSubdir is where the app installs its pointer packs,
     /// relative to a GenericDataLocation directory (PlasmaZones passes
-    /// `plasmazones/pointer`). Empty adds no installed directory.
+    /// `phosphor-works/shaders/pointer`). Empty adds no installed directory.
     ///
     /// Both halves are needed. A bundled pack finds the helpers next door; a
     /// user pack under `~/.local/share/<packDataSubdir>` has no sibling

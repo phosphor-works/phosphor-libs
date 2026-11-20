@@ -7,7 +7,7 @@
 # C++ API from it and exports it from PhosphorPathsConfig.cmake.
 #
 # Include it at the top scope of the project that uses the name:
-#   include("${phosphor-libs_SOURCE_DIR}/cmake/PhosphorSuite.cmake")
+#   include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
 #   install(... DESTINATION ${KDE_INSTALL_DATADIR}/${PHOSPHOR_SUITE_DIRECTORY_NAME}/<tree>)
 
 set(PHOSPHOR_SUITE_DIRECTORY_NAME "phosphor-works")

@@ -57,7 +57,7 @@ void EngineRuntime::setupAnimationShaderEffects()
 
     // Materialise the user dir BEFORE registering so the watcher attaches
     // a direct watch instead of a parent-watch proxy. Without this, on a
-    // fresh install (where `~/.local/share/plasmazones/animations` does
+    // fresh install (where `~/.local/share/phosphor-works/shaders/animations` does
     // not yet exist) the watcher would climb to the user data root —
     // which is forbidden under the new fsloader rules — and silently
     // disable live-reload until the user manually triggered a refresh.
@@ -394,7 +394,7 @@ void EngineRuntime::setupShaderWarmBakes()
         const QString entryPrologue = PhosphorZoneRendering::zoneEntryPrologue();
         const QList<PhosphorShaders::EntryCandidate> entryCandidates = PhosphorZoneRendering::zoneEntryCandidates();
         // Zone shaders bake through the UNQUALIFIED (PlasmaZones) wrapper on
-        // purpose: it prepends the plasmazones/overlays trusted roots so
+        // purpose: it prepends the phosphor-works/shaders/overlays trusted roots so
         // `#include <common.glsl>` resolves the same way ZoneShaderItem's
         // live load does. The animation and surface warm-bakes below MUST
         // instead call PhosphorRendering::warmShaderBakeCacheForPaths

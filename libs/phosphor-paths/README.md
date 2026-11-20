@@ -66,7 +66,7 @@ defines it once, in `cmake/PhosphorSuite.cmake`, which has no dependency, so a b
 `find_package(PhosphorPaths)` sets it for an installed copy.
 
 ```cmake
-include("${phosphor-libs_SOURCE_DIR}/cmake/PhosphorSuite.cmake")
+include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
 install(DIRECTORY data/layouts/ DESTINATION ${KDE_INSTALL_DATADIR}/${PHOSPHOR_SUITE_DIRECTORY_NAME}/layouts)
 ```
 

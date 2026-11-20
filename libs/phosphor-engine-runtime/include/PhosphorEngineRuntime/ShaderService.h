@@ -88,7 +88,7 @@ public Q_SLOTS:
 
     /**
      * @brief Get the user shader installation directory path
-     * @return Path to ~/.local/share/plasmazones/overlays
+     * @return Path to ~/.local/share/phosphor-works/shaders/overlays
      */
     QString userShaderDirectory();
 
