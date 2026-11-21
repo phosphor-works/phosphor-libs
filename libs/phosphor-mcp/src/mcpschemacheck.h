@@ -20,7 +20,8 @@ namespace PhosphorMcp::Schema {
 // Work is counted in units, at most about 20 ns each of a release build,
 // whatever the schema and the value. The checker charges each step it takes
 // (a value walked, a subschema applied to a value, a keyword checked, a
-// member or an item visited, a name looked up, sixteen code units of a
+// member or an item visited, a name looked up, a name or a string read away
+// from the last one read of its object or array, sixteen code units of a
 // string or a name read, compared or hashed, a word of an annotation set
 // merged, an error built), weighted by what it costs as a sweep of each
 // charge measured it. The check stops the moment the count passes MaxWork,
@@ -57,12 +58,21 @@ constexpr qint64 UnitsPerStep = 1;
 // A member visited, or a name looked up or sorted.
 constexpr qint64 UnitsPerMember = 2;
 // A string's text or a member's name read where it is, for each this many
-// bytes of it, up to MaxLineUnits. The members of an object and the strings
-// of a list are read one after the other, and a long one puts the next
-// that much farther, a miss of the cache when the value is larger than the
-// cache. A few lines are all that a read misses, whatever the length.
+// bytes of it, up to MaxLineUnits. The text of a container is mostly read
+// in the order it is kept in (see MaxGapUnits), and a long one puts the
+// next that much farther, a miss of the cache when the value is larger than
+// the cache. A few lines are all that a read misses, whatever the length.
 constexpr qint64 BytesPerLine = 64;
 constexpr qint64 MaxLineUnits = 4;
+// A name or a string read away from the last one read of the same object or
+// array, a unit for each BytesPerLine bytes between the two, up to
+// MaxGapUnits (see TextReads). Qt keeps an object's members sorted by name,
+// but their text in the order in which it was parsed or inserted, and the
+// items of an array that a handler built in the order of their places, but
+// their text in the order in which it was inserted. So the next text may be
+// anywhere in the container's storage: a miss of the cache, and of the TLB,
+// when the container is larger than the cache.
+constexpr qint64 MaxGapUnits = 8;
 // Comparisons of a sort of plain integers (hashes) for each unit.
 constexpr qint64 ComparisonsPerUnit = 2;
 // An error built, beside its pointer.
@@ -91,6 +101,32 @@ qint64 compareUnits(QAnyStringView a, QAnyStringView b);
 qint64 equalUnits(QAnyStringView a, QAnyStringView b);
 // Decoded to UTF-16, for a JSON pointer.
 qint64 decodeUnits(QAnyStringView text);
+
+// The names and strings of one object or array read one after the other:
+// the units of the bytes between each and the last (see MaxGapUnits). The
+// first is charged with the container (UnitsPerContainer), and a text read
+// again costs nothing more.
+class TextReads
+{
+public:
+    qint64 next(QAnyStringView text)
+    {
+        const auto start = quintptr(text.data());
+        const quintptr end = start + quintptr(text.size_bytes());
+        qint64 units = 0;
+        if (m_end != 0) {
+            const quintptr gap = start >= m_end ? start - m_end : (m_start >= end ? m_start - end : 0);
+            units = gap >= quintptr(MaxGapUnits * BytesPerLine) ? MaxGapUnits : qint64(gap) / BytesPerLine;
+        }
+        m_start = start;
+        m_end = end;
+        return units;
+    }
+
+private:
+    quintptr m_start = 0;
+    quintptr m_end = 0;
+};
 
 // Values nested deeper than this are refused before any check. Qt's JSON
 // parser takes no more than 1024 levels in a whole message, so arguments
@@ -176,8 +212,8 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
 int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
 // A hash that is the same for values that equalValues() finds equal, keyed
 // by `key` so that a value cannot be chosen to collide with another without
-// it.
-quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget);
+// it. `reads`: those of the array that the value is an item of, if any.
+quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads = nullptr);
 
 // A token of a place in a value: a member name, read in place in the value
 // (which outlives the place), or an item's index.

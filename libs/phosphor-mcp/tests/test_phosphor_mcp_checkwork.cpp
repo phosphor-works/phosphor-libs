@@ -98,6 +98,38 @@ const QByteArray Cjk11 = QByteArray("\xE4\xB8\xAD").repeated(11);
 // Sixteen surrogate pairs, written as escapes: 32 code units of UTF-16, 64
 // bytes.
 const QByteArray Pairs16 = QByteArray("\\ud83d\\ude00").repeated(16);
+// Text long enough that a name after it is far from the name before it.
+const QByteArray X140(140, 'x');
+const QByteArray X600(600, 'x');
+// Two members whose names Qt keeps in the other order from their text: "a"
+// is read first, and "b", some 620 bytes before it, after. Each value
+// walked is 4 lines.
+const QByteArray Apart = "{'b': '" + X600 + "', 'a': '" + X600 + "'}";
+
+// An array that a handler built: three strings of 600 bytes, the third
+// inserted between the other two, so that it is read away from the first
+// (8), and the second beside it.
+QJsonArray itemsApart()
+{
+    QJsonArray array;
+    array.append(QString::fromLatin1(X600));
+    array.append(QString(600, QLatin1Char('y')));
+    array.insert(1, QString(600, QLatin1Char('z')));
+    return array;
+}
+
+// An object that a handler built: "a" and "b", whose values of 600 bytes
+// were set later, "b" first, so that each value lies after both names, the
+// value of "a" away from "a" (8), and "b" away from it (8).
+QJsonObject membersApart()
+{
+    QJsonObject object;
+    object.insert(QLatin1StringView("a"), 1);
+    object.insert(QLatin1StringView("b"), 1);
+    object.insert(QLatin1StringView("b"), QString(600, QLatin1Char('y')));
+    object.insert(QLatin1StringView("a"), QString::fromLatin1(X600));
+    return object;
+}
 
 // The memory that the checker counts, from the layouts of what it holds.
 // A name of the index of an object's names: its hash and a view of it.
@@ -222,6 +254,19 @@ private Q_SLOTS:
             (3 + 2) + 256 * (2 + 1 + 3) + (2 + 2 + 1), 0);
         row("additionalProperties", "{'additionalProperties': {'type': 'integer'}}", members("1", 256),
             3 + 2 + 2 + 2 + 1 + 256 * ((2 + 3) + 2 + (2 + 1)), 0);
+        // A name read away from the last one read of its object: a unit for
+        // each 64 bytes between the two, up to 8. Here "b" lies some 620
+        // bytes before "a", which is read first (8), before the check and
+        // in it.
+        row("names apart", "{'additionalProperties': {'type': 'string'}}", Apart,
+            (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + (2 + 1)) + 8, 0);
+        // A value of 140 bytes between two names, and the header of each
+        // text: 2 lines, in the check, which does not read the value. The
+        // walk before it reads it, which leaves the next name beside the
+        // last text read.
+        row("names a value apart", "{'additionalProperties': {'type': 'string'}}",
+            "{'a': '" + X140 + "', 'b': '" + X140 + "'}",
+            (3 + 2) + 2 * (2 + (3 + 2)) + (2 + 2 + 1) + 2 * (2 + (2 + 1)) + 2, 0);
         // propertyNames: a step, and the subschema applied to the name in
         // place, which reads its text.
         row("propertyNames", "{'propertyNames': {'maxLength': 20}}", members("1", 256),
@@ -242,6 +287,9 @@ private Q_SLOTS:
         row("required of a long name, UTF-8", "{'items': {'required': ['" + Cjk11 + "x']}}",
             repeat("{'" + Cjk11 + "x': 1}", 256),
             10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 3 * 2) + (1 + 1) + (1 + 4 * 2)), IndexBytes);
+        // The index of names apart: 8 more for the second.
+        row("required of names apart", "{'required': ['a']}", Apart,
+            (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1) + 8 + (1 + 2) + 1, 2 * IndexBytes);
         // An object of no member: 1.
         row("required in empty objects", "{'items': {'not': {'required': ['a']}}}", repeat("{}", 256),
             10 + 256 * ((3 + 2) + (2 + 2) + 1 + (2 + 2) + 1 + 1), 0);
@@ -257,6 +305,8 @@ private Q_SLOTS:
         // triggers' table (2, and 2 for each 16 code units).
         row("dependentRequired of many triggers", "{'items': {'dependentRequired': {'a': ['a'], 'x': [], 'y': []}}}",
             repeat("{'a': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + 2 + 2 + (1 + 1) + 1), IndexBytes);
+        row("dependentRequired of many triggers, names apart", "{'dependentRequired': {'a': [], 'x': [], 'y': []}}",
+            Apart, (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * 2 + 8, 0);
         row("dependentRequired of many triggers, long names",
             "{'items': {'dependentRequired': {'" + A32 + "': [], 'x': [], 'y': []}}}",
             repeat("{'" + A32 + "': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 * 2)), 0);
@@ -338,6 +388,8 @@ private Q_SLOTS:
         // Names of 71 bytes, a line more each time a member is visited.
         row("unevaluatedProperties of long names", "{'unevaluatedProperties': {'type': 'integer'}}",
             members("1", 256, 70), (3 + 2) + 256 * ((2 + 1) + 3) + (2 + 2 + 1) + 256 * (1 + (2 + 1) + 2 + 1), 0);
+        row("unevaluatedProperties of names apart", "{'unevaluatedProperties': {'type': 'string'}}", Apart,
+            (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (1 + 2 + (2 + 1)) + 8, 0);
 
         // uniqueItems: a hash of each item (1), and a sort of integers (1,
         // and half the bits of the count, for each).
@@ -526,6 +578,125 @@ private Q_SLOTS:
             (1 + 4) + 2 * 2 * (2 + 2 * (1 + 2 * 2)) + 2 * (2 + 2 * 4 + 1), (1 + 2) + 2 * (2 + 3 * 2 + 1));
         row("arrays", item("[1, [2]]"), item("[1, [2]]"), (1 + 4) + 1 + (1 + 4) + 1, (1 + 4) + 1 + (1 + 4) + 1,
             (1 + 2) + 1 + (1 + 2) + 1);
+        // Strings of 600 bytes, the third read away from the first in each
+        // array (8).
+        row("arrays of strings apart", itemsApart(), itemsApart(), (1 + 4) + 3 * (1 + 75) + 2 * 8,
+            (1 + 4) + 3 * (1 + 2 * 75) + 2 * 8, (1 + 2) + 3 * (1 + 3 * 37) + 8);
+        // Names apart (8 for the second name of each object), with values
+        // of 600 bytes: compared (1 + 75 each, or 1 + 2 * 75 by code point)
+        // and hashed (1 + 3 * 37). The sort reads the second name away from
+        // the first in each of its comparisons too (2 * 8). Each value is
+        // read beside its name.
+        row("objects of names apart", item(Apart), item(Apart), (1 + 4) + 2 * (2 + 76) + 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1 + (8 + 2 * 8)) + 2 * (2 + 151) + 2 * 8, (1 + 2) + 2 * (2 + 112) + 8);
+        // Values set after both names, each read away from the last text
+        // of its object, and the second name away from the first value (8
+        // each, in each object).
+        row("objects of values apart", membersApart(), membersApart(), (1 + 4) + 2 * (2 + 76) + 2 * 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1) + 2 * (2 + 151) + 2 * 2 * 8, (1 + 2) + 2 * (2 + 112) + 2 * 8);
+        // The same names in two orders, their text in the order of the
+        // second name first in both: the first names compared (2 + 4 * 4),
+        // each object sorted, the name read after the other apart (8, and 8
+        // in each comparison), and the members compared in the order of
+        // their code points, the second name apart in both. The built object
+        // keeps its members in the order of its text, which its hash reads.
+        QJsonObject builtApart;
+        builtApart.insert(second, QString::fromLatin1(X600));
+        builtApart.insert(first, QString::fromLatin1(X600));
+        row("objects of names apart in two orders", builtApart,
+            item("{'" + second.toUtf8() + "': '" + X600 + "', '" + first.toUtf8() + "': '" + X600 + "'}"),
+            (1 + 4) + (2 + 4 * 4) + 2 * (2 * 2 + 2 * 2 * (1 + 2 * 2) + (8 + 2 * 8)) + 2 * (2 + 4 * 4 + 76) + 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * (1 + 2 * 2) + (8 + 2 * 8)) + 2 * (2 + 2 * 4 + 151) + 2 * 8,
+            (1 + 2) + 2 * (2 + 3 * 2 + 112));
+        // The same, with the values of the built object set after its names,
+        // the second first. In the order of code points, its first value is
+        // read after the second (8), its second name before the first value
+        // (8), and the second value after the first name (1). The parsed
+        // object's text is in that order, so only its sort, which reads the
+        // names alone, finds the second name away from the first (8, and 8
+        // in each comparison).
+        QJsonObject builtLater;
+        builtLater.insert(second, 1);
+        builtLater.insert(first, 1);
+        builtLater.insert(second, QString::fromLatin1(X600));
+        builtLater.insert(first, QString::fromLatin1(X600));
+        row("objects of values apart in two orders", builtLater,
+            item("{'" + first.toUtf8() + "': '" + X600 + "', '" + second.toUtf8() + "': '" + X600 + "'}"),
+            (1 + 4) + (2 + 4 * 4) + (2 * 2 + 2 * 2 * (1 + 2 * 2)) + (2 * 2 + 2 * 2 * (1 + 2 * 2) + 8 + 2 * 8)
+                + 2 * (2 + 4 * 4) + 2 * (1 + 75) + (8 + 8 + 1),
+            (1 + 4) + (2 * 2 + 2 * 2 * (1 + 2 * 2)) + (2 * 2 + 2 * 2 * (1 + 2 * 2) + 8 + 2 * 8) + 2 * (2 + 2 * 4)
+                + 2 * (1 + 2 * 75) + (8 + 8 + 1),
+            (1 + 2) + 2 * (2 + 3 * 2) + 2 * (1 + 3 * 37) + (1 + 8));
+    }
+
+    void stringsApart_data()
+    {
+        QTest::addColumn<QByteArray>("schema");
+        QTest::addColumn<qint64>("work");
+        // Walked: the array (3 + 2) and each string (3 + 4), the third away
+        // from the first (8). Applied to: the array (2 + 2), with the step
+        // of the keywords of arrays (1).
+        constexpr qint64 Walked = (3 + 2) + 3 * (3 + 4) + 8 + (2 + 2 + 1);
+        QTest::newRow("walked") << QByteArray("{}") << Walked;
+        // Each string applied to (2), its text read (1 + 4) and not counted
+        // (1), the third away from the first.
+        QTest::newRow("items") << QByteArray("{'items': {'maxLength': 1000}}") << Walked + 3 * (2 + (1 + 4) + 1) + 8;
+        QTest::newRow("prefixItems") << QByteArray(
+            "{'prefixItems': [{'maxLength': 1000}, {'maxLength': 1000}, {'maxLength': 1000}]}")
+                                     << Walked + 3 * (2 + (1 + 4) + 1) + 8;
+        QTest::newRow("contains") << QByteArray("{'contains': {'maxLength': 1000}, 'minContains': 3}")
+                                  << Walked + 3 * (2 + (1 + 4) + 1) + 8;
+        // A step more for each item.
+        QTest::newRow("unevaluatedItems")
+            << QByteArray("{'unevaluatedItems': {'maxLength': 1000}}") << Walked + 3 * (1 + 2 + (1 + 4) + 1) + 8;
+        // Hashed (1 + 3 * 37), and the hashes sorted (1 + 1 each).
+        QTest::newRow("uniqueItems") << QByteArray("{'uniqueItems': true}")
+                                     << Walked + 3 * (1 + 3 * 37) + 8 + 3 * (1 + 1);
+        // Compared (1 + 4, and 1 + 75 for each string) with the schema's,
+        // parsed in the order of its items.
+        QTest::newRow("const") << QByteArray("{'const': ['" + X600 + "', '" + QByteArray(600, 'z') + "', '"
+                                             + QByteArray(600, 'y') + "']}")
+                               << Walked + 1 + (1 + 4) + 3 * (1 + 75) + 8;
+    }
+
+    void valuesApart_data()
+    {
+        QTest::addColumn<QByteArray>("schema");
+        QTest::addColumn<qint64>("work");
+        // Walked: the object (3 + 2), each member (2) and its value (3 +
+        // 4), the value of "a" and the name "b" each away from the last
+        // text read (8 + 8). Applied to: the object (2 + 2), with the step
+        // of the keywords of objects (1).
+        constexpr qint64 Walked = (3 + 2) + 2 * (2 + 3 + 4) + 8 + 8 + (2 + 2 + 1);
+        // Each member visited (2), its value applied to (2), read (1 + 4)
+        // and not counted (1), and the same two reads away (8 + 8).
+        QTest::newRow("additionalProperties") << QByteArray("{'additionalProperties': {'maxLength': 1000}}")
+                                              << Walked + 2 * (2 + 2 + (1 + 4) + 1) + 8 + 8;
+        // Each name looked up too (2).
+        QTest::newRow("properties") << QByteArray(
+            "{'properties': {'a': {'maxLength': 1000}, 'b': {'maxLength': 1000}}}")
+                                    << Walked + 2 * (2 + 2 + 2 + (1 + 4) + 1) + 8 + 8;
+        // A step more for each member.
+        QTest::newRow("unevaluatedProperties") << QByteArray("{'unevaluatedProperties': {'maxLength': 1000}}")
+                                               << Walked + 2 * (1 + 2 + 2 + (1 + 4) + 1) + 8 + 8;
+    }
+
+    void valuesApart()
+    {
+        QFETCH(QByteArray, schema);
+        QFETCH(qint64, work);
+        const Counts counts = count(parse(schema).toObject(), membersApart());
+        QCOMPARE(counts.lines, QStringList());
+        QCOMPARE(counts.work, work);
+    }
+
+    void stringsApart()
+    {
+        QFETCH(QByteArray, schema);
+        QFETCH(qint64, work);
+        const Counts counts = count(parse(schema).toObject(), itemsApart());
+        QCOMPARE(counts.lines, QStringList());
+        QCOMPARE(counts.work, work);
     }
 
     void valuesCompared()

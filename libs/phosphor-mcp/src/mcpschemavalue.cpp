@@ -245,9 +245,14 @@ public:
         const qint64 comparisons = std::bit_width(quint64(object.size()));
         qint64 units = 0;
         m_members.reserve(std::size_t(object.size()));
+        // A name away from the others is read away from them by each
+        // comparison of the sort too.
+        TextReads reads;
         for (auto it = object.begin(); it != object.end(); ++it) {
-            m_members.push_back(Member{it.keyView(), it});
-            units += UnitsPerMember + comparisons * (1 + CompareUnits * (it.keyView().size() / CharactersPerUnit));
+            const QAnyStringView name = it.keyView();
+            m_members.push_back(Member{name, it});
+            const qint64 gap = reads.next(name);
+            units += UnitsPerMember + gap + comparisons * (1 + gap + CompareUnits * (name.size() / CharactersPerUnit));
         }
         if (!m_budget.charge(units)) {
             return;
@@ -529,7 +534,17 @@ int NameTable::value(QAnyStringView name) const
     });
 }
 
-bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+namespace {
+
+// A text read in its container, if it is in one.
+qint64 readUnits(TextReads* reads, QAnyStringView text)
+{
+    return reads ? reads->next(text) : 0;
+}
+
+// The comparisons and the hash below, with the reads of the containers that
+// the values are items or members of, when they are (see TextReads).
+bool equalIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
     budget.charge(1);
     const int rank = typeRank(a);
@@ -547,7 +562,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge(equalUnits(first, second));
+        budget.charge(readUnits(readsA, first) + readUnits(readsB, second) + equalUnits(first, second));
         return QAnyStringView::equal(first, second);
     }
     case QJsonValue::Array: {
@@ -558,8 +573,10 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         if (x.size() != y.size()) {
             return false;
         }
+        TextReads itemsX;
+        TextReads itemsY;
         for (qsizetype i = 0; i < x.size(); ++i) {
-            if (budget.exceeded() || !equalValues(x.at(i), y.at(i), budget)) {
+            if (budget.exceeded() || !equalIn(x.at(i), y.at(i), budget, &itemsX, &itemsY)) {
                 return false;
             }
         }
@@ -575,10 +592,12 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         // Most often both keep their members in the same order. When a
         // name differs there, the members are sorted first.
         bool sameOrder = true;
+        TextReads readsX;
+        TextReads readsY;
         for (auto i = x.begin(), j = y.begin(); i != x.end(); ++i, ++j) {
             const QAnyStringView first = i.keyView();
             const QAnyStringView second = j.keyView();
-            budget.charge(UnitsPerMember + equalUnits(first, second));
+            budget.charge(UnitsPerMember + readsX.next(first) + readsY.next(second) + equalUnits(first, second));
             if (budget.exceeded()) {
                 return false;
             }
@@ -586,7 +605,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
                 sameOrder = false;
                 break;
             }
-            if (!equalValues(i.value(), j.value(), budget)) {
+            if (!equalIn(i.value(), j.value(), budget, &readsX, &readsY)) {
                 return false;
             }
         }
@@ -598,10 +617,13 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         if (!first.isReady() || !second.isReady()) {
             return false;
         }
+        TextReads sortedX;
+        TextReads sortedY;
         for (std::size_t i = 0; i < std::size_t(x.size()); ++i) {
-            budget.charge(UnitsPerMember + equalUnits(first.name(i), second.name(i)));
+            budget.charge(UnitsPerMember + sortedX.next(first.name(i)) + sortedY.next(second.name(i))
+                          + equalUnits(first.name(i), second.name(i)));
             if (budget.exceeded() || !QAnyStringView::equal(first.name(i), second.name(i))
-                || !equalValues(first.value(i), second.value(i), budget)) {
+                || !equalIn(first.value(i), second.value(i), budget, &sortedX, &sortedY)) {
                 return false;
             }
         }
@@ -611,7 +633,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     return false;
 }
 
-int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+int compareIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
     budget.charge(1);
     const int rankA = typeRank(a);
@@ -630,7 +652,7 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge(compareUnits(first, second));
+        budget.charge(readUnits(readsA, first) + readUnits(readsB, second) + compareUnits(first, second));
         return compareText(first, second);
     }
     case QJsonValue::Array: {
@@ -638,8 +660,10 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         const QJsonArray x = a.toArray();
         const QJsonArray y = b.toArray();
         const qsizetype n = std::min(x.size(), y.size());
+        TextReads itemsX;
+        TextReads itemsY;
         for (qsizetype i = 0; i < n && !budget.exceeded(); ++i) {
-            const int c = compareValues(x.at(i), y.at(i), budget);
+            const int c = compareIn(x.at(i), y.at(i), budget, &itemsX, &itemsY);
             if (c != 0) {
                 return c;
             }
@@ -660,13 +684,16 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         if (!first.isReady() || !second.isReady()) {
             return 0;
         }
+        TextReads readsX;
+        TextReads readsY;
         for (std::size_t i = 0; i < std::size_t(x.size()) && !budget.exceeded(); ++i) {
-            budget.charge(UnitsPerMember + compareUnits(first.name(i), second.name(i)));
+            budget.charge(UnitsPerMember + readsX.next(first.name(i)) + readsY.next(second.name(i))
+                          + compareUnits(first.name(i), second.name(i)));
             const int k = compareText(first.name(i), second.name(i));
             if (k != 0) {
                 return k;
             }
-            const int c = compareValues(first.value(i), second.value(i), budget);
+            const int c = compareIn(first.value(i), second.value(i), budget, &readsX, &readsY);
             if (c != 0) {
                 return c;
             }
@@ -677,7 +704,7 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     return 0;
 }
 
-quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
+quint64 hashIn(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads)
 {
     budget.charge(1);
     switch (value.type()) {
@@ -690,15 +717,16 @@ quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
         return hashNumber(numberOf(value), key);
     case QJsonValue::String: {
         const QAnyStringView text = value.toStringView();
-        budget.charge(hashUnits(text));
+        budget.charge(readUnits(reads, text) + hashUnits(text));
         return hashText(text, start(key, KindString));
     }
     case QJsonValue::Array: {
         budget.charge(UnitsPerContainer);
         quint64 hash = start(key, KindArray);
         const QJsonArray array = value.toArray();
+        TextReads items;
         for (qsizetype i = 0; i < array.size() && !budget.exceeded(); ++i) {
-            hash = mix(hash, hashValue(array.at(i), key, budget));
+            hash = mix(hash, hashIn(array.at(i), key, budget, &items));
         }
         return mix(hash, quint64(array.size()));
     }
@@ -709,15 +737,33 @@ quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
         quint64 sum = 0;
         const QJsonObject object = value.toObject();
         const quint64 names = start(key, KindName);
+        TextReads reads;
         for (auto it = object.begin(); it != object.end() && !budget.exceeded(); ++it) {
             const QAnyStringView name = it.keyView();
-            budget.charge(UnitsPerMember + hashUnits(name));
-            sum += mix(hashText(name, names), hashValue(it.value(), key, budget));
+            budget.charge(UnitsPerMember + reads.next(name) + hashUnits(name));
+            sum += mix(hashText(name, names), hashIn(it.value(), key, budget, &reads));
         }
         return mix(mix(start(key, KindObject), sum), quint64(object.size()));
     }
     }
     return 0;
+}
+
+} // namespace
+
+bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+{
+    return equalIn(a, b, budget, nullptr, nullptr);
+}
+
+int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+{
+    return compareIn(a, b, budget, nullptr, nullptr);
+}
+
+quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads)
+{
+    return hashIn(value, key, budget, reads);
 }
 
 } // namespace PhosphorMcp::Schema

@@ -205,9 +205,10 @@ private:
         // Each name hashed, and a sort of plain integers.
         qint64 units = qint64(size) * (UnitsPerMember + std::bit_width(quint64(size)) / ComparisonsPerUnit);
         m_names.reserve(std::size_t(size));
+        TextReads reads;
         for (auto it = object.begin(); it != object.end(); ++it) {
             const QAnyStringView name = it.keyView();
-            units += hashUnits(name);
+            units += reads.next(name) + hashUnits(name);
             m_names.push_back(Name{hashText(name, m_key), name});
         }
         if (!m_budget.charge(units)) {
@@ -277,7 +278,9 @@ public:
     {
     }
 
-    void walk(const QJsonValue& value)
+    // `reads`: those of the container that `value` is an item or a member
+    // of, if any.
+    void walk(const QJsonValue& value, TextReads* reads = nullptr)
     {
         if (m_report.isDone() || !m_budget.charge(UnitsPerValueWalked)) {
             return;
@@ -292,7 +295,8 @@ public:
             // Read in place: only UTF-16 can hold an unpaired surrogate,
             // and only it is read through.
             const QAnyStringView text = value.toStringView();
-            m_budget.charge(lineUnits(text) + (isUtf16(text) ? text.size() / CharactersPerUnit : 0));
+            m_budget.charge(lineUnits(text) + (reads ? reads->next(text) : 0)
+                            + (isUtf16(text) ? text.size() / CharactersPerUnit : 0));
             if (!isValidText(text)) {
                 problem(QStringLiteral("contains an unpaired UTF-16 surrogate"));
             }
@@ -306,9 +310,10 @@ public:
         case QJsonValue::Array: {
             m_budget.charge(UnitsPerContainer);
             const QJsonArray array = value.toArray();
+            TextReads items;
             for (qsizetype i = 0; i < array.size() && !m_report.isDone(); ++i) {
                 m_place.pushIndex(i);
-                walk(array.at(i));
+                walk(array.at(i), &items);
                 m_place.pop();
             }
             break;
@@ -316,14 +321,16 @@ public:
         case QJsonValue::Object: {
             m_budget.charge(UnitsPerContainer);
             const QJsonObject object = value.toObject();
+            TextReads members;
             for (auto it = object.begin(); it != object.end() && !m_report.isDone(); ++it) {
                 const QAnyStringView name = it.keyView();
                 m_place.pushName(name);
-                m_budget.charge(memberUnits(name) + (isUtf16(name) ? name.size() / CharactersPerUnit : 0));
+                m_budget.charge(memberUnits(name) + members.next(name)
+                                + (isUtf16(name) ? name.size() / CharactersPerUnit : 0));
                 if (!isValidText(name)) {
                     problem(QStringLiteral("the property name contains an unpaired UTF-16 surrogate"));
                 }
-                walk(it.value());
+                walk(it.value(), &members);
                 m_place.pop();
             }
             break;
@@ -384,6 +391,7 @@ private:
     }
 
     bool apply(int index, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared = nullptr);
+    bool applyTo(TextReads& reads, int index, const QJsonValue& value, Mode mode);
     bool applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared);
     Q_NEVER_INLINE bool checkAssertions(const Node& node, const QJsonValue& value, Mode mode, Shared& shared);
     Q_NEVER_INLINE bool checkType(const Node& node, const QJsonValue& value, Mode mode);
@@ -410,6 +418,9 @@ private:
     // say so, and its text is m_name (see checkName()).
     bool m_propertyName = false;
     QAnyStringView m_name;
+    // The reads of the container that the value applied to is an item or a
+    // member of, if any (see applyTo()).
+    TextReads* m_texts = nullptr;
     int m_depth = 0;
     // The frame of check(). The stack grows down on every Linux the library
     // builds for.
@@ -442,6 +453,17 @@ bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* ou
     }
     --m_depth;
     return valid && !stopped();
+}
+
+// Applies the node `index` to an item or a member of a container: its text,
+// when a keyword reads it, is read after the last one that `reads` saw.
+bool Checker::applyTo(TextReads& reads, int index, const QJsonValue& value, Mode mode)
+{
+    TextReads* const outer = m_texts;
+    m_texts = &reads;
+    const bool valid = apply(index, value, mode, nullptr);
+    m_texts = outer;
+    return valid;
 }
 
 bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared)
@@ -516,8 +538,9 @@ bool Checker::checkAssertions(const Node& node, const QJsonValue& value, Mode mo
     const bool isString = value.isString();
     QAnyStringView text;
     if (isString && (node.hasConst || node.hasEnum || node.minLength >= 0 || node.maxLength >= 0)) {
+        // A name was read where its member was visited.
         text = m_propertyName ? m_name : value.toStringView();
-        charge(UnitsPerStep + lineUnits(text));
+        charge(UnitsPerStep + lineUnits(text) + (!m_propertyName && m_texts ? m_texts->next(text) : 0));
     }
     if ((node.hasConst || node.hasEnum) && !checkLiterals(node, value, isString ? &text : nullptr, mode) && fail()) {
         return false;
@@ -758,10 +781,11 @@ bool Checker::checkArray(const Node& node, const QJsonArray& array, Mode mode, E
         return false;
     }
 
+    TextReads texts;
     const qsizetype prefix = std::min(size, qsizetype(node.prefixItems.size()));
     for (qsizetype i = 0; i < prefix; ++i) {
         m_place.pushIndex(i);
-        const bool ok = apply(node.prefixItems[std::size_t(i)], array.at(i), mode, nullptr);
+        const bool ok = applyTo(texts, node.prefixItems[std::size_t(i)], array.at(i), mode);
         m_place.pop();
         if (!ok && fail()) {
             return false;
@@ -794,7 +818,7 @@ bool Checker::checkArray(const Node& node, const QJsonArray& array, Mode mode, E
         } else {
             for (qsizetype i = prefix; i < size; ++i) {
                 m_place.pushIndex(i);
-                const bool ok = apply(node.items, array.at(i), mode, nullptr);
+                const bool ok = applyTo(texts, node.items, array.at(i), mode);
                 m_place.pop();
                 if (!ok && fail()) {
                     return false;
@@ -816,6 +840,7 @@ bool Checker::checkContains(const Node& node, const QJsonArray& array, Mode mode
     const qint64 minimum = node.minContains >= 0 ? node.minContains : 1;
     const qint64 maximum = node.maxContains;
     qint64 matches = 0;
+    TextReads items;
     for (qsizetype i = 0; i < array.size(); ++i) {
         if (stopped()) {
             return false;
@@ -823,7 +848,7 @@ bool Checker::checkContains(const Node& node, const QJsonArray& array, Mode mode
         // The errors of an item that does not match are no errors of the
         // value.
         m_place.pushIndex(i);
-        const bool ok = apply(node.contains, array.at(i), Mode::Verdict, nullptr);
+        const bool ok = applyTo(items, node.contains, array.at(i), Mode::Verdict);
         m_place.pop();
         if (ok) {
             ++matches;
@@ -877,8 +902,9 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
     }
     std::vector<Key> keys;
     keys.reserve(std::size_t(size));
+    TextReads items;
     for (qsizetype i = 0; i < size && !stopped(); ++i) {
-        keys.push_back(Key{hashValue(array.at(i), m_key, m_budget), i});
+        keys.push_back(Key{hashValue(array.at(i), m_key, m_budget, &items), i});
     }
     // A sort of plain integers, whose comparisons are counted here: some
     // five nanoseconds each, since the hashes are in no order and the
@@ -996,6 +1022,7 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
     if (!node.properties.isEmpty() || node.additionalProperties >= 0 || node.propertyNames >= 0) {
         const bool closed = node.additionalProperties >= 0 && m_nodes[std::size_t(node.additionalProperties)].isBoolean
             && !m_nodes[std::size_t(node.additionalProperties)].booleanValue;
+        TextReads reads;
         qsizetype i = 0;
         for (auto it = object.begin(); it != object.end(); ++it, ++i) {
             if (stopped()) {
@@ -1003,7 +1030,7 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
             }
             const QAnyStringView name = it.keyView();
             m_place.pushName(name);
-            charge(memberUnits(name));
+            charge(memberUnits(name) + reads.next(name));
             bool ok = node.propertyNames < 0 || checkName(node.propertyNames, name, mode);
             if (ok || mode == Mode::Errors) {
                 int child = -1;
@@ -1016,14 +1043,14 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
                     if (evaluated) {
                         evaluated->set(i);
                     }
-                    ok = apply(child, it.value(), mode, nullptr) && ok;
+                    ok = applyTo(reads, child, it.value(), mode) && ok;
                 } else if (closed) {
                     if (mode == Mode::Errors) {
                         error(QStringLiteral("is not a known property"));
                     }
                     ok = false;
                 } else if (node.additionalProperties >= 0) {
-                    ok = apply(node.additionalProperties, it.value(), mode, nullptr) && ok;
+                    ok = applyTo(reads, node.additionalProperties, it.value(), mode) && ok;
                 }
             }
             m_place.pop();
@@ -1099,10 +1126,11 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
                 }
             }
         } else {
+            TextReads reads;
             for (auto it = object.begin(); it != object.end(); ++it) {
                 const QAnyStringView name = it.keyView();
                 // A hash of the name, and a comparison with the entry.
-                charge(UnitsPerMember + 2 * (name.size() / CharactersPerUnit));
+                charge(UnitsPerMember + reads.next(name) + 2 * (name.size() / CharactersPerUnit));
                 const int i = node.dependentRequiredIndex.value(name);
                 if (i >= 0) {
                     triggered.push_back(i);
@@ -1294,6 +1322,7 @@ bool Checker::checkUnevaluatedItems(const Node& node, const QJsonArray& array, M
     if (!evaluated.hasAll()) {
         const Node& rest = m_nodes[std::size_t(node.unevaluatedItems)];
         const bool closed = rest.isBoolean && !rest.booleanValue;
+        TextReads items;
         for (qsizetype i = 0; i < array.size(); ++i) {
             if (stopped()) {
                 return false;
@@ -1310,7 +1339,7 @@ bool Checker::checkUnevaluatedItems(const Node& node, const QJsonArray& array, M
                 }
                 ok = false;
             } else {
-                ok = apply(node.unevaluatedItems, array.at(i), mode, nullptr);
+                ok = applyTo(items, node.unevaluatedItems, array.at(i), mode);
             }
             m_place.pop();
             if (!ok) {
@@ -1331,6 +1360,7 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
     if (!evaluated.hasAll()) {
         const Node& rest = m_nodes[std::size_t(node.unevaluatedProperties)];
         const bool closed = rest.isBoolean && !rest.booleanValue;
+        TextReads reads;
         qsizetype i = 0;
         for (auto it = object.begin(); it != object.end(); ++it, ++i) {
             if (stopped()) {
@@ -1340,8 +1370,9 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
             if (evaluated.has(i)) {
                 continue;
             }
-            m_place.pushName(it.keyView());
-            charge(memberUnits(it.keyView()));
+            const QAnyStringView name = it.keyView();
+            m_place.pushName(name);
+            charge(memberUnits(name) + reads.next(name));
             bool ok = true;
             if (closed) {
                 if (mode == Mode::Errors) {
@@ -1349,7 +1380,7 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
                 }
                 ok = false;
             } else {
-                ok = apply(node.unevaluatedProperties, it.value(), mode, nullptr);
+                ok = applyTo(reads, node.unevaluatedProperties, it.value(), mode);
             }
             m_place.pop();
             if (!ok) {
