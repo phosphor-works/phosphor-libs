@@ -59,10 +59,10 @@ namespace PhosphorFsLoader {
  *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
  *   @c then and @c else beside an @c if (2020-12 ignores them without one),
  *   @c dependentSchemas and other @c $ref s only, as @c {"$ref": "#"}
- *   does. jsoncons would recurse on it until the stack
- *   overflowed. It is refused even in a @c $defs entry nothing uses. A
- *   @c $ref back through @c properties, @c items or another keyword that
- *   applies to a member or an item is allowed: the document is finite.
+ *   does. jsoncons would recurse on it until the stack overflowed. It is
+ *   refused even in a @c $defs entry nothing uses. A @c $ref back through
+ *   @c properties, @c items or another keyword that applies to a member or
+ *   an item is allowed, since the document is finite.
  *
  * @c format is asserted, not only annotated, for the formats jsoncons
  * checks: date-time, date, time, email, ipv4, ipv6, regex, json-pointer, uri
