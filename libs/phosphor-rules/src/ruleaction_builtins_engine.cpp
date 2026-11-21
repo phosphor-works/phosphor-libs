@@ -567,16 +567,13 @@ void ActionRegistry::registerBuiltinsEngine()
         },
         .validate =
             [](const QJsonObject& p) {
-                // `curve` is optional here (the effect reads it from this action
-                // as well as from OverrideAnimationCurve) but when present it
-                // must be a bounded string, or a `"curve": 7` loads and is
-                // silently ignored, the presetId shape fixed above.
+                // Duration only. The curve is OverrideAnimationCurve's, and a
+                // `curve` key here is refused by allowedKeys below.
                 return hasBoundedNonEmptyString(p, ActionParam::Event, MaxChainPackIdLength)
-                    && hasOptionalBoundedString(p, ActionParam::Curve, MaxChainPackIdLength)
                     && hasValidOptionalDurationMs(p, ActionParam::DurationMs);
             },
         .terminal = false,
-        .allowedKeys = {QString(ActionParam::Event), QString(ActionParam::Curve), QString(ActionParam::DurationMs)},
+        .allowedKeys = {QString(ActionParam::Event), QString(ActionParam::DurationMs)},
         .domain = ActionDomain::Window,
         .params = {P{.key = QString(ActionParam::Event), .kind = QString(ParamKind::AnimationEvent)},
                    // Floor stays 0, which is the disengaged sentinel the editor

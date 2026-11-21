@@ -98,6 +98,9 @@ PhosphorRules::Rule buildAnimationAppRule(const QJsonObject& source, int i, int 
     const bool isShader = kindStr.compare(kKindShader, Qt::CaseInsensitive) == 0;
 
     PhosphorRules::RuleAction action;
+    // A legacy timing entry's curve becomes its own OverrideAnimationCurve
+    // action on the same rule: the timing action carries the duration only.
+    std::optional<PhosphorRules::RuleAction> curveAction;
     QJsonObject params;
     params.insert(ActionParam::Event, eventPath);
     if (isShader) {
@@ -128,9 +131,18 @@ PhosphorRules::Rule buildAnimationAppRule(const QJsonObject& source, int i, int 
         }
     } else {
         action.type = QString(PhosphorRules::ActionType::OverrideAnimationTiming);
+        // An empty curve is the "inherit" sentinel and produces no curve
+        // action. The timing action is emitted either way, as before: it is
+        // the rule's only action when there is no curve, and an
+        // engaged-but-empty timing slot still shadows a lower-priority rule's
+        // duration for the same event, which is what the legacy entry did.
         const QString curve = source.value(kKeyCurve).toString();
         if (!curve.isEmpty()) {
-            params.insert(ActionParam::Curve, curve);
+            PhosphorRules::RuleAction c;
+            c.type = QString(PhosphorRules::ActionType::OverrideAnimationCurve);
+            c.params.insert(ActionParam::Event, eventPath);
+            c.params.insert(ActionParam::Curve, curve);
+            curveAction = std::move(c);
         }
         // `durationMs <= 0` is the "inherit per-event default" sentinel —
         // omit the key entirely, mirroring AnimationAppRule::toJson. An
@@ -176,6 +188,9 @@ PhosphorRules::Rule buildAnimationAppRule(const QJsonObject& source, int i, int 
     rule.match = PhosphorRules::MatchExpression::makeLeaf(PhosphorRules::Field::WindowClass,
                                                           PhosphorRules::Operator::Contains, classPattern);
     rule.actions.append(action);
+    if (curveAction) {
+        rule.actions.append(*curveAction);
+    }
     return rule;
 }
 

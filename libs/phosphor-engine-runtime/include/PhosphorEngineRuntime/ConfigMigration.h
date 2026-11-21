@@ -29,8 +29,9 @@ namespace PhosphorEngineRuntime {
 ///     assignments.json is superseded. QuickLayouts slots relocate to the
 ///     quicklayouts.json sidecar. The Animations.AnimationAppRules array also
 ///     folds into rules.json as OverrideAnimation{Shader,Timing} actions
-///     on `WindowClass Contains <pattern>` matchers — the legacy
-///     AnimationAppRule/Bridge types are removed and the runtime reads
+///     (a timing entry's curve as an OverrideAnimationCurve action beside
+///     its timing action) on `WindowClass Contains <pattern>` matchers — the
+///     legacy AnimationAppRule/Bridge types are removed and the runtime reads
 ///     animation overrides exclusively from the unified rule store.
 ///     The legacy `Exclusions` group (`Applications` / `WindowClasses`
 ///     comma-joined pattern lists) folds into the same rules.json: each
@@ -83,6 +84,10 @@ namespace PhosphorEngineRuntime {
 /// v7 config step cannot reach it (see renameRetiredAnimationEventPaths).
 /// The strip of the managed appearance baseline rules older builds seeded
 /// rides it for the first reason (see stripManagedAppearanceBaselineRules).
+/// So does the split of a curve carried on a timing action onto its own
+/// curve action, for the second reason: the timing action stopped carrying a
+/// curve, and the actions that still do live in that sidecar (see
+/// splitTimingActionCurves).
 /// These are the only cleanups that run outside the chain. Anything else
 /// touching the config root needs a version bump.
 /// v5: the per-mode Snapping/Tiling appearance and gap settings fold into the
@@ -275,7 +280,8 @@ public:
     /// survives a config schema bump without a rebuild). It is NOT a strict no-op — it
     /// retries the still-pending tail steps (strip surviving `_v4*Stash`
     /// keys, retire a still-present assignments.json, and the rules.json
-    /// fix-ups `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule`,
+    /// fix-ups `splitTimingActionCurves` (always first, see its comment),
+    /// `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule`,
     /// `renameRetiredAnimationEventPaths` and
     /// `stripManagedAppearanceBaselineRules`, which DO write the sidecar) so a
     /// partial earlier
@@ -478,6 +484,47 @@ public:
     ///                 via ConfigDefaults).
     /// @return true on success or a clean no-op; false on an I/O failure.
     static bool stripManagedAppearanceBaselineRules(const QString& jsonPath);
+
+    /// Move the curve a stored `overrideAnimationTiming` action still carries
+    /// onto an `overrideAnimationCurve` action for the same event, and drop it
+    /// from the timing action. The timing action carries only the duration
+    /// now and refuses a `curve` key, so without this a rule written before
+    /// the split would lose the whole timing action on load.
+    ///
+    /// Per timing action carrying a string curve:
+    ///  - the `curve` key is removed. The timing action itself is KEPT even
+    ///    when nothing but its event is left: an engaged timing slot with no
+    ///    duration still shadows a lower-priority rule's duration for that
+    ///    event, so dropping it would change which duration applies.
+    ///  - an empty curve (the "inherit" sentinel) moves nowhere.
+    ///  - if the rule already has a curve action for the event with a
+    ///    non-empty curve, that one wins and the timing curve is discarded.
+    ///    This is the precedence the compositor applied, reading the curve
+    ///    slot first and the timing action's curve only when that was empty.
+    ///  - if the rule's curve action for the event has an empty or absent
+    ///    curve, it takes the timing curve, for the same reason.
+    ///  - otherwise a new curve action is inserted right after the timing
+    ///    action.
+    /// A timing action whose curve is not a string or is longer than the old
+    /// validator allowed already failed to load, and is left exactly as found.
+    ///
+    /// One precedence cannot carry over. The compositor preferred a curve
+    /// action from ANY matching rule over a timing curve, even when the timing
+    /// curve sat in a higher-priority rule. Once split, the moved curve is an
+    /// ordinary curve action, so it now outranks a lower-priority rule's curve
+    /// for the same window and event like every other slot does.
+    ///
+    /// Reads and writes the RAW rules.json with frozen key spellings (the
+    /// live Rule/RuleAction types cannot represent the old shape), so it runs
+    /// FIRST in finalizeV4Conversion's cleanup path: every other fix-up there
+    /// round-trips the store through RuleSet, which would drop the
+    /// un-migrated action. Idempotent: once split, no timing action carries a
+    /// curve and nothing is written.
+    ///
+    /// @param jsonPath Path to config.json (rules.json is derived as a sibling
+    ///                 via ConfigDefaults).
+    /// @return true on success or a clean no-op; false on an I/O failure.
+    static bool splitTimingActionCurves(const QString& jsonPath);
 
     /// Part of the v4 conversion: read every `*.json` layout in @p layoutsDir,
     /// split its embedded per-layout settings into the @p sidecarPath store

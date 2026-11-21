@@ -474,6 +474,17 @@ bool ConfigMigration::finalizeV4Conversion(const QString& jsonPath)
         // still-pending, idempotent cleanup steps.
         bool ok = true;
 
+        // Move the curve off every timing action onto its own curve action.
+        // FIRST among the rules.json fix-ups, and it must stay first: it reads
+        // the raw JSON, while the four below load and save the store through
+        // RuleSet, which refuses a timing action that still carries a `curve`
+        // and would drop it (duration and all, and the whole rule when that
+        // was its only action) on the round-trip. If it could not write, the
+        // RuleSet fix-ups are skipped for this start rather than allowed to
+        // save that loss; they are all idempotent and run again next time.
+        const bool timingCurvesSplit = splitTimingActionCurves(jsonPath);
+        ok = timingCurvesSplit && ok;
+
         // Strip the four v4 scratch keys (`_v4DisableStash`, `_v4AnimationRulesStash`,
         // `_v4ExclusionStash`, `_v4AnimationExclusionStash`) from config.json if any
         // survived a partial earlier run. Log every failure mode (open / parse /
@@ -522,6 +533,10 @@ bool ConfigMigration::finalizeV4Conversion(const QString& jsonPath)
         // on filesystems where remove may not (and the renamed file is inert —
         // nothing reads it), so a delete-failure can never loop forever.
         retireLegacyAssignmentsFile(assignmentsPath);
+
+        if (!timingCurvesSplit) {
+            return false;
+        }
 
         // Prune the retired provider-default catch-all rule from rules.json.
         // Idempotent: once gone (or on a config that never had one) it is a
@@ -791,8 +806,9 @@ bool ConfigMigration::finalizeV4Conversion(const QString& jsonPath)
     // ── Animation App Rules → Rules ──────────────────────────────────
     // Port the (now-deleted) AnimationAppRuleBridge logic against the stashed
     // legacy JSON. The animation rules target slot prefixes (`anim-shader:`,
-    // `anim-timing:`) that no other rule type fills, so they coexist with the
-    // assignment/disable rules above regardless of priority interleaving.
+    // `anim-timing:`, `anim-curve:`) that no other rule type fills, so they
+    // coexist with the assignment/disable rules above regardless of priority
+    // interleaving.
     appendAnimationRulesFromStash(rules, animationRulesStash);
 
     // ── Exclusions → Rules ───────────────────────────────────────────
@@ -1163,6 +1179,158 @@ bool ConfigMigration::renameRetiredAnimationEventPaths(const QString& jsonPath)
         }
         return changed;
     });
+}
+
+namespace {
+
+// Frozen rules.json spellings for splitTimingActionCurves. It migrates an
+// on-disk shape the live types can no longer represent, so it reads the raw
+// document and must not follow a later rename of the live ActionType /
+// ActionParam constants.
+constexpr QLatin1StringView kRulesVersionKey{"_version"};
+constexpr int kRulesSchemaVersion = 4;
+constexpr QLatin1StringView kRulesListKey{"rules"};
+constexpr QLatin1StringView kRuleActionsKey{"actions"};
+constexpr QLatin1StringView kActionTypeKey{"type"};
+constexpr QLatin1StringView kActionEventKey{"event"};
+constexpr QLatin1StringView kActionCurveKey{"curve"};
+constexpr QLatin1StringView kTimingActionType{"overrideAnimationTiming"};
+constexpr QLatin1StringView kCurveActionType{"overrideAnimationCurve"};
+// The longest curve the timing action's validator accepted while it still
+// carried one. A longer curve made the whole action fail to load, so such an
+// action is left exactly as found rather than repaired into a loading one.
+constexpr int kMaxLegacyCurveLength = 1024;
+// The rule store's own size cap: a file past it never loads, so it is not read.
+constexpr qint64 kMaxRulesFileBytes = 8 * 1024 * 1024;
+
+/// Split the curve off every timing action in one rule's @p actions. Returns
+/// whether anything changed. See ConfigMigration::splitTimingActionCurves for
+/// the contract.
+bool splitTimingCurvesInActions(QJsonArray& actions)
+{
+    bool changed = false;
+    for (int i = 0; i < actions.size(); ++i) {
+        QJsonObject timing = actions.at(i).toObject();
+        if (timing.value(kActionTypeKey).toString() != kTimingActionType) {
+            continue;
+        }
+        const QJsonValue curveValue = timing.value(kActionCurveKey);
+        // Absent: nothing to move. Not a string, or over the old bound: the
+        // action already fails to load today, and stripping the key would
+        // bring it back to life with a duration nobody has seen applied.
+        if (!curveValue.isString() || curveValue.toString().size() > kMaxLegacyCurveLength) {
+            continue;
+        }
+        const QString curve = curveValue.toString();
+        timing.remove(kActionCurveKey);
+        actions.replace(i, timing);
+        changed = true;
+
+        // An empty curve meant "inherit" and has nothing to carry. An action
+        // with no usable event fails to load either way, and a curve cannot be
+        // scoped without one.
+        const QString event = timing.value(kActionEventKey).toString();
+        if (curve.isEmpty() || event.isEmpty()) {
+            continue;
+        }
+
+        // The first curve action for the same event is the one the rule's
+        // curve slot decodes. The effect preferred a non-empty curve there and
+        // fell back to the timing action's curve only when it was empty, so a
+        // non-empty one wins and an empty or absent one takes the timing curve.
+        // A curve that is not a string, or is over the same bound, made that
+        // action fail to load, so it counts as no curve action at all.
+        int curveIndex = -1;
+        for (int j = 0; j < actions.size(); ++j) {
+            const QJsonObject candidate = actions.at(j).toObject();
+            if (candidate.value(kActionTypeKey).toString() == kCurveActionType
+                && candidate.value(kActionEventKey).toString() == event) {
+                const QJsonValue existing = candidate.value(kActionCurveKey);
+                if (existing.isUndefined()
+                    || (existing.isString() && existing.toString().size() <= kMaxLegacyCurveLength)) {
+                    curveIndex = j;
+                    break;
+                }
+            }
+        }
+        if (curveIndex >= 0) {
+            QJsonObject existing = actions.at(curveIndex).toObject();
+            if (existing.value(kActionCurveKey).toString().isEmpty()) {
+                existing.insert(kActionCurveKey, curve);
+                actions.replace(curveIndex, existing);
+            }
+            continue;
+        }
+
+        // No curve action for this event: add one straight after the timing
+        // action, and step past it.
+        actions.insert(i + 1,
+                       QJsonObject{{QString(kActionTypeKey), QString(kCurveActionType)},
+                                   {QString(kActionEventKey), event},
+                                   {QString(kActionCurveKey), curve}});
+        ++i;
+    }
+    return changed;
+}
+
+} // namespace
+
+bool ConfigMigration::splitTimingActionCurves(const QString& jsonPath)
+{
+    // Same gate as withRuleSet: only a converted store is ours to touch.
+    if (!QFile::exists(jsonPath)) {
+        return true;
+    }
+    const QString rulesPath = ConfigDefaults::rulesFilePath();
+    QFile file(rulesPath);
+    if (!file.exists()) {
+        return true;
+    }
+    if (file.size() > kMaxRulesFileBytes) {
+        return true; // never loads; prevalidateRulesFile owns that case
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning("ConfigMigration::splitTimingActionCurves: cannot read %s: %s", qPrintable(rulesPath),
+                 qPrintable(file.errorString()));
+        return false;
+    }
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+    file.close();
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        return true; // not a store this build loads; prevalidateRulesFile owns it
+    }
+    QJsonObject root = doc.object();
+    const QJsonValue version = root.value(kRulesVersionKey);
+    if (!version.isDouble() || version.toInt() != kRulesSchemaVersion) {
+        return true;
+    }
+    QJsonArray rules = root.value(kRulesListKey).toArray();
+    bool changed = false;
+    for (int i = 0; i < rules.size(); ++i) {
+        QJsonObject rule = rules.at(i).toObject();
+        const QJsonValue actionsValue = rule.value(kRuleActionsKey);
+        if (!actionsValue.isArray()) {
+            continue;
+        }
+        QJsonArray actions = actionsValue.toArray();
+        if (!splitTimingCurvesInActions(actions)) {
+            continue;
+        }
+        rule.insert(kRuleActionsKey, actions);
+        rules.replace(i, rule);
+        changed = true;
+    }
+    if (!changed) {
+        return true; // already split, or never had a timing curve: no write
+    }
+    root.insert(kRulesListKey, rules);
+    if (!PhosphorConfig::JsonBackend::writeJsonAtomically(rulesPath, root)) {
+        qWarning("ConfigMigration::splitTimingActionCurves: failed to write %s", qPrintable(rulesPath));
+        return false;
+    }
+    qInfo("ConfigMigration::splitTimingActionCurves: rewrote %s", qPrintable(rulesPath));
+    return true;
 }
 
 } // namespace PhosphorEngineRuntime
