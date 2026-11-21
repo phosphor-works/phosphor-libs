@@ -152,13 +152,6 @@ inline QLatin1String kFixedPx()
 {
     return QLatin1String("fixedPx");
 }
-inline QLatin1String kPresetIdx()
-{
-    // LEGACY read-only key: pre-value-anchor blobs stored the preset INDEX.
-    // New blobs write kPresetFraction; the readers resolve a legacy index
-    // against the restoring screen's effective list (claim-site fixup).
-    return QLatin1String("presetIdx");
-}
 inline QLatin1String kPresetFraction()
 {
     return QLatin1String("presetFraction");
@@ -182,13 +175,7 @@ QJsonObject widthToJson(const ColumnWidth& w)
     return obj;
 }
 
-/// @p legacyVocab: the restoring screen's effective preset-width list, used
-/// ONLY to resolve a pre-value-anchor blob's stored index into a fraction
-/// (fromJson stays pure — the vocabulary is a parameter, threaded in by
-/// restoreStripState which knows the screen). Version-free additive per the
-/// policy above; a blob written by this build is unreadable-as-preset by
-/// older builds (stash entries expire after three sessions regardless).
-ColumnWidth widthFromJson(const QJsonObject& obj, const QList<qreal>& legacyVocab)
+ColumnWidth widthFromJson(const QJsonObject& obj)
 {
     // Persisted config is user-writable, so this is a system boundary: every
     // numeric field is bounded to the range its producers already enforce
@@ -205,17 +192,7 @@ ColumnWidth widthFromJson(const QJsonObject& obj, const QList<qreal>& legacyVoca
     // Bounded above like every other Fixed producer (kMaxFixedExtentPx);
     // relayout clamps to the work area anyway, so this is a belt.
     w.fixedPx = qBound(0, obj.value(kFixedPx()).toInt(0), static_cast<int>(kMaxFixedExtentPx));
-    if (obj.contains(kPresetFraction())) {
-        w.presetFraction = qBound<qreal>(MinColumnWidthFraction, obj.value(kPresetFraction()).toDouble(0.5), 1.0);
-    } else {
-        // Legacy blob: resolve the stored index against the current
-        // vocabulary. If the list changed since the write the anchor lands on
-        // a slightly different value — accepted degradation, smoothed by
-        // snap-at-resolve.
-        const int legacyIdx = qMax(0, obj.value(kPresetIdx()).toInt(0));
-        w.presetFraction =
-            legacyVocab.isEmpty() ? 0.5 : legacyVocab.at(qBound(0, legacyIdx, int(legacyVocab.size()) - 1));
-    }
+    w.presetFraction = qBound<qreal>(MinColumnWidthFraction, obj.value(kPresetFraction()).toDouble(0.5), 1.0);
     return w;
 }
 
@@ -229,8 +206,7 @@ QJsonObject heightToJson(const WindowHeight& h)
     return obj;
 }
 
-/// Same legacy-vocabulary contract as widthFromJson.
-WindowHeight heightFromJson(const QJsonObject& obj, const QList<qreal>& legacyVocab)
+WindowHeight heightFromJson(const QJsonObject& obj)
 {
     WindowHeight h;
     const int kind = obj.value(kKind()).toInt(static_cast<int>(WindowHeight::Auto));
@@ -238,16 +214,10 @@ WindowHeight heightFromJson(const QJsonObject& obj, const QList<qreal>& legacyVo
                                                                            : WindowHeight::Auto;
     // Same boundary hardening as widthFromJson: a non-positive weight would
     // divide the auto-height share by zero-or-negative, and a negative
-    // fixedPx/presetIdx indexes out of range.
+    // fixedPx is out of range.
     h.weight = qBound<qreal>(0.01, obj.value(kWeight()).toDouble(1.0), 100.0);
     h.fixedPx = qBound(0, obj.value(kFixedPx()).toInt(0), static_cast<int>(kMaxFixedExtentPx));
-    if (obj.contains(kPresetFraction())) {
-        h.presetFraction = qBound<qreal>(MinWindowHeightFraction, obj.value(kPresetFraction()).toDouble(0.5), 1.0);
-    } else {
-        const int legacyIdx = qMax(0, obj.value(kPresetIdx()).toInt(0));
-        h.presetFraction =
-            legacyVocab.isEmpty() ? 0.5 : legacyVocab.at(qBound(0, legacyIdx, int(legacyVocab.size()) - 1));
-    }
+    h.presetFraction = qBound<qreal>(MinWindowHeightFraction, obj.value(kPresetFraction()).toDouble(0.5), 1.0);
     return h;
 }
 
@@ -563,22 +533,6 @@ void ScrollEngine::restoreStripState(const QJsonObject& state)
             continue;
         }
         const QJsonObject obj = it.value().toObject();
-        // Vocabularies for the LEGACY presetIdx fixup in the two fromJson
-        // calls below — resolved once per key; the screen is in scope here,
-        // which is why the fixup lives at this claim site.
-        //
-        // "Effective" means effective AT RESTORE TIME, which on the login
-        // path is the settings list: the daemon hands this blob over from
-        // initEnginesAndWiring, and a screen's template overrides are not
-        // pushed until updateScrollingScreens runs later, out of start().
-        // A legacy index therefore usually resolves against the settings
-        // vocabulary even for a screen that ends up on a template. The
-        // result is a value anchor either way, and relayout snaps it into
-        // whatever vocabulary the screen finally has, so the reload path
-        // (which does see the overrides) differs only in which entry the
-        // anchor starts from.
-        const QList<qreal> widthVocab = effectivePresetColumnWidths(key.screenId);
-        const QList<qreal> heightVocab = effectivePresetWindowHeights(key.screenId);
         StashedStrip stash;
         stash.focusedWindowId = obj.value(kFocused()).toString();
         // Same boundary hardening as widthFromJson. The anchor is deliberately
@@ -610,7 +564,7 @@ void ScrollEngine::restoreStripState(const QJsonObject& state)
             }
             const QJsonObject colObj = colVal.toObject();
             StashedColumn col;
-            col.width = widthFromJson(colObj.value(kWidth()).toObject(), widthVocab);
+            col.width = widthFromJson(colObj.value(kWidth()).toObject());
             col.display = colObj.value(kDisplay()).toInt(0) == static_cast<int>(ColumnDisplay::Tabbed)
                 ? ColumnDisplay::Tabbed
                 : ColumnDisplay::Normal;
@@ -637,7 +591,7 @@ void ScrollEngine::restoreStripState(const QJsonObject& state)
                 const QJsonObject tileObj = tileVal.toObject();
                 StashedTile tile;
                 tile.windowId = tileObj.value(kWindowId()).toString();
-                tile.height = heightFromJson(tileObj.value(kHeight()).toObject(), heightVocab);
+                tile.height = heightFromJson(tileObj.value(kHeight()).toObject());
                 tile.minimized = tileObj.value(kMinimized()).toBool(false);
                 // Additive key: an older blob reads false (version-free
                 // policy above).

@@ -179,12 +179,6 @@ struct SnapResult
     QString zoneId;
     QStringList zoneIds;
     QString screenId;
-    /// INERT, kept for ABI layout: snap's resolve once set it when it stood
-    /// down for a record that homed the window TILED on another engine's
-    /// screen, so the adaptor would offer the window to that engine's
-    /// cross-screen reclaim. The reopen contract removed both halves; nothing
-    /// sets or reads it now, and it stays false.
-    bool deferredToTilingEngine = false;
     /// Target virtual desktop the snap should be committed in (1-based). 0 means
     /// "the window's current desktop" — the historical behaviour. Set non-zero only
     /// by a placement rule that also routes the window to a desktop (RouteToDesktop),

@@ -161,7 +161,6 @@ void EngineRuntime::initEnginesAndWiring()
     // switch and the disabled check included, F1137)? The reopen claim (claimCrossScreenReopen) asks it for the
     // RECORDED context, the same-mode half of the reopen contract (a FIFO record on another virtual screen of the
     // opening output); readoptParked asks it for an out-of-view parked context before seating or granting it (F1102).
-    // (The engine's Snapping and Autotile resolvers fed the cross-screen defer gates, which are gone; not wired.)
     scrollEngine->setScrollingModeResolver([this](const QString& screenId, int desktop, const QString& activity) {
         return routedModeForContext(screenId, desktop, activity) == PhosphorZones::AssignmentEntry::Mode::Scrolling;
     });
@@ -256,8 +255,6 @@ void EngineRuntime::initEnginesAndWiring()
     // CONTRACT: createEngines() above always constructs every engine and
     // initCoreAdaptors() ran first, so the engine pointers and the
     // adaptor members are non-null throughout this method — no per-use guards.
-    // (Autotile's scrolling-mode resolver fed its cross-screen defer gate,
-    // which the reopen contract removed; it is not wired.)
     autotileEngine->setContextGapProvider([this](const QString& screenId) -> QVariantMap {
         if (!m_layoutManager || screenId.isEmpty()) {
             return {};

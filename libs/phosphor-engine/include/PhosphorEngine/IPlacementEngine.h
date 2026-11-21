@@ -108,14 +108,6 @@ public:
         return false;
     }
 
-    /// INERT, kept for ABI: fed the removed cross-screen defer gates. Nothing
-    /// calls it and the in-tree overrides ignore it.
-    virtual void noteCrossScreenClaimsExhausted(const QString& windowId, bool exhausted)
-    {
-        Q_UNUSED(windowId)
-        Q_UNUSED(exhausted)
-    }
-
     /// OPTIONAL: the screen this engine genuinely HOLDS the window on IN THE
     /// SCREEN'S CURRENT CONTEXT — a MEMBERSHIP answer (tiled or
     /// engine-floating both count; a phantom reverse-map key does not),

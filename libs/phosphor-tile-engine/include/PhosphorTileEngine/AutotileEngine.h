@@ -625,15 +625,6 @@ public:
         m_contextModeResolver = std::move(resolver);
     }
 
-    /// INERT, kept for ABI: a scrolling-mode resolver that fed windowOpened's cross-screen tile-restore defer, which
-    /// the reopen contract removed (a window opening on an autotile screen is autotile's). Nothing reads the stored
-    /// resolver and the daemon no longer wires it; a setter call is harmless.
-    void setScrollingModeResolver(
-        std::function<bool(const QString& screenId, int desktop, const QString& activity)> resolver)
-    {
-        m_scrollingModeResolver = std::move(resolver);
-    }
-
     // Mark the active (screen, desktop, activity) state's split ratio / master
     // count as user-tuned so propagateGlobalSplitRatio/MasterCount leaves it
     // alone — the adjustment stays local to that desktop instead of bleeding into
@@ -1101,7 +1092,6 @@ public:
     /// would TILE the window; returns the REAL adoption outcome.
     bool claimCrossScreenReopen(const QString& windowId, const QString& openingScreenId, int minWidth,
                                 int minHeight) override;
-    void noteCrossScreenClaimsExhausted(const QString& windowId, bool exhausted) override;
     QString heldScreenForWindow(const QString& windowId) const override;
     std::optional<PhosphorEngine::PlacementStateKey> heldKeyForWindow(const QString& windowId) const override;
 
@@ -1793,8 +1783,6 @@ private:
     QSet<QString> m_autotileFloatedWindows;
 
     PhosphorZones::LayoutRegistry* m_layoutManager = nullptr;
-    /// INERT, kept for ABI layout; see setScrollingModeResolver.
-    std::function<bool(const QString& screenId, int desktop, const QString& activity)> m_scrollingModeResolver;
     PhosphorEngine::IWindowTrackingService* m_windowTracker = nullptr;
     PhosphorScreens::ScreenManager* m_screenManager = nullptr;
     /// Borrowed cross-surface resolver (neighbouring output / desktop lookup);
@@ -1828,8 +1816,6 @@ private:
     // Alias for the type hoisted to AutotileEngineTypes.h.
     using MigrationArrival = ::PhosphorTileEngine::MigrationArrival;
     std::optional<MigrationArrival> m_migrationArrival;
-    /// INERT, kept for ABI layout: the defer gate it fed is gone, and nothing writes or reads it.
-    QSet<QString> m_crossScreenClaimsExhausted;
 
     /// The float state @p windowId must be inserted with: the live state it
     /// carried across a migration, else the open-time "Float this app" rule.
@@ -1870,9 +1856,7 @@ private:
     // Script-state bags rescued from TilingStates that a teardown destroys, so a
     // re-created state for the same key can pick its bag back up. See
     // StashedScriptState in AutotileEngineTypes.h for the full rationale (harvest
-    // rules, the algorithm tag, split-tree carry). The alias keeps the
-    // AutotileEngine::StashedScriptState spelling valid for existing call sites.
-    using StashedScriptState = ::PhosphorTileEngine::StashedScriptState;
+    // rules, the algorithm tag, split-tree carry).
     std::unordered_map<PhosphorEngine::TilingStateKey, StashedScriptState> m_scriptStateStash;
 
     /// Rescue @p state's script-state bag and split tree into m_scriptStateStash
@@ -2047,9 +2031,7 @@ private:
     // here and replay it in onWindowAdded once the window is tracked.
     QString m_pendingFocusReseedWindowId;
 
-    // DragInsertPreview moved to AutotileEngineTypes.h; alias keeps the
-    // AutotileEngine::DragInsertPreview spelling valid for existing call sites.
-    using DragInsertPreview = ::PhosphorTileEngine::DragInsertPreview;
+    // The live drag-insert preview; DragInsertPreview is in AutotileEngineTypes.h.
     std::optional<DragInsertPreview> m_dragInsertPreview;
 
     /// Set only for the duration of cancelDragInsertPreview(dragStillActive =
