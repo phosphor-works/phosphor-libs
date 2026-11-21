@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 fuddlesworth
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //
-// The preset STORE half: the directory loader and its live-reload watcher, the
-// one-shot legacy overlay-preset migration, and ShaderPresetStore itself (load
-// idempotence, family selection, root refusal, teardown order).
+// The preset STORE half: the directory loader and its live-reload watcher, and
+// ShaderPresetStore itself (load idempotence, family selection, root refusal,
+// teardown order).
 //
 // Split from test_shaderpresets.cpp when that file reached the size ceiling. The PARSE
 // and RESOLVE halves stay there: this file is about getting presets off disk and into a
@@ -87,14 +87,8 @@ private Q_SLOTS:
     void watcherSeesAnAtomicRenameSave();
     void watcherSeesAPresetAddedToAFreshInstall();
 
-    // ─────── legacy migration ───────
+    // ─────── user preset root ───────
 
-    void migratesLegacyOverlayPreset();
-    void migrationIsIdempotent();
-    void migratedIdIsDerivedNotRandom();
-    void migrationLeavesForeignFilesAlone();
-    void migrationFallsBackToFilenameForName();
-    void migrationOnAbsentRootIsNoOp();
     void standardUserPresetRootIsTheAppSubdirUnderTheUserDataDir();
     void standardUserPresetRootIsEmptyWithoutASubdir();
 
@@ -212,109 +206,7 @@ void TestShaderPresetStore::editingAPresetFileReachesTheRegistry()
     QCOMPARE(resolved.value(QStringLiteral("glow")).toDouble(), 0.5);
 }
 
-// ═══════════════════════ legacy migration ═══════════════════════
-
-void TestShaderPresetStore::migratesLegacyOverlayPreset()
-{
-    QTemporaryDir root;
-    QVERIFY(root.isValid());
-    // The exact shape the old zone-only save dialog wrote: flat in the root,
-    // `shaderId` / `shaderParams`, identity carried by the filename.
-    QVERIFY(writeFile(root.path() + QStringLiteral("/my-aurora.json"), QStringLiteral(R"({
-        "name": "My Aurora", "shaderId": "aurora",
-        "shaderParams": { "speed": 0.7, "tint": "#ff8800" }
-    })")));
-
-    QCOMPARE(migrateLegacyOverlayPresets(root.path()), 1);
-
-    // The original is gone from the root...
-    QVERIFY(!QFile::exists(root.path() + QStringLiteral("/my-aurora.json")));
-
-    // ...and the preset now loads through the ordinary overlay path.
-    const auto store = storePublishing(root.path(), ShaderFamily::Overlay);
-
-    const QList<ShaderPreset> presets = store->registry().presetsFor(ShaderFamily::Overlay, QStringLiteral("aurora"));
-    QCOMPARE(presets.size(), 1);
-    QCOMPARE(presets.at(0).name, QStringLiteral("My Aurora"));
-    QCOMPARE(presets.at(0).packId, QStringLiteral("aurora"));
-    QCOMPARE(presets.at(0).params.value(QStringLiteral("speed")).toDouble(), 0.7);
-    QCOMPARE(presets.at(0).params.value(QStringLiteral("tint")).toString(), QStringLiteral("#ff8800"));
-    QVERIFY(!presets.at(0).readOnly);
-}
-
-void TestShaderPresetStore::migrationIsIdempotent()
-{
-    QTemporaryDir root;
-    QVERIFY(root.isValid());
-    QVERIFY(writeFile(root.path() + QStringLiteral("/one.json"),
-                      QStringLiteral(R"({ "name": "One", "shaderId": "aurora", "shaderParams": {} })")));
-
-    QCOMPARE(migrateLegacyOverlayPresets(root.path()), 1);
-    // Nothing left in the root, so a second run has nothing to do. Running on
-    // every startup must not keep manufacturing copies.
-    QCOMPARE(migrateLegacyOverlayPresets(root.path()), 0);
-
-    const QDir overlayDir(userPresetDirectory(root.path(), ShaderFamily::Overlay));
-    QCOMPARE(overlayDir.entryList({QStringLiteral("*.json")}, QDir::Files).size(), 1);
-}
-
-void TestShaderPresetStore::migratedIdIsDerivedNotRandom()
-{
-    // Two processes racing the migration have to agree on the target path, or
-    // the user ends up with the preset twice. Same input filename, same id.
-    const auto idFor = [](const QString& rootPath) {
-        const QDir dir(userPresetDirectory(rootPath, ShaderFamily::Overlay));
-        const QStringList files = dir.entryList({QStringLiteral("*.json")}, QDir::Files);
-        return files.isEmpty() ? QString() : files.first();
-    };
-
-    QTemporaryDir rootA;
-    QTemporaryDir rootB;
-    QVERIFY(rootA.isValid() && rootB.isValid());
-    const QString body = QStringLiteral(R"({ "name": "X", "shaderId": "aurora", "shaderParams": {} })");
-    QVERIFY(writeFile(rootA.path() + QStringLiteral("/same-name.json"), body));
-    QVERIFY(writeFile(rootB.path() + QStringLiteral("/same-name.json"), body));
-
-    QCOMPARE(migrateLegacyOverlayPresets(rootA.path()), 1);
-    QCOMPARE(migrateLegacyOverlayPresets(rootB.path()), 1);
-
-    QVERIFY(!idFor(rootA.path()).isEmpty());
-    QCOMPARE(idFor(rootA.path()), idFor(rootB.path()));
-}
-
-void TestShaderPresetStore::migrationLeavesForeignFilesAlone()
-{
-    // A file in the same directory that this never wrote is not ours to move or
-    // delete — the migration owns the shape it produced, not the directory.
-    QTemporaryDir root;
-    QVERIFY(root.isValid());
-    const QString foreign = root.path() + QStringLiteral("/notes.json");
-    QVERIFY(writeFile(foreign, QStringLiteral(R"({ "something": "else" })")));
-
-    QCOMPARE(migrateLegacyOverlayPresets(root.path()), 0);
-    QVERIFY(QFile::exists(foreign));
-}
-
-void TestShaderPresetStore::migrationFallsBackToFilenameForName()
-{
-    QTemporaryDir root;
-    QVERIFY(root.isValid());
-    QVERIFY(writeFile(root.path() + QStringLiteral("/deep-teal.json"),
-                      QStringLiteral(R"({ "shaderId": "aurora", "shaderParams": {} })")));
-
-    QCOMPARE(migrateLegacyOverlayPresets(root.path()), 1);
-
-    const auto store = storePublishing(root.path(), ShaderFamily::Overlay);
-    // A nameless preset would render as a blank picker row; the old filename is
-    // the best name available and is what the user recognises.
-    QCOMPARE(store->registry().presetsFor(ShaderFamily::Overlay, QStringLiteral("aurora")).at(0).name,
-             QStringLiteral("deep-teal"));
-}
-
-void TestShaderPresetStore::migrationOnAbsentRootIsNoOp()
-{
-    QCOMPARE(migrateLegacyOverlayPresets(QStringLiteral("/nonexistent/shader-presets")), 0);
-}
+// ═══════════════════════ user preset root ═══════════════════════
 
 void TestShaderPresetStore::standardUserPresetRootIsTheAppSubdirUnderTheUserDataDir()
 {
@@ -503,9 +395,8 @@ void TestShaderPresetStore::storeLoadIsIdempotent()
 void TestShaderPresetStore::storeRefusesANonAbsoluteRoot()
 {
     // An empty root resolves to the process working directory: QDir("") is
-    // QDir("."), whose exists() is true, so the migration would scan and read
-    // the CWD's *.json files and userPresetDirectory would hand out
-    // filesystem-root paths. A relative root is the same hazard.
+    // QDir("."), so the loaders would scan the CWD's *.json files and
+    // userPresetDirectory would hand out filesystem-root paths. A relative root is the same hazard.
     ShaderPresetStore store;
     store.load(QString());
     QVERIFY(!store.publishes(ShaderFamily::Animation));
