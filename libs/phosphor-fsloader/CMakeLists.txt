@@ -90,12 +90,12 @@ foreach(_phosphorfsloader_old PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON VALIJSON_INCL
                     "validator")
             else()
                 string(CONCAT _phosphorfsloader_now
-                    "phosphor-fsloader no longer uses valijson. Its schema validator is jsoncons, whose headers "
-                    "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS and JSONCONS_INCLUDE_DIR choose")
+                    "phosphor-fsloader no longer uses valijson. Its schema validator is jsoncons, and "
+                    "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS and JSONCONS_INCLUDE_DIR choose its headers")
             endif()
             message(WARNING
-                "${_phosphorfsloader_old} is set in this build directory's cache, but nothing reads it: "
-                "${_phosphorfsloader_now}. It is removed from the cache.")
+                "${_phosphorfsloader_old} is set in this build directory's cache, but nothing reads it, "
+                "because ${_phosphorfsloader_now}. It is removed from the cache.")
         endif()
         unset(${_phosphorfsloader_old} CACHE)
     endif()
