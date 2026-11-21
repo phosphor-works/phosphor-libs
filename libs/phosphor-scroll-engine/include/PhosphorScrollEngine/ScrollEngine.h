@@ -155,7 +155,6 @@ public:
     void forceReemit(const QString& screenId);
     void beginArrivalBurst() override;
     void endArrivalBurst() override;
-    void noteCrossScreenClaimsExhausted(const QString& windowId, bool exhausted) override;
     void windowClosed(const QString& windowId) override;
     void windowFocused(const QString& windowId, const QString& screenId) override;
     void windowMinSizeUpdated(const QString& windowId, int minWidth, int minHeight) override;
@@ -1042,22 +1041,12 @@ public:
         m_openParamsResolver = std::move(resolver);
     }
 
-    /// Context-mode resolver shape shared by the three injected closures
-    /// below: invoked as (screenId, virtualDesktop, activity) → bool. The
-    /// daemon bakes the mode lookup (and, where relevant, engine liveness
-    /// and global toggles) into each closure so this library stays free of
-    /// the zones-layer mode type. Same clear-before-destroy contract as the
-    /// other injected closures.
+    /// Context-mode resolver shape for the injected closure below: invoked as
+    /// (screenId, virtualDesktop, activity) → bool. The daemon bakes the mode
+    /// lookup (and, where relevant, engine liveness and global toggles) into
+    /// the closure so this library stays free of the zones-layer mode type.
+    /// Same clear-before-destroy contract as the other injected closures.
     using ModeResolver = std::function<bool(const QString& screenId, int desktop, const QString& activity)>;
-
-    /// INERT, kept for ABI: a snapping-mode resolver that fed windowOpened's
-    /// cross-screen restore defer gate, which the reopen contract removed (a
-    /// window opening on a scrolling screen is scroll's). Nothing reads it and
-    /// the daemon no longer wires it; a setter call is harmless.
-    void setSnappingModeResolver(ModeResolver resolver)
-    {
-        m_snappingModeResolver = std::move(resolver);
-    }
 
     /// Scrolling-mode resolver: whether a context runs Scrolling as the daemon resolves it (feature switch and
     /// disabled cascade included, F1137). claimCrossScreenReopen asks it of the RECORDED context (unset: it never
@@ -1067,13 +1056,6 @@ public:
     void setScrollingModeResolver(ModeResolver resolver)
     {
         m_scrollingModeResolver = std::move(resolver);
-    }
-
-    /// INERT, kept for ABI: an autotile-mode resolver that fed the same removed
-    /// defer gate. Nothing reads it and the daemon no longer wires it.
-    void setAutotileModeResolver(ModeResolver resolver)
-    {
-        m_autotileModeResolver = std::move(resolver);
     }
 
     /// Per-context (window-rule) gap overrides, resolved daemon-side so this
@@ -1740,8 +1722,6 @@ private:
     /// focus); the outermost endArrivalBurst applies once per screen.
     int m_arrivalBurstDepth = 0;
     QHash<PhosphorEngine::PlacementStateKey, bool> m_burstPendingApplies;
-    /// INERT, kept for ABI layout: the defer gate it fed is gone, and nothing writes or reads it.
-    QSet<QString> m_crossScreenClaimsExhausted;
     /// Armed by the context setters (desktop/activity switch), consumed by
     /// setActiveScreens so the identical-set re-emit only claims
     /// isDesktopSwitch=true for a REAL switch — same contract as
@@ -2319,9 +2299,7 @@ private:
     FloatPredicate m_floatPredicate;
     RestorePositionPredicate m_restorePositionPredicate{};
     OpenParamsResolver m_openParamsResolver;
-    ModeResolver m_snappingModeResolver; ///< INERT (see setSnappingModeResolver)
     ModeResolver m_scrollingModeResolver;
-    ModeResolver m_autotileModeResolver; ///< INERT (see setAutotileModeResolver)
     ContextGapProvider m_contextGapProvider;
 
     // engine_evacueepark.cpp

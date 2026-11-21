@@ -177,12 +177,4 @@ bool ScrollEngine::claimCrossScreenReopen(const QString& rawWindowId, const QStr
     return true;
 }
 
-void ScrollEngine::noteCrossScreenClaimsExhausted(const QString& windowId, bool exhausted)
-{
-    // INERT, kept for ABI: the mark told the cross-screen defer gate to adopt
-    // instead of deferring again, and that gate is gone (the reopen contract).
-    Q_UNUSED(windowId)
-    Q_UNUSED(exhausted)
-}
-
 } // namespace PhosphorScrollEngine

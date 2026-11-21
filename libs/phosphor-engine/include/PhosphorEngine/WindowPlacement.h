@@ -39,7 +39,7 @@ inline constexpr int MAX_PLAUSIBLE_VIRTUAL_DESKTOP = 1024;
 /// WindowPlacement::freeGeometryByScreen.
 struct EngineSlot
 {
-    QString state; ///< engine-defined token: snap "snapped"/"floating"; autotile "tiled"/"floating" ("free" retired)
+    QString state; ///< engine-defined token: snap "snapped"/"floating"; autotile "tiled"/"floating"
     QStringList zoneIds; ///< snap slot — zone UUIDs (first is primary); empty for autotile
     int order = -1; ///< autotile slot — tile index within the screen; -1 for snap
     /// Snap slot — the zones this window occupies on EACH desktop it is
@@ -121,17 +121,6 @@ struct WindowPlacement
 
     // ── Recency (most-recent-wins ordering; stamped by the store) ──
     quint64 sequence = 0;
-
-    // ── Retired reclaim credit (INERT, kept for ABI layout) ──
-    /// The cross-screen reclaim's credit, retired with the reclaim: a window
-    /// is now restored only on the output it opens on, so nothing rations
-    /// cross-monitor pulls any more. Nothing reads it. It still round-trips
-    /// as "liveAtSave" so an older daemon reading a newer file sees the
-    /// default it always wrote for a live window, and stays OUTSIDE
-    /// sameContentAs like sequence.
-    bool reclaimEligible = true;
-    /// INERT, kept for ABI layout. Never stamped or read.
-    qint64 closedAtMsecs = 0;
 
     bool isValid() const
     {
@@ -279,15 +268,6 @@ struct WindowPlacement
 
     /// Common state-token vocabulary. Engines may define more; these cover the
     /// built-in snap/autotile states.
-    /// Retired snap state — snapping is now two-state (snapped/floating). No engine
-    /// produces it any more; a legacy `free` record persisted by an older build
-    /// deserializes to this token and is restored as floating (see
-    /// SnapEngine::resolveWindowRestore). Retained only for that legacy-record
-    /// mapping and the tests that exercise it.
-    static QLatin1String stateFree()
-    {
-        return QLatin1String("free");
-    }
     static QLatin1String stateFloating()
     {
         return QLatin1String("floating");
@@ -389,7 +369,6 @@ struct WindowPlacement
         }
 
         obj[QLatin1String("seq")] = static_cast<double>(sequence);
-        obj[QLatin1String("liveAtSave")] = reclaimEligible;
         return obj;
     }
 
@@ -462,8 +441,6 @@ struct WindowPlacement
         }
 
         p.sequence = static_cast<quint64>(obj.value(QLatin1String("seq")).toDouble());
-        // Inert field, read back only so it round-trips (see its declaration).
-        p.reclaimEligible = obj.value(QLatin1String("liveAtSave")).toBool(true);
         return p;
     }
 };
@@ -551,17 +528,6 @@ bool pendingCrossScreenManagedRestore(const WindowPlacement& p, QLatin1String en
         return false; // same screen (or unscreened): the opening context's engine owns it
     }
     return isEngineMode(p.screenId, p.virtualDesktop, p.activity);
-}
-
-/// The snap-engine specialization of the 5-argument form. Superseded by the
-/// 4-argument reopen-contract overload below and kept for source
-/// compatibility.
-template<typename IsSnappingMode>
-bool pendingCrossScreenSnapRestore(const WindowPlacement& p, const QString& openingScreenId,
-                                   IsSnappingMode&& isSnappingMode)
-{
-    return pendingCrossScreenManagedRestore(p, WindowPlacement::snapEngineId(), WindowPlacement::stateSnapped(),
-                                            openingScreenId, std::forward<IsSnappingMode>(isSnappingMode));
 }
 
 /// The reopen contract over pendingCrossScreenManagedRestore. Restores happen

@@ -247,15 +247,6 @@ public:
         m_contextModeResolver = std::move(resolver);
     }
 
-    /// INERT, kept for ABI: nothing reads it since snap no longer defers an open to another engine's reclaim (the
-    /// reopen contract), and the daemon does not wire it. Clear with {} at teardown.
-    using TilingEngineLiveResolver =
-        std::function<bool(PhosphorZones::AssignmentEntry::Mode mode, const QString& screenId)>;
-    void setTilingEngineLiveResolver(TilingEngineLiveResolver resolver)
-    {
-        m_tilingEngineLiveResolver = std::move(resolver);
-    }
-
     /**
      * @brief Predicate deciding whether an opening window should start FLOATING
      *        because a "Float this app" rule matched it. Daemon-injected,
@@ -1324,7 +1315,6 @@ private:
     RestorePositionPredicate m_restorePositionPredicate{};
     ManagedRestorePredicate m_managedRestorePredicate{};
     LiveModeResolver m_liveModeResolver{};
-    TilingEngineLiveResolver m_tilingEngineLiveResolver{};
     FloatPredicate m_floatPredicate{};
     UnfloatFallbackPredicate m_unfloatFallbackPredicate{};
     PlacementZonesResolver m_placementZonesResolver{};

@@ -240,17 +240,6 @@ public:
     /// `removedDesktop` (a virtual desktop was destroyed / renumbered).
     void pruneDesktop(int removedDesktop);
 
-    /// Shift every stored desktop number ABOVE @p removedDesktop down by one,
-    /// the global desktop included, after pruneDesktop has dropped the entries
-    /// that referenced it.
-    ///
-    /// The single-removal form of remapDesktops, kept for the installed API: the
-    /// engines renumber through remapDesktops (F787) and no longer call it. Both
-    /// maps hold POSITIONAL desktop numbers that index the same numbering the
-    /// state keys use, so it must run with the stores' own renumber or not at
-    /// all, or a pinned or per-output value names a position whose content moved.
-    void renumberDesktopsAfterRemoval(int removedDesktop);
-
     /// Move every stored desktop number through @p remap, for any change of
     /// KWin's desktop list (F763, F787): a sticky pin through map(), dropped
     /// when its desktop was removed, and each per-output desktop and the
