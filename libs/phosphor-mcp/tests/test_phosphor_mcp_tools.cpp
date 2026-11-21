@@ -455,8 +455,20 @@ private Q_SLOTS:
                      return i == 40 ? QByteArray("{}")
                                     : QByteArray("{'allOf': [{'$ref': " + next(i) + "}, {'$ref': " + next(i) + "}]}");
                  }),
-            QStringLiteral("/$defs/d0017: applies more than 20000000 subschemas to the same value, counting every "
-                           "branch, which the server does not check"));
+            QStringLiteral("/$defs/d0017: applies more than 20000000 subschemas to the same value, counting each "
+                           "branch that a value can take, which the server does not check"));
+        // A value takes then or else, not both. Each doubles here, and the
+        // larger counts.
+        row("$ref doubling 40 levels in then and in else",
+            defs(41,
+                 [&](int i) -> QByteArray {
+                     const QByteArray twice = "{'allOf': [{'$ref': " + next(i) + "}, {'$ref': " + next(i) + "}]}";
+                     return i == 40
+                         ? QByteArray("{}")
+                         : QByteArray("{'if': {'type': 'string'}, 'then': " + twice + ", 'else': " + twice + "}");
+                 }),
+            QStringLiteral("/$defs/d0018/then: applies more than 20000000 subschemas to the same value, counting each "
+                           "branch that a value can take, which the server does not check"));
 
         // Names and strings that no argument can have, since an unpaired
         // surrogate in one is refused.
@@ -674,6 +686,17 @@ private Q_SLOTS:
             server.addTool(McpTool(QStringLiteral("t")).setInputSchema(schema).setOutputSchema(schema), noop(), &error),
             qPrintable(error));
         QVERIFY2(server.addTool(McpTool(QStringLiteral("env")).setInputSchema(envSchema()), noop(), &error),
+                 qPrintable(error));
+        // then and else to the same schema at each of forty levels. A value
+        // takes one of the two, so a check applies three subschemas a level.
+        QByteArray levels = "{'type': 'object', '$ref': '#/$defs/l0', '$defs': {";
+        for (int i = 0; i < 40; ++i) {
+            const QByteArray next = "{'$ref': '#/$defs/l" + QByteArray::number(i + 1) + "'}";
+            levels += "'l" + QByteArray::number(i) + "': {'if': {'type': 'string'}, 'then': " + next
+                + ", 'else': " + next + "}, ";
+        }
+        QVERIFY2(server.addTool(McpTool(QStringLiteral("levels")).setInputSchema(parse(levels + "'l40': {}}}")), noop(),
+                                &error),
                  qPrintable(error));
         // The $schema of 2020-12 with an empty fragment, as some generators
         // write it.
@@ -1002,9 +1025,11 @@ private Q_SLOTS:
         row("integer or string 1e19", "{'type': ['integer', 'string']}", "1e19", false);
         // A number, which the handler reads with toDouble().
         row("integer or number 1e19", "{'type': ['integer', 'number']}", "1e19", true);
-        // Qt's parser rounds these to a double, as the README says: the
-        // first arrives as qint64's minimum, the second as 2^63. Departure:
-        // Python reads the second exactly, an integer.
+        // Qt's parser rounds these to a double, as the README says. The first
+        // arrives as qint64's minimum, and the second as 2^63, past qint64.
+        // Departure: Python reads the second as the float 2^63 too, and lets
+        // it pass, since 2020-12 takes a number without a fraction for an
+        // integer.
         row("integer rounded to qint64 min", "{'type': 'integer'}", "-9223372036854775809", true);
         row("integer qint64 max with a fraction", "{'type': 'integer'}", "9223372036854775807.0", false);
         row("number", "{'type': 'number'}", "2.5", true);

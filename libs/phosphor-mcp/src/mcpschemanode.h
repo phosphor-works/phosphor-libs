@@ -67,14 +67,15 @@ QString formatNumber(const Number& number);
 // it. QAnyStringView::size() counts the code units of the text's own
 // encoding (bytes, or UTF-16 code units), which is what reading it costs.
 //
-// Its length in code points, as 2020-12 counts characters (an unpaired
-// surrogate counts as one).
+// Its length in code points, as 2020-12 counts characters, for text without
+// an unpaired surrogate, which the walk before the check refuses.
 qsizetype codePoints(QAnyStringView text);
 // Whether the text has no unpaired UTF-16 surrogate, which only UTF-16 can
 // hold.
 bool isValidText(QAnyStringView text);
-// Whether the text is in UTF-16.
+// Whether the text is in UTF-16, or in UTF-8.
 bool isUtf16(QAnyStringView text);
+bool isUtf8(QAnyStringView text);
 // -1, 0 or 1: the order of the texts' code points, whatever their encodings.
 // 0 exactly when QAnyStringView::equal() is true (for text without an
 // unpaired surrogate).
@@ -92,8 +93,18 @@ public:
     // A name inserted twice keeps the last value.
     void insert(const QString& name, int value)
     {
+        insert(name, name.toUtf8(), value);
+    }
+    // The same, with the name's UTF-8 at hand.
+    void insert(const QString& name, const QByteArray& utf8, int value)
+    {
         m_utf16.insert(name, value);
-        m_utf8.insert(name.toUtf8(), value);
+        m_utf8.insert(utf8, value);
+    }
+    void reserve(qsizetype size)
+    {
+        m_utf16.reserve(size);
+        m_utf8.reserve(size);
     }
     // The value of `name`, or -1.
     [[nodiscard]] int value(QAnyStringView name) const;

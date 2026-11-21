@@ -23,6 +23,8 @@ namespace PhosphorMcp::Schema {
 namespace {
 
 const QString TooLargeToCheck = QStringLiteral(": is too large for the server to check against the schema");
+// The value that a property name is checked as (see Checker::checkName()).
+const QJsonValue NameStandIn(QJsonValue::String);
 
 // How a subschema is applied. With Errors, its failure fails the whole
 // value, so each error is listed and every keyword checked. With Verdict,
@@ -164,18 +166,18 @@ public:
             m_budget.charge(1);
             return false;
         }
-        if (!m_indexed && !index(object)) {
+        if (!m_indexed && (m_failed || !index(object))) {
             return false;
         }
         // The name hashed, a binary search, and the names of its hash
         // compared with it.
-        m_budget.charge(1 + std::bit_width(quint64(size)) + 2 * (name.size() / CharactersPerUnit));
+        m_budget.charge(1 + std::bit_width(quint64(size)) + hashUnits(name));
         const quint64 hash = hashText(name, m_key);
         auto it = std::lower_bound(m_names.begin(), m_names.end(), hash, [](const Name& a, quint64 b) {
             return a.hash < b;
         });
         for (; it != m_names.end() && it->hash == hash; ++it) {
-            m_budget.charge(UnitsPerStep + (it->name.size() + name.size()) / CharactersPerUnit);
+            m_budget.charge(UnitsPerStep + equalUnits(it->name, name));
             if (QAnyStringView::equal(it->name, name)) {
                 return true;
             }
@@ -190,19 +192,22 @@ private:
         QAnyStringView name;
     };
 
+    // Made once, whether it fails or not. The budget is spent when it
+    // fails.
     bool index(const QJsonObject& object)
     {
+        m_failed = true;
         const qsizetype size = object.size();
         m_bytes = qint64(size) * qint64(sizeof(Name));
         if (!m_budget.allocate(m_bytes)) {
             return false;
         }
         // Each name hashed, and a sort of plain integers.
-        qint64 units = qint64(size) * (UnitsPerMember + std::bit_width(quint64(size)) / 4);
+        qint64 units = qint64(size) * (UnitsPerMember + std::bit_width(quint64(size)) / ComparisonsPerUnit);
         m_names.reserve(std::size_t(size));
         for (auto it = object.begin(); it != object.end(); ++it) {
             const QAnyStringView name = it.keyView();
-            units += 2 * (name.size() / CharactersPerUnit);
+            units += hashUnits(name);
             m_names.push_back(Name{hashText(name, m_key), name});
         }
         if (!m_budget.charge(units)) {
@@ -211,6 +216,7 @@ private:
         std::sort(m_names.begin(), m_names.end(), [](const Name& a, const Name& b) {
             return a.hash < b.hash;
         });
+        m_failed = false;
         m_indexed = true;
         return true;
     }
@@ -221,7 +227,20 @@ private:
     qint64 m_bytes = 0;
     qsizetype m_length = -1;
     bool m_indexed = false;
+    bool m_failed = false;
 };
+
+// A text read where it is (see BytesPerLine).
+qint64 lineUnits(QAnyStringView text)
+{
+    return std::min(MaxLineUnits, qint64(text.size_bytes()) / BytesPerLine);
+}
+
+// A member visited, its name read where it is.
+qint64 memberUnits(QAnyStringView name)
+{
+    return UnitsPerMember + lineUnits(name);
+}
 
 // Whether a string of a value is `text`, which the schema keeps in UTF-16
 // and in UTF-8: compared in the string's own encoding, never decoded, and
@@ -263,7 +282,7 @@ public:
         if (m_report.isDone() || !m_budget.charge(UnitsPerValueWalked)) {
             return;
         }
-        if (qsizetype(m_path.size()) > MaxNestingDepth) {
+        if (qsizetype(m_place.tokens().size()) > MaxNestingDepth) {
             problem(QStringLiteral("is nested more than %1 levels deep, which the server does not check")
                         .arg(MaxNestingDepth));
             return;
@@ -273,9 +292,7 @@ public:
             // Read in place: only UTF-16 can hold an unpaired surrogate,
             // and only it is read through.
             const QAnyStringView text = value.toStringView();
-            if (isUtf16(text)) {
-                m_budget.charge(text.size() / CharactersPerUnit);
-            }
+            m_budget.charge(lineUnits(text) + (isUtf16(text) ? text.size() / CharactersPerUnit : 0));
             if (!isValidText(text)) {
                 problem(QStringLiteral("contains an unpaired UTF-16 surrogate"));
             }
@@ -290,9 +307,9 @@ public:
             m_budget.charge(UnitsPerContainer);
             const QJsonArray array = value.toArray();
             for (qsizetype i = 0; i < array.size() && !m_report.isDone(); ++i) {
-                m_path.push_back(PathToken{QString(), i});
+                m_place.pushIndex(i);
                 walk(array.at(i));
-                m_path.pop_back();
+                m_place.pop();
             }
             break;
         }
@@ -300,14 +317,14 @@ public:
             m_budget.charge(UnitsPerContainer);
             const QJsonObject object = value.toObject();
             for (auto it = object.begin(); it != object.end() && !m_report.isDone(); ++it) {
-                m_path.push_back(PathToken{it.keyView(), -1});
-                const QAnyStringView name = m_path.back().name;
-                m_budget.charge(UnitsPerMember + (isUtf16(name) ? name.size() / CharactersPerUnit : 0));
+                const QAnyStringView name = it.keyView();
+                m_place.pushName(name);
+                m_budget.charge(memberUnits(name) + (isUtf16(name) ? name.size() / CharactersPerUnit : 0));
                 if (!isValidText(name)) {
                     problem(QStringLiteral("the property name contains an unpaired UTF-16 surrogate"));
                 }
                 walk(it.value());
-                m_path.pop_back();
+                m_place.pop();
             }
             break;
         }
@@ -321,13 +338,12 @@ public:
 private:
     void problem(const QString& description)
     {
-        m_budget.charge(UnitsPerError + qint64(m_path.size())
-                        + m_report.add(m_path, nullptr, description) / CharactersPerUnit);
+        m_budget.charge(UnitsPerError + m_report.add(m_place, description));
     }
 
     Report& m_report;
     Budget& m_budget;
-    Path m_path;
+    Place m_place;
 };
 
 // The check of a value against the nodes of a compiled schema.
@@ -358,13 +374,13 @@ private:
     {
         return m_budget.charge(units);
     }
-    // An error at the current place, or at `last` below it. Kept out of
-    // the frames of the recursion, as each check below that does not
-    // recurse is: their locals would grow every frame of a deep walk.
-    Q_NEVER_INLINE void error(const QString& description, const QString* last = nullptr)
+    // An error at the current place. Kept out of the frames of the
+    // recursion, as each check below that does not recurse is, since their
+    // locals would grow every frame of a deep walk.
+    Q_NEVER_INLINE void error(const QString& description)
     {
         const QString text = m_propertyName ? QStringLiteral("the property name ") + description : description;
-        charge(UnitsPerError + qint64(m_path.size()) + m_report.add(m_path, last, text) / CharactersPerUnit);
+        charge(UnitsPerError + m_report.add(m_place, text));
     }
 
     bool apply(int index, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared = nullptr);
@@ -389,10 +405,11 @@ private:
     const std::vector<Node>& m_nodes;
     Report& m_report;
     Budget& m_budget;
-    Path m_path;
+    Place m_place;
     // The value is a property name, which propertyNames checks: the lines
-    // say so.
+    // say so, and its text is m_name (see checkName()).
     bool m_propertyName = false;
+    QAnyStringView m_name;
     int m_depth = 0;
     // The frame of check(). The stack grows down on every Linux the library
     // builds for.
@@ -494,9 +511,14 @@ bool Checker::checkAssertions(const Node& node, const QJsonValue& value, Mode mo
     if (node.types != 0 && !checkType(node, value, mode) && fail()) {
         return false;
     }
-    // Read in place, never decoded: each keyword charges what it reads.
+    // A string's text, read in place when a keyword reads it (a step), and
+    // never decoded. Each keyword charges what it reads of it.
     const bool isString = value.isString();
-    const QAnyStringView text = isString ? value.toStringView() : QAnyStringView();
+    QAnyStringView text;
+    if (isString && (node.hasConst || node.hasEnum || node.minLength >= 0 || node.maxLength >= 0)) {
+        text = m_propertyName ? m_name : value.toStringView();
+        charge(UnitsPerStep + lineUnits(text));
+    }
     if ((node.hasConst || node.hasEnum) && !checkLiterals(node, value, isString ? &text : nullptr, mode) && fail()) {
         return false;
     }
@@ -582,7 +604,7 @@ bool Checker::checkLiterals(const Node& node, const QJsonValue& value, const QAn
         if (text) {
             if (!node.enumTable.isEmpty()) {
                 // A hash of the string, and a comparison with the entry.
-                charge(1 + 2 * (text->size() / CharactersPerUnit));
+                charge(UnitsPerMember + 2 * (text->size() / CharactersPerUnit));
                 found = node.enumTable.value(*text) >= 0;
             } else {
                 for (qsizetype i = 0; i < node.enumStrings.size() && !found; ++i) {
@@ -738,9 +760,9 @@ bool Checker::checkArray(const Node& node, const QJsonArray& array, Mode mode, E
 
     const qsizetype prefix = std::min(size, qsizetype(node.prefixItems.size()));
     for (qsizetype i = 0; i < prefix; ++i) {
-        m_path.push_back(PathToken{QString(), i});
+        m_place.pushIndex(i);
         const bool ok = apply(node.prefixItems[std::size_t(i)], array.at(i), mode, nullptr);
-        m_path.pop_back();
+        m_place.pop();
         if (!ok && fail()) {
             return false;
         }
@@ -761,9 +783,9 @@ bool Checker::checkArray(const Node& node, const QJsonArray& array, Mode mode, E
             for (qsizetype i = prefix; i < size; ++i) {
                 charge(UnitsPerStep);
                 if (mode == Mode::Errors) {
-                    m_path.push_back(PathToken{QString(), i});
+                    m_place.pushIndex(i);
                     error(description);
-                    m_path.pop_back();
+                    m_place.pop();
                 }
                 if (fail()) {
                     return false;
@@ -771,9 +793,9 @@ bool Checker::checkArray(const Node& node, const QJsonArray& array, Mode mode, E
             }
         } else {
             for (qsizetype i = prefix; i < size; ++i) {
-                m_path.push_back(PathToken{QString(), i});
+                m_place.pushIndex(i);
                 const bool ok = apply(node.items, array.at(i), mode, nullptr);
-                m_path.pop_back();
+                m_place.pop();
                 if (!ok && fail()) {
                     return false;
                 }
@@ -800,9 +822,9 @@ bool Checker::checkContains(const Node& node, const QJsonArray& array, Mode mode
         }
         // The errors of an item that does not match are no errors of the
         // value.
-        m_path.push_back(PathToken{QString(), i});
+        m_place.pushIndex(i);
         const bool ok = apply(node.contains, array.at(i), Mode::Verdict, nullptr);
-        m_path.pop_back();
+        m_place.pop();
         if (ok) {
             ++matches;
             if (evaluated) {
@@ -858,9 +880,10 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
     for (qsizetype i = 0; i < size && !stopped(); ++i) {
         keys.push_back(Key{hashValue(array.at(i), m_key, m_budget), i});
     }
-    // A sort of plain integers, whose comparisons are counted here: about
-    // two nanoseconds each.
-    charge(qint64(size) * (1 + std::bit_width(quint64(size)) / 4));
+    // A sort of plain integers, whose comparisons are counted here: some
+    // five nanoseconds each, since the hashes are in no order and the
+    // branches of the sort are taken at random.
+    charge(qint64(size) * (1 + std::bit_width(quint64(size)) / ComparisonsPerUnit));
     if (stopped()) {
         m_budget.release(bytes);
         return false;
@@ -978,15 +1001,15 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
             if (stopped()) {
                 return false;
             }
-            m_path.push_back(PathToken{it.keyView(), -1});
-            const QAnyStringView name = m_path.back().name;
-            charge(UnitsPerMember);
+            const QAnyStringView name = it.keyView();
+            m_place.pushName(name);
+            charge(memberUnits(name));
             bool ok = node.propertyNames < 0 || checkName(node.propertyNames, name, mode);
             if (ok || mode == Mode::Errors) {
                 int child = -1;
                 if (!node.properties.isEmpty()) {
                     // A hash of the name, and a comparison with the entry.
-                    charge(1 + 2 * (name.size() / CharactersPerUnit));
+                    charge(UnitsPerMember + 2 * (name.size() / CharactersPerUnit));
                     child = node.properties.value(name);
                 }
                 if (child >= 0) {
@@ -1003,7 +1026,7 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
                     ok = apply(node.additionalProperties, it.value(), mode, nullptr) && ok;
                 }
             }
-            m_path.pop_back();
+            m_place.pop();
             if (!ok && fail()) {
                 return false;
             }
@@ -1056,7 +1079,9 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
                 return false;
             }
             if (mode == Mode::Errors) {
-                error(QStringLiteral("is required"), &name);
+                m_place.pushName(name);
+                error(QStringLiteral("is required"));
+                m_place.pop();
             }
             if (fail()) {
                 return false;
@@ -1095,7 +1120,9 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
                     return false;
                 }
                 if (mode == Mode::Errors) {
-                    error(QStringLiteral("is required when \"%1\" is present").arg(shownName(trigger)), &name);
+                    m_place.pushName(name);
+                    error(QStringLiteral("is required when \"%1\" is present").arg(shownName(trigger)));
+                    m_place.pop();
                 }
                 if (fail()) {
                     return false;
@@ -1115,12 +1142,16 @@ bool Checker::checkName(int target, QAnyStringView name, Mode mode)
         }
         return node.booleanValue;
     }
-    // The name as a string value, decoded once for the subschema.
-    charge(UnitsPerStep + name.size() / CharactersPerUnit);
-    const bool saved = m_propertyName;
+    // The name is checked in place, never decoded. The subschema gets a
+    // string that stands for it, and reads the name's text where it reads
+    // a string's (see checkAssertions()). A string has no members or items,
+    // so every subschema below sees the name.
+    charge(UnitsPerStep);
     m_propertyName = true;
-    const bool ok = apply(target, QJsonValue(name.toString()), mode, nullptr);
-    m_propertyName = saved;
+    m_name = name;
+    const bool ok = apply(target, NameStandIn, mode, nullptr);
+    m_propertyName = false;
+    m_name = QAnyStringView();
     return ok;
 }
 
@@ -1271,7 +1302,7 @@ bool Checker::checkUnevaluatedItems(const Node& node, const QJsonArray& array, M
             if (evaluated.has(i)) {
                 continue;
             }
-            m_path.push_back(PathToken{QString(), i});
+            m_place.pushIndex(i);
             bool ok = true;
             if (closed) {
                 if (mode == Mode::Errors) {
@@ -1281,7 +1312,7 @@ bool Checker::checkUnevaluatedItems(const Node& node, const QJsonArray& array, M
             } else {
                 ok = apply(node.unevaluatedItems, array.at(i), mode, nullptr);
             }
-            m_path.pop_back();
+            m_place.pop();
             if (!ok) {
                 valid = false;
                 if (mode == Mode::Verdict) {
@@ -1309,8 +1340,8 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
             if (evaluated.has(i)) {
                 continue;
             }
-            m_path.push_back(PathToken{it.keyView(), -1});
-            charge(UnitsPerMember);
+            m_place.pushName(it.keyView());
+            charge(memberUnits(it.keyView()));
             bool ok = true;
             if (closed) {
                 if (mode == Mode::Errors) {
@@ -1320,7 +1351,7 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
             } else {
                 ok = apply(node.unevaluatedProperties, it.value(), mode, nullptr);
             }
-            m_path.pop_back();
+            m_place.pop();
             if (!ok) {
                 valid = false;
                 if (mode == Mode::Verdict) {

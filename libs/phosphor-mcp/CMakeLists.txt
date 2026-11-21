@@ -50,20 +50,38 @@ include(GenerateExportHeader)
 
 find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 
-# The library used jsoncons once, with a switch to the system's headers. A
-# build directory from then keeps the switch in its cache, where it would
-# do nothing without a word. The entry is removed whatever its value, with a
-# warning when it is not the default, AUTO, in any case. The jsoncons
-# entries that phosphor-fsloader reads too (JSONCONS_INCLUDE_DIR) stay.
-if(DEFINED CACHE{PHOSPHORMCP_USE_SYSTEM_JSONCONS})
-    string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_JSONCONS}" _phosphormcp_old_jsoncons)
-    if(NOT _phosphormcp_old_jsoncons STREQUAL "AUTO")
-        message(WARNING "PHOSPHORMCP_USE_SYSTEM_JSONCONS is no longer used, since phosphor-mcp checks schemas "
-            "itself, without jsoncons. It is removed from the cache.")
+# The library checked schemas with valijson once, and with jsoncons for a
+# while after that. A build directory from then keeps their entries in its
+# cache, where they would do nothing without a word. Each is removed, with a
+# warning when it chose something (a switch turned on, a directory set), so
+# that a packager does not believe it still does. The entries that only
+# kept the result of a check of the headers, or that a development build
+# of phosphor-fsloader set to warn once about these, go silently.
+# VALIJSON_INCLUDE_DIR was phosphor-fsloader's too, which may have removed
+# it first in the tree. JSONCONS_INCLUDE_DIR stays, since phosphor-fsloader
+# reads it.
+foreach(_phosphormcp_old PHOSPHORMCP_USE_SYSTEM_VALIJSON PHOSPHORMCP_VALIJSON_INCLUDE_DIR VALIJSON_INCLUDE_DIR
+        PHOSPHORMCP_USE_SYSTEM_JSONCONS)
+    if(DEFINED CACHE{${_phosphormcp_old}})
+        # AUTO, the default of both switches, is no choice.
+        string(TOUPPER "${${_phosphormcp_old}}" _phosphormcp_old_value)
+        if(${_phosphormcp_old} AND NOT _phosphormcp_old_value STREQUAL "AUTO")
+            message(WARNING
+                "${_phosphormcp_old} is set in this build directory's cache, but nothing reads it, because "
+                "phosphor-mcp checks tool schemas itself, with no third-party validator. It is removed from the "
+                "cache.")
+        endif()
+        unset(${_phosphormcp_old} CACHE)
     endif()
-    unset(PHOSPHORMCP_USE_SYSTEM_JSONCONS CACHE)
-    unset(_phosphormcp_old_jsoncons)
-endif()
+endforeach()
+foreach(_phosphormcp_old _PHOSPHORMCP_VALIJSON_CHECKED_DIR PHOSPHORMCP_VALIJSON_HAS_JSON_POINTER
+        _PHOSPHORMCP_JSONCONS_CHECKED_DIR PHOSPHORMCP_JSONCONS_HAS_WALK_STATE
+        _PHOSPHORFSLOADER_WARNED_PHOSPHORMCP_USE_SYSTEM_VALIJSON
+        _PHOSPHORFSLOADER_WARNED_PHOSPHORMCP_VALIJSON_INCLUDE_DIR)
+    unset(${_phosphormcp_old} CACHE)
+endforeach()
+unset(_phosphormcp_old)
+unset(_phosphormcp_old_value)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -86,19 +104,35 @@ set(phosphormcp_SRCS
     src/mcplogging.cpp
     src/mcpresult.cpp
     src/mcpschema.cpp
-    src/mcpschemacheck.cpp
-    src/mcpschemacompile.cpp
-    src/mcpschemareport.cpp
-    src/mcpschemavalue.cpp
     src/mcpserver.cpp
     src/mcpsignals.cpp
     src/mcptool.cpp
     src/mcptransport.cpp
 )
 
+# The JSON Schema checker, built once for the library and for
+# test_phosphor_mcp_checkwork, which counts the work of each step and so
+# reads the checker's own functions, hidden in the library.
+add_library(PhosphorMcpSchemaChecker OBJECT
+    src/mcpschemacheck.cpp
+    src/mcpschemacompile.cpp
+    src/mcpschemareport.cpp
+    src/mcpschemavalue.cpp
+)
+target_compile_features(PhosphorMcpSchemaChecker PUBLIC cxx_std_20)
+target_include_directories(PhosphorMcpSchemaChecker PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+target_link_libraries(PhosphorMcpSchemaChecker PUBLIC Qt6::Core)
+set_target_properties(PhosphorMcpSchemaChecker PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    # The anonymous namespaces of the checker's files must stay apart.
+    UNITY_BUILD OFF
+)
+
 add_library(PhosphorMcp SHARED
     ${phosphormcp_public_HDRS}
     ${phosphormcp_SRCS}
+    $<TARGET_OBJECTS:PhosphorMcpSchemaChecker>
 )
 
 add_library(PhosphorMcp::PhosphorMcp ALIAS PhosphorMcp)

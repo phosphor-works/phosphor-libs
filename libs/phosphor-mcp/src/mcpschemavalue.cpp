@@ -52,16 +52,23 @@ void oddAndExponent(const Number& value, quint64& odd, int& exponent)
         odd = value.integer < 0 ? quint64(0) - quint64(value.integer) : quint64(value.integer);
         exponent = 0;
     } else {
-        int e = 0;
-        const double fraction = std::frexp(std::fabs(value.real), &e);
-        // 53 bits of mantissa, exactly.
-        odd = quint64(std::ldexp(fraction, 53));
-        exponent = e - 53;
+        // The bits of the double. A subnormal has no hidden bit, and the
+        // exponent of the least normal.
+        quint64 bits = 0;
+        static_assert(sizeof(bits) == sizeof(value.real));
+        std::memcpy(&bits, &value.real, sizeof(bits));
+        const int biased = int((bits >> 52) & 0x7FF);
+        odd = bits & ((quint64(1) << 52) - 1);
+        if (biased == 0) {
+            exponent = -1074;
+        } else {
+            odd |= quint64(1) << 52;
+            exponent = biased - 1075;
+        }
     }
-    while ((odd & 1) == 0) {
-        odd >>= 1;
-        ++exponent;
-    }
+    const int zeros = std::countr_zero(odd);
+    odd >>= zeros;
+    exponent += zeros;
 }
 
 // Whether value / divisor is an integer, exactly, for the binary values as
@@ -206,7 +213,7 @@ private:
 // The code point order of two UTF-16 code units that differ: a surrogate
 // (U+D800 to U+DFFF, the half of a code point past U+FFFF) comes after
 // U+E000 to U+FFFF.
-int compareUnits(char16_t a, char16_t b)
+int compareCodeUnits(char16_t a, char16_t b)
 {
     const auto fix = [](char16_t c) {
         return c >= 0xE000 ? c - 0x800 : (c >= 0xD800 ? c + 0x2000 : c);
@@ -240,7 +247,7 @@ public:
         m_members.reserve(std::size_t(object.size()));
         for (auto it = object.begin(); it != object.end(); ++it) {
             m_members.push_back(Member{it.keyView(), it});
-            units += UnitsPerMember + comparisons * (1 + it.keyView().size() / CharactersPerUnit);
+            units += UnitsPerMember + comparisons * (1 + CompareUnits * (it.keyView().size() / CharactersPerUnit));
         }
         if (!m_budget.charge(units)) {
             return;
@@ -344,7 +351,14 @@ bool isMultipleOf(const Number& value, const Number& divisor)
         if (value.isInteger) {
             return value.integer % divisor.integer == 0;
         }
-        return std::fmod(value.real, double(divisor.integer)) == 0;
+        // A double by the divisor as a double, as Python takes it: whether
+        // std::fmod() leaves nothing, tested on the binary values, since
+        // std::fmod() takes a step for each bit between their exponents
+        // (some 90 ns for 1e308 by 3).
+        Number real;
+        real.isInteger = false;
+        real.real = double(divisor.integer);
+        return isExactMultiple(value, real);
     }
     const double quotient = value.toDouble() / divisor.real;
     if (std::isfinite(quotient)) {
@@ -419,7 +433,7 @@ int compareText(QAnyStringView a, QAnyStringView b)
                 const qsizetype n = std::min(x.size(), y.size());
                 for (qsizetype i = 0; i < n; ++i) {
                     if (x.utf16()[i] != y.utf16()[i]) {
-                        return compareUnits(x.utf16()[i], y.utf16()[i]);
+                        return compareCodeUnits(x.utf16()[i], y.utf16()[i]);
                     }
                 }
                 return x.size() < y.size() ? -1 : (x.size() > y.size() ? 1 : 0);
@@ -464,6 +478,33 @@ quint64 hashText(QAnyStringView text, quint64 key)
     return mix(mix(hash, word), quint64(total));
 }
 
+bool isUtf8(QAnyStringView text)
+{
+    return text.visit([](auto view) {
+        return !std::is_same_v<decltype(view), QStringView> && !std::is_same_v<decltype(view), QLatin1StringView>;
+    });
+}
+
+qint64 hashUnits(QAnyStringView text)
+{
+    return HashUnits * (text.size() / CharactersPerUnit);
+}
+
+qint64 compareUnits(QAnyStringView a, QAnyStringView b)
+{
+    return CompareUnits * ((a.size() + b.size()) / CharactersPerUnit);
+}
+
+qint64 equalUnits(QAnyStringView a, QAnyStringView b)
+{
+    return (isUtf8(a) == isUtf8(b) ? 1 : DecodeUnits) * ((a.size() + b.size()) / CharactersPerUnit);
+}
+
+qint64 decodeUnits(QAnyStringView text)
+{
+    return (isUtf8(text) ? DecodeUnits : 1) * (text.size() / CharactersPerUnit);
+}
+
 int NameTable::value(QAnyStringView name) const
 {
     return name.visit([this](auto view) -> int {
@@ -471,7 +512,9 @@ int NameTable::value(QAnyStringView name) const
         if constexpr (std::is_same_v<View, QStringView>) {
             return m_utf16.value(QString::fromRawData(view.data(), view.size()), -1);
         } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
-            // ASCII is UTF-8 too. Other Latin-1 comes only from a handler.
+            // Qt keeps text in Latin-1 only when it is ASCII, which is UTF-8
+            // too. Other Latin-1, which no QJsonValue holds, is looked up by
+            // UTF-16, so that the table is right for any view.
             uchar high = 0;
             for (const char c : view) {
                 high |= uchar(c);
@@ -504,10 +547,12 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge((first.size() + second.size()) / CharactersPerUnit);
+        budget.charge(equalUnits(first, second));
         return QAnyStringView::equal(first, second);
     }
     case QJsonValue::Array: {
+        // Read through their own storage, as an array applied to is.
+        budget.charge(2 * UnitsPerContainer);
         const QJsonArray x = a.toArray();
         const QJsonArray y = b.toArray();
         if (x.size() != y.size()) {
@@ -521,6 +566,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         return true;
     }
     case QJsonValue::Object: {
+        budget.charge(2 * UnitsPerContainer);
         const QJsonObject x = a.toObject();
         const QJsonObject y = b.toObject();
         if (x.size() != y.size()) {
@@ -532,7 +578,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         for (auto i = x.begin(), j = y.begin(); i != x.end(); ++i, ++j) {
             const QAnyStringView first = i.keyView();
             const QAnyStringView second = j.keyView();
-            budget.charge(UnitsPerMember + (first.size() + second.size()) / CharactersPerUnit);
+            budget.charge(UnitsPerMember + equalUnits(first, second));
             if (budget.exceeded()) {
                 return false;
             }
@@ -553,7 +599,7 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
             return false;
         }
         for (std::size_t i = 0; i < std::size_t(x.size()); ++i) {
-            budget.charge(UnitsPerMember + (first.name(i).size() + second.name(i).size()) / CharactersPerUnit);
+            budget.charge(UnitsPerMember + equalUnits(first.name(i), second.name(i)));
             if (budget.exceeded() || !QAnyStringView::equal(first.name(i), second.name(i))
                 || !equalValues(first.value(i), second.value(i), budget)) {
                 return false;
@@ -584,10 +630,11 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge((first.size() + second.size()) / CharactersPerUnit * 2);
+        budget.charge(compareUnits(first, second));
         return compareText(first, second);
     }
     case QJsonValue::Array: {
+        budget.charge(2 * UnitsPerContainer);
         const QJsonArray x = a.toArray();
         const QJsonArray y = b.toArray();
         const qsizetype n = std::min(x.size(), y.size());
@@ -600,6 +647,7 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         return x.size() < y.size() ? -1 : (x.size() > y.size() ? 1 : 0);
     }
     case QJsonValue::Object: {
+        budget.charge(2 * UnitsPerContainer);
         const QJsonObject x = a.toObject();
         const QJsonObject y = b.toObject();
         if (x.size() != y.size()) {
@@ -613,7 +661,7 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
             return 0;
         }
         for (std::size_t i = 0; i < std::size_t(x.size()) && !budget.exceeded(); ++i) {
-            budget.charge(UnitsPerMember + (first.name(i).size() + second.name(i).size()) / CharactersPerUnit * 2);
+            budget.charge(UnitsPerMember + compareUnits(first.name(i), second.name(i)));
             const int k = compareText(first.name(i), second.name(i));
             if (k != 0) {
                 return k;
@@ -642,10 +690,11 @@ quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
         return hashNumber(numberOf(value), key);
     case QJsonValue::String: {
         const QAnyStringView text = value.toStringView();
-        budget.charge(text.size() / CharactersPerUnit * 2);
+        budget.charge(hashUnits(text));
         return hashText(text, start(key, KindString));
     }
     case QJsonValue::Array: {
+        budget.charge(UnitsPerContainer);
         quint64 hash = start(key, KindArray);
         const QJsonArray array = value.toArray();
         for (qsizetype i = 0; i < array.size() && !budget.exceeded(); ++i) {
@@ -656,12 +705,13 @@ quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
     case QJsonValue::Object: {
         // A sum of the hashes of the members, which does not depend on
         // their order.
+        budget.charge(UnitsPerContainer);
         quint64 sum = 0;
         const QJsonObject object = value.toObject();
         const quint64 names = start(key, KindName);
         for (auto it = object.begin(); it != object.end() && !budget.exceeded(); ++it) {
             const QAnyStringView name = it.keyView();
-            budget.charge(UnitsPerMember + name.size() / CharactersPerUnit * 2);
+            budget.charge(UnitsPerMember + hashUnits(name));
             sum += mix(hashText(name, names), hashValue(it.value(), key, budget));
         }
         return mix(mix(start(key, KindObject), sum), quint64(object.size()));

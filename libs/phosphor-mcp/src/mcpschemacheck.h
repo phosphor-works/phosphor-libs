@@ -17,14 +17,14 @@ namespace PhosphorMcp::Schema {
 
 // The bound of a check (see Budget).
 //
-// Work is counted in units, at most about 18 ns each of a release build,
-// whatever the schema and the value: the checker charges each step it takes
+// Work is counted in units, at most about 20 ns each of a release build,
+// whatever the schema and the value. The checker charges each step it takes
 // (a value walked, a subschema applied to a value, a keyword checked, a
 // member or an item visited, a name looked up, sixteen code units of a
 // string or a name read, compared or hashed, a word of an annotation set
-// merged, an error built), weighted by what it costs. The check stops the
-// moment the count passes MaxWork, about a second. The README has the
-// measured times.
+// merged, an error built), weighted by what it costs as a sweep of each
+// charge measured it. The check stops the moment the count passes MaxWork,
+// under a second. The README has the measured times.
 constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
 // goes: the sets of the members and items that subschemas evaluated (for
@@ -56,13 +56,41 @@ constexpr qint64 UnitsPerContainer = 2;
 constexpr qint64 UnitsPerStep = 1;
 // A member visited, or a name looked up or sorted.
 constexpr qint64 UnitsPerMember = 2;
-// An error built, beside its pointer's length.
-constexpr qint64 UnitsPerError = 16;
-// Each this many code units of a string or a name read, compared or hashed
-// (bytes of UTF-8, which cost more for each character than UTF-16 does).
+// A string's text or a member's name read where it is, for each this many
+// bytes of it, up to MaxLineUnits. The members of an object and the strings
+// of a list are read one after the other, and a long one puts the next
+// that much farther, a miss of the cache when the value is larger than the
+// cache. A few lines are all that a read misses, whatever the length.
+constexpr qint64 BytesPerLine = 64;
+constexpr qint64 MaxLineUnits = 4;
+// Comparisons of a sort of plain integers (hashes) for each unit.
+constexpr qint64 ComparisonsPerUnit = 2;
+// An error built, beside its pointer.
+constexpr qint64 UnitsPerError = 24;
+// A token of an error's JSON pointer built, beside its name decoded...
+constexpr qint64 UnitsPerToken = 2;
+// ...and one of the line of a listed error.
+constexpr qint64 UnitsPerShownToken = 16;
+// Each this many code units of a string or a name read in its own encoding
+// (bytes of UTF-8 or Latin-1, or UTF-16 code units): counted, scanned, or
+// compared with text in the same encoding...
 constexpr qint64 CharactersPerUnit = 16;
+// ...and the units for as many hashed by code point (hashText()), or
+// compared by code point (compareText())...
+constexpr qint64 HashUnits = 3;
+constexpr qint64 CompareUnits = 2;
+// ...or compared with text in another encoding where one is UTF-8, which Qt
+// decodes as it compares, or decoded from UTF-8 to UTF-16.
+constexpr qint64 DecodeUnits = 4;
 // Words of an annotation set merged or cleared for each unit.
 constexpr qint64 WordsPerUnit = 4;
+
+// What reading text costs, in units (see above).
+qint64 hashUnits(QAnyStringView text);
+qint64 compareUnits(QAnyStringView a, QAnyStringView b);
+qint64 equalUnits(QAnyStringView a, QAnyStringView b);
+// Decoded to UTF-16, for a JSON pointer.
+qint64 decodeUnits(QAnyStringView text);
 
 // Values nested deeper than this are refused before any check. Qt's JSON
 // parser takes no more than 1024 levels in a whole message, so arguments
@@ -151,8 +179,8 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
 // it.
 quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget);
 
-// A place in a value: a member name, read in place in the value (which
-// outlives the place), or an item's index.
+// A token of a place in a value: a member name, read in place in the value
+// (which outlives the place), or an item's index.
 struct PathToken
 {
     QAnyStringView name;
@@ -165,6 +193,39 @@ QString pointerToken(const QString& name);
 // A name as an error shows it: an unpaired surrogate replaced so that the
 // reply stays valid UTF-8, and cut short.
 QString shownName(const QString& name);
+
+// The place in a value that a walk is at: its tokens from the root, and its
+// JSON pointer. The pointer is built when an error needs it, from the tokens
+// that the last error left unbuilt, and cut back as the walk leaves them, so
+// errors at the same place, or below one, build nothing twice.
+class Place
+{
+public:
+    void pushName(QAnyStringView name)
+    {
+        m_tokens.push_back(PathToken{name, -1});
+    }
+    void pushIndex(qsizetype index)
+    {
+        m_tokens.push_back(PathToken{QAnyStringView(), index});
+    }
+    void pop();
+    [[nodiscard]] const Path& tokens() const
+    {
+        return m_tokens;
+    }
+    // The JSON pointer of the place, or null when it would be longer than
+    // MaxErrorPointerLength, which no error that the report kept is. Adds
+    // the work of the tokens built to `units`.
+    const QString* pointer(qint64& units);
+
+private:
+    Path m_tokens;
+    QString m_pointer;
+    // The length of m_pointer after each token built: one more entry than
+    // the tokens built.
+    std::vector<qsizetype> m_ends{0};
+};
 
 // The errors that validate() returns: each once, at most MaxListedErrors of
 // them, and a last line that counts the rest.
@@ -183,12 +244,11 @@ public:
     {
     }
 
-    // "<pointer>: <description>" for the place `path` (and `last` below it,
-    // when not null), unless it was added before. The test is on the whole
-    // pointer, not on the line, which cuts names: two long names alike in
-    // their first 61 code units are two errors. Returns the code units of
-    // the pointer, for the budget.
-    qsizetype add(const Path& path, const QString* last, const QString& description);
+    // "<pointer>: <description>" for the place, unless it was added before.
+    // The test is on the whole pointer, not on the line, which cuts names:
+    // two long names alike in their first 61 code units are two errors.
+    // Returns the work it took beside the description, in units.
+    qint64 add(Place& place, const QString& description);
     // Whether more errors would change nothing: the value has too many to
     // list.
     [[nodiscard]] bool isDone() const
@@ -202,8 +262,23 @@ public:
     QStringList take();
 
 private:
+    // An error as it is told from the others.
+    struct Seen
+    {
+        QString pointer;
+        QString description;
+        friend bool operator==(const Seen& a, const Seen& b) noexcept
+        {
+            return a.pointer == b.pointer && a.description == b.description;
+        }
+        friend size_t qHash(const Seen& seen, size_t seed) noexcept
+        {
+            return qHashMulti(seed, seen.pointer, seen.description);
+        }
+    };
+
     QStringList m_lines;
-    QSet<QString> m_seen;
+    QSet<Seen> m_seen;
     qsizetype m_pointerLength = 0;
     qsizetype m_more = 0;
     bool m_overflow = false;
