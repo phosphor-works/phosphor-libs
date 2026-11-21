@@ -873,6 +873,55 @@ private Q_SLOTS:
         QVERIFY(errors->first().message.endsWith(QChar(0x2026)));
     }
 
+    void errorsEscapeWhatCouldForgeALogLine()
+    {
+        // A member name or a string quoted from a data file reaches the log
+        // unquoted, where a newline would start a line of its own, an ESC a
+        // terminal escape sequence, and U+202E would reverse the text after
+        // it. Each such character is written as \uXXXX, in the path and in
+        // the message, and so logged.
+        const SchemaValidator validator(QByteArrayLiteral(
+            R"({"properties": {"s": {"pattern": "^a$"}}, "additionalProperties": {"type": "string"}})"));
+        QVERIFY(validator.isValid());
+        const QString name = QStringLiteral("a\nfsloader: FORGED") + QChar(0x1b) + QStringLiteral("[31m");
+        const QString value = QStringLiteral("x\ny") + QChar(0x202e) + QChar(0x85) + QChar(0x7f);
+        const auto errors = validator.validate(QJsonObject{{name, 1}, {QStringLiteral("s"), value}});
+        QVERIFY(errors.has_value());
+        const QString shownName = QStringLiteral("a\\u000afsloader: FORGED\\u001b[31m");
+        const QList<SchemaValidator::Error> expected{
+            {QStringLiteral("/s"),
+             QStringLiteral("String 'x\\u000ay\\u202e\\u0085\\u007f' does not match pattern '^a$'.")},
+            {QStringLiteral("/") + shownName,
+             QStringLiteral("Additional property '") + shownName + QStringLiteral("' found but was invalid.")},
+            {QStringLiteral("/") + shownName, QStringLiteral("additionalProperties: Expected string, found integer")},
+        };
+        QCOMPARE(errors->size(), expected.size());
+        for (qsizetype i = 0; i < expected.size(); ++i) {
+            QCOMPARE(errors->at(i).path, expected.at(i).path);
+            QCOMPARE(errors->at(i).message, expected.at(i).message);
+        }
+        const QLoggingCategory category("test.schemavalidator.log");
+        for (const SchemaValidator::Error& error : expected) {
+            QTest::ignoreMessage(
+                QtWarningMsg,
+                (QStringLiteral("  ") + error.path + QStringLiteral(": ") + error.message).toUtf8().constData());
+        }
+        logSchemaErrors(category, *errors);
+
+        // An error built elsewhere is escaped when it is logged.
+        QTest::ignoreMessage(QtWarningMsg, "  /a\\u2066: x\\u000d\\u000a\\u009b\\u2028");
+        logSchemaErrors(category,
+                        {SchemaValidator::Error{QStringLiteral("/a") + QChar(0x2066),
+                                                QStringLiteral("x\r\n") + QChar(0x9b) + QChar(0x2028)}});
+
+        // The cut is never made inside an escape: "/", 497 letters and the
+        // six units of an escaped newline would cross 500.
+        const SchemaValidator closed(QByteArrayLiteral(R"({"additionalProperties": false})"));
+        const auto cut = closed.validate(QJsonObject{{QString(497, u'a') + QChar(u'\n'), 1}});
+        QVERIFY(cut.has_value());
+        QCOMPARE(cut->first().path, QStringLiteral("/") + QString(497, u'a') + QChar(0x2026));
+    }
+
     void movedFromFailsClosed()
     {
         SchemaValidator source(sampleSchema());

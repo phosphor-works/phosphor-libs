@@ -288,7 +288,12 @@ parse(mesh->bytes);
   inside another, and each reason is prefixed `additionalProperties: `. A failed `dependentSchemas` subschema is reported
   below the member that triggered it (`/a/c` for member `c`, when `a`
   triggered it), as jsoncons reports it.
-- `logSchemaErrors()` logs each error as `  <path>: <message>`, unquoted.
+- In a path or a message, each C0 and C1 control character, DEL, U+2028,
+  U+2029 and each bidirectional control (U+202A to U+202E, U+2066 to U+2069)
+  is written as `\uXXXX`, so a member name or a quoted string from a data
+  file cannot start a log line, send a terminal escape sequence or reorder
+  the text around it. `logSchemaErrors()` logs each error as
+  `  <path>: <message>`, unquoted.
 
 ## See also
 

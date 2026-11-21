@@ -113,7 +113,8 @@ public:
         /// subschema is reported below the member that triggered it, also
         /// jsoncons' way: with @c {"dependentSchemas": {"a": {"properties":
         /// {"c": {"type": "string"}}}}}, the document @c {"a": 1, "c": 2}
-        /// fails at "/a/c", not "/c".
+        /// fails at "/a/c", not "/c". The characters that could forge a log
+        /// line are escaped in it, as in @c message.
         QString path;
 
         /// Human-readable description of why the node failed. The reasons
@@ -125,9 +126,22 @@ public:
         /// "additionalProperties: ". That goes four such subschemas deep (a
         /// member of a member of ...), which bounds what it costs: at most
         /// four more passes over the document.
-        /// A path or a message longer than 500 UTF-16 code units keeps its
-        /// first 500 (499 where the 500th would split a surrogate pair), and
-        /// an ellipsis (U+2026) is appended: 501 code units at most.
+        ///
+        /// In the path and in the message, each C0 and C1 control character
+        /// (U+0000 to U+001F, U+007F to U+009F), the line and paragraph
+        /// separators U+2028 and U+2029, each bidirectional embedding,
+        /// override and isolate (U+202A to U+202E, U+2066 to U+2069) and an
+        /// unpaired surrogate is written as @c \\uXXXX in lower-case hex. So a
+        /// member name, or a string a message quotes from a data file, can
+        /// neither start a log line of its own, nor send a terminal escape
+        /// sequence, nor reorder the text around it. A backslash is kept as
+        /// it is, so a name holding the six characters @c \\u000a reads the
+        /// same as one holding a newline.
+        ///
+        /// A path or a message longer than 500 UTF-16 code units, escapes
+        /// included, keeps its first 500 or a few fewer, so as not to split
+        /// a surrogate pair or an escape, and an ellipsis (U+2026) is
+        /// appended: 501 code units at most.
         QString message;
     };
 
@@ -191,9 +205,12 @@ private:
  *
  * Each error is logged as "  <json-pointer>: <message>", unquoted, with
  * "(root)" for a document-root failure, and the count @c validate() appends
- * past its 100th error as "  <message>". Centralizes the per-error diagnostic
- * format every loader shares; callers emit their own "skipping X" headline
- * first.
+ * past its 100th error as "  <message>". The path and the message are
+ * escaped as @c SchemaValidator::Error describes, which changes nothing in
+ * what @c validate() returned (it is escaped already) and keeps an error
+ * built elsewhere from logging a control character. Centralizes the
+ * per-error diagnostic format every loader shares. Callers emit their own
+ * "skipping X" headline first.
  */
 PHOSPHORFSLOADER_EXPORT void logSchemaErrors(const QLoggingCategory& category,
                                              const QList<SchemaValidator::Error>& errors);

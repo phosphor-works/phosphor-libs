@@ -49,8 +49,8 @@ constexpr qsizetype kMaxErrors = 100;
 /// members that do not overlap, so validate() costs at most this many times
 /// more than without the rechecks.
 constexpr int kMaxRecheckDepth = 4;
-/// The most UTF-16 code units of a path or a message an error keeps, before
-/// the ellipsis that says it was cut.
+/// The most UTF-16 code units of a path or a message an error keeps, escapes
+/// included, before the ellipsis that says it was cut.
 constexpr qsizetype kMaxTextLength = 500;
 
 QString fromUtf8(std::string_view text)
@@ -58,42 +58,61 @@ QString fromUtf8(std::string_view text)
     return QString::fromUtf8(text.data(), qsizetype(text.size()));
 }
 
-/// @p text cut to kMaxTextLength code units, or one fewer rather than between
-/// the two halves of a surrogate pair, with an ellipsis appended where it was
-/// cut: kMaxTextLength + 1 at most.
-QString clipped(QString text)
+/// Whether an error writes the UTF-16 code unit @p c as \uXXXX: a C0 or C1
+/// control or DEL, which could end a log line or start a terminal escape
+/// sequence, the line and paragraph separators U+2028 and U+2029, a
+/// bidirectional embedding, override or isolate (U+202A to U+202E, U+2066 to
+/// U+2069), which could reorder the text around it, and a surrogate, which
+/// shown() asks about only when it is unpaired.
+bool isEscaped(char16_t c)
 {
-    if (text.size() <= kMaxTextLength) {
-        return text;
+    return c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == 0x2028 || c == 0x2029 || (c >= 0x202a && c <= 0x202e)
+        || (c >= 0x2066 && c <= 0x2069) || QChar::isSurrogate(c);
+}
+
+/// @p text as an error shows it, with each code unit isEscaped() names written
+/// as \uXXXX (lower-case hex). A backslash is kept as it is. Text longer than
+/// @p limit code units is cut before the character or escape that would cross
+/// the limit, so never between the two halves of a surrogate pair nor inside
+/// an escape, and an ellipsis is appended: @p limit + 1 code units at most. A
+/// negative @p limit cuts nothing.
+QString shown(QStringView text, qsizetype limit = -1)
+{
+    QString result;
+    result.reserve(limit < 0 ? text.size() : std::min(text.size(), limit + 1));
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const char16_t c = text.at(i).unicode();
+        const bool pair =
+            QChar::isHighSurrogate(c) && i + 1 < text.size() && QChar::isLowSurrogate(text.at(i + 1).unicode());
+        const bool escaped = !pair && isEscaped(c);
+        const qsizetype width = pair ? 2 : escaped ? 6 : 1;
+        if (limit >= 0 && result.size() + width > limit) {
+            result.append(QChar(0x2026));
+            break;
+        }
+        if (escaped) {
+            result.append(QStringLiteral("\\u%1").arg(uint(c), 4, 16, QChar(u'0')));
+        } else {
+            result.append(text.at(i));
+            if (pair) {
+                result.append(text.at(++i));
+            }
+        }
     }
-    qsizetype cut = kMaxTextLength;
-    if (text.at(cut - 1).isHighSurrogate()) {
-        --cut;
-    }
-    text.truncate(cut);
-    text.append(QChar(0x2026));
-    return text;
+    return result;
 }
 
 /// One JSON Pointer reference token, escaped as jsoncons escapes them ("~" to
-/// "~0", "/" to "~1"). U+0000 and unpaired surrogates, which only appear in
-/// the path of a name refused for holding them, are written as \uXXXX so the
-/// log shows them.
+/// "~0", "/" to "~1").
 QString pointerToken(const QString& name)
 {
     QString token;
     token.reserve(name.size());
-    for (qsizetype i = 0; i < name.size(); ++i) {
-        const QChar c = name.at(i);
+    for (const QChar c : name) {
         if (c == u'~') {
             token.append(QLatin1StringView("~0"));
         } else if (c == u'/') {
             token.append(QLatin1StringView("~1"));
-        } else if (c.isHighSurrogate() && i + 1 < name.size() && name.at(i + 1).isLowSurrogate()) {
-            token.append(c);
-            token.append(name.at(++i));
-        } else if (c.unicode() == 0 || c.isSurrogate()) {
-            token.append(QStringLiteral("\\u%1").arg(uint(c.unicode()), 4, 16, QChar(u'0')));
         } else {
             token.append(c);
         }
@@ -117,7 +136,7 @@ public:
     {
         ++m_total;
         if (wantsMore()) {
-            m_errors.append(SchemaValidator::Error{clipped(path), clipped(message)});
+            m_errors.append(SchemaValidator::Error{shown(path, kMaxTextLength), shown(message, kMaxTextLength)});
         }
     }
 
@@ -508,7 +527,7 @@ void checkDialect(const QJsonValue& schema, PointerPath& path, ErrorList& errors
 // fragments as written, which a decoded comparison here could misread), and
 // one that names no subschema. $dynamicRef and $id below the root are refused
 // before this runs, by checkDialect, and so are U+0000 and unpaired surrogates,
-// by the Converter, which pointerToken would otherwise write as \uXXXX.
+// by the Converter.
 class ReferenceCheck
 {
 public:
@@ -942,7 +961,8 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
         d->schema.emplace(jsonschema::make_json_schema(std::move(schema), evaluationOptions()));
         d->recheckBase = std::move(recheckBase);
     } catch (const std::exception& e) {
-        d->compileError = QStringLiteral("schema failed to compile: %1").arg(QString::fromUtf8(e.what()));
+        d->compileError =
+            QStringLiteral("schema failed to compile: %1").arg(shown(QString::fromUtf8(e.what()), kMaxTextLength));
     } catch (...) {
         d->compileError = QStringLiteral("schema failed to compile: unknown error");
     }
@@ -1037,8 +1057,9 @@ std::optional<QList<SchemaValidator::Error>> SchemaValidator::validate(const QJs
         }
         return errors.take();
     } catch (const std::exception& e) {
-        return QList<Error>{
-            Error{QString(), QStringLiteral("schema validation error: %1").arg(QString::fromUtf8(e.what()))}};
+        return QList<Error>{Error{
+            QString(),
+            QStringLiteral("schema validation error: %1").arg(shown(QString::fromUtf8(e.what()), kMaxTextLength))}};
     } catch (...) {
         return QList<Error>{Error{QString(), QStringLiteral("schema validation error: unknown")}};
     }
@@ -1048,14 +1069,17 @@ void logSchemaErrors(const QLoggingCategory& category, const QList<SchemaValidat
 {
     for (qsizetype i = 0; i < errors.size(); ++i) {
         const SchemaValidator::Error& error = errors.at(i);
+        // validate() has escaped both already. An error built elsewhere is
+        // escaped here, so that no line it logs holds a control character.
+        const QString message = shown(error.message);
         // The entry past the last kept error, which validate() adds when it
         // only counted the rest, is a count and has no node.
         if (i == kMaxErrors && error.path.isEmpty()) {
-            qCWarning(category).noquote().nospace() << "  " << error.message;
+            qCWarning(category).noquote().nospace() << "  " << message;
             continue;
         }
         qCWarning(category).noquote().nospace()
-            << "  " << (error.path.isEmpty() ? QStringLiteral("(root)") : error.path) << ": " << error.message;
+            << "  " << (error.path.isEmpty() ? QStringLiteral("(root)") : shown(error.path)) << ": " << message;
     }
 }
 
