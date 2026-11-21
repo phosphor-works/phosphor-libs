@@ -454,15 +454,18 @@ bool isSubschemaArrayKeyword(const QString& keyword)
     return keywords.contains(keyword);
 }
 
-// The keywords above whose subschemas apply to the same value as the schema
-// that holds them, and not to a member or an item of it.
-bool isInPlaceKeyword(const QString& keyword)
+// Whether the subschemas under `keyword` in `schema` apply to the same value
+// as `schema`, and not to a member or an item of it. then and else do only
+// beside an if: without one, 2020-12 ignores them, and so does jsoncons.
+bool isInPlaceKeyword(const QString& keyword, const QJsonObject& schema)
 {
     static const QStringList keywords{
         QStringLiteral("allOf"), QStringLiteral("anyOf"), QStringLiteral("dependentSchemas"),
-        QStringLiteral("else"),  QStringLiteral("if"),    QStringLiteral("not"),
-        QStringLiteral("oneOf"), QStringLiteral("then"),
+        QStringLiteral("if"),    QStringLiteral("not"),   QStringLiteral("oneOf"),
     };
+    if (keyword == QLatin1StringView("then") || keyword == QLatin1StringView("else")) {
+        return schema.contains(QLatin1StringView("if"));
+    }
     return keywords.contains(keyword);
 }
 
@@ -591,7 +594,7 @@ private:
         for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
             const QString keyword = it.key();
             const QString at = pointer + QChar(u'/') + pointerToken(keyword);
-            const bool inPlace = isInPlaceKeyword(keyword);
+            const bool inPlace = isInPlaceKeyword(keyword, object);
             const auto child = [&](const QJsonValue& value, const QString& childPointer) {
                 const int added = add(value, childPointer, errors);
                 if (inPlace && added >= 0) {
@@ -982,11 +985,12 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
     }
     const QJsonObject root = document.object();
 
-    // jsoncons throws on a schema it cannot compile, which includes a
-    // `pattern` that is not a valid ECMAScript regex. The schemas compiled
-    // here are our own embedded resources, checked in CI, so this is a
-    // build-time guarantee in practice. A bad one still degrades to
-    // fail-closed validation rather than ending the process.
+    // jsoncons throws on a schema it cannot compile. The checks before it
+    // refuse what is known to make it throw (a `pattern` that is not an
+    // ECMAScript regex, a $ref that names no subschema) but one, a $ref into
+    // contentSchema, which jsoncons does not compile and so cannot resolve.
+    // That and whatever else throws is refused here, with what jsoncons
+    // says, rather than ending the process.
     try {
         ErrorList problems;
         PointerPath path;

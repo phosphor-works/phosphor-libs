@@ -52,11 +52,14 @@ namespace PhosphorFsLoader {
  *   @c "#", @c "#/<JSON pointer>" or @c "#<anchor>", not percent-encoded,
  *   and names one of the schema's subschemas. An @c $anchor is defined once.
  *   @c $id is allowed at the root only, and @c $dynamicRef and
- *   @c $dynamicAnchor are refused.
+ *   @c $dynamicAnchor are refused. A @c $ref into @c contentSchema is
+ *   refused with what jsoncons says, since jsoncons does not compile
+ *   @c contentSchema (2020-12 makes it an annotation).
  * - No @c $ref that leads back to its own schema without descending into the
  *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
- *   @c then, @c else, @c dependentSchemas and other @c $ref s only, as
- *   @c {"$ref": "#"} does. jsoncons would recurse on it until the stack
+ *   @c then and @c else beside an @c if (2020-12 ignores them without one),
+ *   @c dependentSchemas and other @c $ref s only, as @c {"$ref": "#"}
+ *   does. jsoncons would recurse on it until the stack
  *   overflowed. It is refused even in a @c $defs entry nothing uses. A
  *   @c $ref back through @c properties, @c items or another keyword that
  *   applies to a member or an item is allowed: the document is finite.

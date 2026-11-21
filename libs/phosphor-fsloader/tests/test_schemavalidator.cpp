@@ -496,6 +496,17 @@ private Q_SLOTS:
                      QStringLiteral("schema refused at ") + QString::fromUtf8(row.refusal));
         }
 
+        // A $ref into contentSchema is followed here, since contentSchema
+        // holds a subschema. jsoncons does not compile it (2020-12 makes it
+        // an annotation) and throws on the $ref: the one schema known to
+        // reach the constructor's catch, refused with what jsoncons says.
+        const SchemaValidator content(QByteArrayLiteral(
+            "{\"contentSchema\": {\"type\": \"string\"}, \"properties\": {\"x\": {\"$ref\": \"#/contentSchema\"}}}"));
+        QVERIFY(!content.isValid());
+        QCOMPARE(content.validate(QJsonValue(1)).value().first().message,
+                 QStringLiteral("schema failed to compile: Don't know how to load JSON Schema "
+                                "'https://jsoncons.com#/contentSchema'"));
+
         // An $id at the root is allowed, and a $ref by pointer or by anchor
         // resolves within the schema.
         const SchemaValidator validator(QByteArrayLiteral(
@@ -516,6 +527,8 @@ private Q_SLOTS:
         // The walks over the schema reach every place a subschema sits: a
         // Draft 7 keyword is refused below each, and a {"$ref": "#"} there is
         // a loop exactly where the subschema applies to the value itself.
+        // then and else apply to it only beside an if, which each schema
+        // here has.
         enum class Shape {
             Single,
             Map,
@@ -554,7 +567,9 @@ private Q_SLOTS:
             } else if (shape == Shape::Array) {
                 value = QJsonArray{subschema};
             }
-            return QJsonDocument(QJsonObject{{keyword, value}}).toJson();
+            QJsonObject schema{{QStringLiteral("if"), QJsonObject()}};
+            schema.insert(keyword, value);
+            return QJsonDocument(schema).toJson();
         };
         for (const auto& row : rows) {
             const QString keyword = QString::fromUtf8(row.keyword);
@@ -581,6 +596,18 @@ private Q_SLOTS:
                          QStringLiteral("schema refused at ") + at + QStringLiteral("/$ref:"));
             }
         }
+
+        // Without an if, 2020-12 ignores then and else, and so does jsoncons:
+        // a $ref back under them is no loop, and checks nothing.
+        const SchemaValidator then(QByteArrayLiteral("{\"then\": {\"$ref\": \"#\"}, \"type\": \"integer\"}"));
+        QVERIFY(then.isValid());
+        QVERIFY(!then.validate(QJsonValue(1)).has_value());
+        const SchemaValidator otherwise(QByteArrayLiteral("{\"else\": {\"$ref\": \"#\"}, \"type\": \"integer\"}"));
+        QVERIFY(otherwise.isValid());
+        const auto errors = otherwise.validate(QJsonValue(QStringLiteral("x")));
+        QVERIFY(errors.has_value());
+        QCOMPARE(errors->size(), 1);
+        QCOMPARE(errors->first().message, QStringLiteral("Expected integer, found string"));
     }
 
     void additionalPropertiesSaysWhy()

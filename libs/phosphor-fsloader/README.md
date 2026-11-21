@@ -249,16 +249,20 @@ parse(mesh->bytes);
   (`$defs`, `properties`, `patternProperties`, `dependentSchemas`) one inside
   another. For a member of a fifth, the reason is only that it was invalid.
   A refused schema refuses every document, with the reason.
-- References stay within the schema: a `$ref` is `#`, `#/<JSON pointer>` or
-  `#<anchor>`, not percent-encoded, and names one of its subschemas; an
-  `$anchor` is defined once; `$id` appears at the root only; `$dynamicRef`
-  and `$dynamicAnchor` are refused. A `$ref` that leads back to its own
-  schema without descending into the document (through `allOf`, `anyOf`,
-  `oneOf`, `not`, `if`, `then`, `else`, `dependentSchemas` and `$ref` only,
-  as `{"$ref": "#"}` does) is refused, even in a `$defs` entry nothing uses:
-  jsoncons would recurse on it until the stack overflowed. A `$ref` back
-  through `properties`, `items` or another keyword that applies to a member
-  or an item is allowed.
+- References stay within the schema. A `$ref` is `#`, `#/<JSON pointer>` or
+  `#<anchor>`, not percent-encoded, and names one of its subschemas. An
+  `$anchor` is defined once, `$id` appears at the root only, and
+  `$dynamicRef` and `$dynamicAnchor` are refused. A `$ref` into
+  `contentSchema` is refused with what jsoncons says, since jsoncons does not
+  compile `contentSchema`.
+- A `$ref` that leads back to its own schema without descending into the
+  document is refused, even in a `$defs` entry nothing uses, since jsoncons
+  would recurse on it until the stack overflowed. That is a `$ref` back
+  through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `dependentSchemas`, other
+  `$ref`s, and `then` and `else` beside an `if` (2020-12 ignores them
+  without one), as `{"$ref": "#"}` is. A `$ref` back through `properties`,
+  `items` or another keyword that applies to a member or an item is
+  allowed.
 - `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex,
   json-pointer, uri and uri-reference, as jsoncons reads each: it takes the
   year 0000 and the ipv4 address 256.1.1.1, and refuses an empty
