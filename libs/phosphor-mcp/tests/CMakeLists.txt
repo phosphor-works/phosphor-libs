@@ -49,18 +49,11 @@ phosphormcp_add_test(test_phosphor_mcp_signals)
 phosphormcp_add_test(test_phosphor_mcp_bounds)
 set_tests_properties(test_phosphor_mcp_bounds PROPERTIES TIMEOUT 900)
 
-# The work and the memory that the checker charges for each shape, counted
+# The work and the memory that the checker charges for each step, counted
 # exactly. The checker is private to the library, whose symbols are hidden,
-# so its sources are built into the test.
-add_executable(test_phosphor_mcp_checkwork
-    test_phosphor_mcp_checkwork.cpp
-    ../src/mcpschemacheck.cpp
-    ../src/mcpschemacompile.cpp
-    ../src/mcpschemareport.cpp
-    ../src/mcpschemavalue.cpp
-)
-target_include_directories(test_phosphor_mcp_checkwork PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
-target_link_libraries(test_phosphor_mcp_checkwork PRIVATE Qt6::Core Qt6::Test)
+# so its objects are linked into the test.
+add_executable(test_phosphor_mcp_checkwork test_phosphor_mcp_checkwork.cpp)
+target_link_libraries(test_phosphor_mcp_checkwork PRIVATE PhosphorMcpSchemaChecker Qt6::Test)
 set_target_properties(test_phosphor_mcp_checkwork PROPERTIES UNITY_BUILD OFF)
 add_test(NAME test_phosphor_mcp_checkwork COMMAND test_phosphor_mcp_checkwork
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

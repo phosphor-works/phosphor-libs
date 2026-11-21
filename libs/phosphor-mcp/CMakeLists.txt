@@ -104,19 +104,35 @@ set(phosphormcp_SRCS
     src/mcplogging.cpp
     src/mcpresult.cpp
     src/mcpschema.cpp
-    src/mcpschemacheck.cpp
-    src/mcpschemacompile.cpp
-    src/mcpschemareport.cpp
-    src/mcpschemavalue.cpp
     src/mcpserver.cpp
     src/mcpsignals.cpp
     src/mcptool.cpp
     src/mcptransport.cpp
 )
 
+# The JSON Schema checker, built once for the library and for
+# test_phosphor_mcp_checkwork, which counts the work of each step and so
+# reads the checker's own functions, hidden in the library.
+add_library(PhosphorMcpSchemaChecker OBJECT
+    src/mcpschemacheck.cpp
+    src/mcpschemacompile.cpp
+    src/mcpschemareport.cpp
+    src/mcpschemavalue.cpp
+)
+target_compile_features(PhosphorMcpSchemaChecker PUBLIC cxx_std_20)
+target_include_directories(PhosphorMcpSchemaChecker PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+target_link_libraries(PhosphorMcpSchemaChecker PUBLIC Qt6::Core)
+set_target_properties(PhosphorMcpSchemaChecker PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    # The anonymous namespaces of the checker's files must stay apart.
+    UNITY_BUILD OFF
+)
+
 add_library(PhosphorMcp SHARED
     ${phosphormcp_public_HDRS}
     ${phosphormcp_SRCS}
+    $<TARGET_OBJECTS:PhosphorMcpSchemaChecker>
 )
 
 add_library(PhosphorMcp::PhosphorMcp ALIAS PhosphorMcp)
