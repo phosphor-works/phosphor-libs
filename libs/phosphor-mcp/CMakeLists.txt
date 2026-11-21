@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # PhosphorMcp, a Model Context Protocol server over stdio for Phosphor
-# applications. The application declares its tools and answers their calls;
-# the library speaks the protocol (revision 2026-07-28): JSON-RPC on stdin and
-# stdout, the checks of every request, server/discover, tools/list, the
-# dispatch of tools/call with argument checks against each tool's schema,
+# applications. The application declares its tools and answers their calls.
+# The library speaks the protocol (revision 2026-07-28), which is JSON-RPC on
+# stdin and stdout, the checks of every request, server/discover, tools/list,
+# the dispatch of tools/call with argument checks against each tool's schema,
 # cancellation, progress, and the end of the session.
 #
-# Depends on Qt6::Core only. No Gui, no Qml, no Network: a server that runs
+# Depends on Qt6::Core only. No Gui, no Qml, no Network, so a server that runs
 # inside a CLI command pulls in nothing more. The JSON Schema checker of the
 # arguments is the library's own (src/mcpschema*.cpp).
-# Linux only: the transport writes a terminal through /proc/self/fd and
+# Linux only, since the transport writes a terminal through /proc/self/fd and
 # sockets with MSG_NOSIGNAL, and takes back SIGPIPE with sigtimedwait.
 
 # 3.21 floor, as phosphor-control's.
@@ -52,13 +52,17 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 
 # The library used jsoncons once, with a switch to the system's headers. A
 # build directory from then keeps the switch in its cache, where it would
-# do nothing without a word.
+# do nothing without a word. The entry is removed whatever its value, with a
+# warning when it is not the default, AUTO, in any case. The jsoncons
+# entries that phosphor-fsloader reads too (JSONCONS_INCLUDE_DIR) stay.
 if(DEFINED CACHE{PHOSPHORMCP_USE_SYSTEM_JSONCONS})
-    if(NOT PHOSPHORMCP_USE_SYSTEM_JSONCONS STREQUAL "AUTO")
-        message(WARNING "PHOSPHORMCP_USE_SYSTEM_JSONCONS is no longer used: phosphor-mcp checks schemas itself, "
-            "without jsoncons. It is removed from the cache.")
+    string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_JSONCONS}" _phosphormcp_old_jsoncons)
+    if(NOT _phosphormcp_old_jsoncons STREQUAL "AUTO")
+        message(WARNING "PHOSPHORMCP_USE_SYSTEM_JSONCONS is no longer used, since phosphor-mcp checks schemas "
+            "itself, without jsoncons. It is removed from the cache.")
     endif()
     unset(PHOSPHORMCP_USE_SYSTEM_JSONCONS CACHE)
+    unset(_phosphormcp_old_jsoncons)
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -117,11 +121,6 @@ endif()
 if(NOT DEFINED KDE_INSTALL_BINDIR)
     include(GNUInstallDirs)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
-endif()
-
-if(NOT DEFINED KDE_INSTALL_DATADIR)
-    include(GNUInstallDirs)
-    set(KDE_INSTALL_DATADIR ${CMAKE_INSTALL_DATAROOTDIR})
 endif()
 
 target_include_directories(PhosphorMcp
@@ -198,9 +197,9 @@ install(FILES
 
 # ON when phosphor-libs is the outermost project, when this library is
 # configured on its own, and when the tests are built, whose smoke test runs
-# it. OFF inside an app that adds the tree or this library without tests:
-# PROJECT_IS_TOP_LEVEL would be the app's there, when the app adds this
-# directory itself. Never installed: it is source for authors of other
+# it. OFF inside an app that adds the tree or this library without tests,
+# where PROJECT_IS_TOP_LEVEL would be the app's when the app adds this
+# directory itself. Never installed, since it is source for authors of other
 # servers.
 if(PHOSPHOR_LIBS_TOP_LEVEL OR CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR OR BUILD_TESTING)
     set(_phosphormcp_examples_default ON)
