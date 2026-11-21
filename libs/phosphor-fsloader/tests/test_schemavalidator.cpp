@@ -19,7 +19,9 @@
 #include <QTemporaryFile>
 #include <QTest>
 
+#include <thread>
 #include <utility>
+#include <vector>
 
 using namespace PhosphorFsLoader;
 
@@ -690,6 +692,63 @@ private Q_SLOTS:
         QCOMPARE(reasons->size(), 2);
         QCOMPARE(reasons->last().path, QStringLiteral("/dependentSchemas/k"));
         QCOMPARE(reasons->last().message, QStringLiteral("additionalProperties: Expected string, found integer"));
+    }
+
+    void rechecksAreKeptAcrossCallsAndThreads()
+    {
+        // The subschemas compiled to recheck failed members are kept for
+        // later validate() calls, sixteen at most, and a validator is shared
+        // across threads. Twenty failing locations, each its own subschema,
+        // so that a validate() uses kept ones and compiles others: four
+        // threads validating at once, five times each, on a validator that
+        // has kept nothing yet, all report what a validator of their own
+        // reports. (Run under TSan for the races.)
+        QJsonObject properties;
+        QJsonObject document;
+        for (int i = 0; i < 20; ++i) {
+            const QString name = QStringLiteral("p%1").arg(i, 2, 10, QChar(u'0'));
+            properties.insert(name,
+                              QJsonObject{{QStringLiteral("additionalProperties"),
+                                           QJsonObject{{QStringLiteral("type"), QStringLiteral("string")},
+                                                       {QStringLiteral("maxLength"), i}}}});
+            document.insert(name, QJsonObject{{QStringLiteral("k"), QStringLiteral("abcdefghijklmnopqrstuvwxyz")}});
+        }
+        const QByteArray schema = QJsonDocument(QJsonObject{{QStringLiteral("properties"), properties}}).toJson();
+        const auto expected = SchemaValidator(schema).validate(document);
+        QVERIFY(expected.has_value());
+        QCOMPARE(expected->size(), 40);
+        QCOMPARE(expected->at(39).path, QStringLiteral("/p19/k"));
+        QCOMPARE(expected->at(39).message,
+                 QStringLiteral("additionalProperties: Number of characters must be at most 19"));
+
+        const SchemaValidator shared(schema);
+        QVERIFY(shared.isValid());
+        std::vector<std::optional<QList<SchemaValidator::Error>>> results(20);
+        // std::thread, joined: TSan sees the join, and not QThread::wait(),
+        // which happens inside Qt, built without it.
+        std::vector<std::thread> threads;
+        for (int t = 0; t < 4; ++t) {
+            threads.emplace_back([&shared, &document, &results, t] {
+                for (int n = 0; n < 5; ++n) {
+                    results[std::size_t(t * 5 + n)] = shared.validate(document);
+                }
+            });
+        }
+        for (std::thread& thread : threads) {
+            thread.join();
+        }
+        for (const auto& result : results) {
+            QVERIFY(result.has_value());
+            QCOMPARE(result->size(), expected->size());
+            for (qsizetype i = 0; i < expected->size(); ++i) {
+                QCOMPARE(result->at(i).path, expected->at(i).path);
+                QCOMPARE(result->at(i).message, expected->at(i).message);
+            }
+        }
+        // And on the same thread, once all are kept or compiled.
+        const auto again = shared.validate(document);
+        QVERIFY(again.has_value());
+        QCOMPARE(again->at(39).message, expected->at(39).message);
     }
 
     void unknownKeywordsAreIgnored()

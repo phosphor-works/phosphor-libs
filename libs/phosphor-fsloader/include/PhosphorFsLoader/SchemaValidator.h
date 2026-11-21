@@ -125,11 +125,10 @@ public:
         /// an @c anyOf, @c oneOf or @c allOf failed follow it as errors of
         /// their own, each prefixed with its branch ("anyOf/1: ..."). So do
         /// the reasons a member failed an @c additionalProperties subschema,
-        /// which jsoncons keeps to itself: the member is checked against the
-        /// subschema again, and each reason is prefixed
-        /// "additionalProperties: ". That goes four such subschemas deep (a
-        /// member of a member of ...), which bounds what it costs: at most
-        /// four more passes over the document.
+        /// which jsoncons keeps to itself. The member is checked against the
+        /// subschema again, down to four such subschemas one inside another
+        /// (a member of a member of ...), and each reason is prefixed
+        /// "additionalProperties: ". @c validate() says what that costs.
         ///
         /// In the path and in the message, each C0 and C1 control character
         /// (U+0000 to U+001F, U+007F to U+009F), the line and paragraph
@@ -184,6 +183,21 @@ public:
 
     /**
      * @brief Validate a parsed JSON document against the compiled schema.
+     *
+     * A document that passes costs one validation. One that fails costs more
+     * for each member that failed an @c additionalProperties subschema, whose
+     * reasons are looked for (see @c Error::message). The member's value is
+     * validated again against that subschema, compiled for it as a copy of
+     * the whole schema, which costs about what compiling the schema does. A
+     * recheck follows an error kept, so one @c validate() runs at most 100,
+     * and compiles each subschema it needs once. The validator keeps the
+     * first 16 it compiles for every later @c validate(), on any thread,
+     * which bounds the memory they take at 16 times that of the compiled
+     * schema. Others are compiled again by each @c validate() that needs
+     * them. In a Release build, a document failing 150 such subschemas of a
+     * 24 KB schema (50 of them rechecked, the rest past the 100th error)
+     * takes about 100 ms the first time and 50 ms after, and one failing 16
+     * takes 2.4 ms the first time and 0.05 ms after.
      *
      * @param document  Any parsed JSON value (typically a QJsonObject).
      * @return @c std::nullopt when the document satisfies the schema;

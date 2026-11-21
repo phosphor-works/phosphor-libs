@@ -25,6 +25,8 @@
 #include <exception>
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -41,14 +43,20 @@ namespace {
 // written in (const, enum).
 using Json = jsoncons::json;
 namespace jsonschema = jsoncons::jsonschema;
+using CompiledSchema = jsonschema::json_schema<Json>;
 
 /// The most errors validate() lists; the rest are counted in one more entry.
 constexpr qsizetype kMaxErrors = 100;
-/// How many additionalProperties subschemas, one inside another, validate()
-/// rechecks a failed member against for its reasons. Each level rechecks
-/// members that do not overlap, so validate() costs at most this many times
-/// more than without the rechecks.
+/// How deep rechecks nest. A recheck validates a failed member's value again,
+/// and a member that fails inside it is rechecked in turn, which validates a
+/// part of that value once more: without a bound, a chain of members nested
+/// N deep would be validated about N times. Rechecks stop at this many
+/// additionalProperties subschemas, one inside another.
 constexpr int kMaxRecheckDepth = 4;
+/// How many compiled rechecks a validator keeps for later validate() calls.
+/// Each is a copy of the whole schema, compiled, so they take at most this
+/// many times the memory of the validator's own compiled schema.
+constexpr std::size_t kMaxKeptRechecks = 16;
 /// The most UTF-16 code units of a path or a message an error keeps, escapes
 /// included, before the ellipsis that says it was cut.
 constexpr qsizetype kMaxTextLength = 500;
@@ -891,7 +899,7 @@ struct SchemaValidator::Private
     // Compiled once at construction and reused by every validate(). Empty when
     // the schema was refused or did not compile, and then every validate()
     // fails closed.
-    std::optional<jsonschema::json_schema<Json>> schema;
+    std::optional<CompiledSchema> schema;
 
     // Why the schema was refused, reported by every validate().
     QString compileError;
@@ -900,6 +908,57 @@ struct SchemaValidator::Private
     // validate() compiles a schema that is one failed additionalProperties
     // subschema, to say why a member failed it.
     Json recheckBase;
+
+    // The rechecks compiled so far, by the fragment of the subschema's
+    // location, kept for later validate() calls: kMaxKeptRechecks at most,
+    // never removed. Null for one that did not compile (it should). A
+    // validator is shared across threads and validate() is const, so the map
+    // is behind a mutex, held only to look an entry up or add one, never
+    // while compiling or validating.
+    std::mutex recheckMutex;
+    std::map<std::string, std::shared_ptr<const CompiledSchema>> keptRechecks;
+
+    // The subschema at `fragment` as a schema of its own: a copy of the whole
+    // schema whose root is a $ref to it. Null when it does not compile.
+    std::shared_ptr<const CompiledSchema> compileRecheck(const std::string& fragment) const
+    {
+        try {
+            Json wrapper = recheckBase;
+            wrapper.insert_or_assign("$ref", std::string(kRecheckId) + '#' + fragment);
+            return std::make_shared<const CompiledSchema>(
+                jsonschema::make_json_schema(std::move(wrapper), evaluationOptions()));
+        } catch (...) {
+            // The member keeps jsoncons' line only.
+            return nullptr;
+        }
+    }
+
+    // The compiled recheck for `fragment`: a kept one, else one this
+    // validate() compiled past the kept ones (in `local`), else compiled now
+    // and kept, or put in `local` once kMaxKeptRechecks are kept.
+    std::shared_ptr<const CompiledSchema>
+    recheckFor(const std::string& fragment, std::map<std::string, std::shared_ptr<const CompiledSchema>>& local)
+    {
+        {
+            const std::lock_guard lock(recheckMutex);
+            if (const auto kept = keptRechecks.find(fragment); kept != keptRechecks.end()) {
+                return kept->second;
+            }
+        }
+        if (const auto found = local.find(fragment); found != local.end()) {
+            return found->second;
+        }
+        std::shared_ptr<const CompiledSchema> compiled = compileRecheck(fragment);
+        {
+            const std::lock_guard lock(recheckMutex);
+            if (keptRechecks.size() < kMaxKeptRechecks) {
+                // Another thread may have kept one meanwhile, the same.
+                return keptRechecks.try_emplace(fragment, std::move(compiled)).first->second;
+            }
+        }
+        local.emplace(fragment, compiled);
+        return compiled;
+    }
 };
 
 SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
@@ -1039,38 +1098,27 @@ std::optional<QList<SchemaValidator::Error>> SchemaValidator::validate(const QJs
     try {
         ErrorList errors;
         const Json instance = Converter(errors).convert(document);
-        // Each failed additionalProperties subschema is compiled once per
-        // validate(), the first time a member fails it: a copy of the whole
-        // schema whose root is a $ref to it. At most kMaxErrors are, since a
-        // recheck follows an error kept. Empty: it did not compile (it
-        // should).
-        std::map<std::string, std::optional<jsonschema::json_schema<Json>>> subschemas;
+        // Each failed additionalProperties subschema is compiled the first
+        // time a member fails it (Private::recheckFor), at most kMaxErrors per
+        // validate() since a recheck follows an error kept. Those compiled
+        // when kMaxKeptRechecks are kept already live in `local`, for this
+        // validate() only.
+        std::map<std::string, std::shared_ptr<const CompiledSchema>> local;
         Recheck recheck;
-        recheck = [this, &errors, &subschemas, &recheck](const Json& member, const QString& memberPath,
-                                                         const jsonschema::validation_message& message,
-                                                         const QString& prefix, int depth) {
+        recheck = [this, &errors, &local, &recheck](const Json& member, const QString& memberPath,
+                                                    const jsonschema::validation_message& message,
+                                                    const QString& prefix, int depth) {
             if (depth > kMaxRecheckDepth) {
                 return;
             }
             const jsoncons::string_view fragment = message.schema_location().encoded_fragment();
-            const std::string key(fragment.data(), fragment.size());
-            auto compiled = subschemas.find(key);
-            if (compiled == subschemas.end()) {
-                std::optional<jsonschema::json_schema<Json>> subschema;
-                try {
-                    Json wrapper = d->recheckBase;
-                    wrapper.insert_or_assign("$ref", std::string(kRecheckId) + '#' + key);
-                    subschema.emplace(jsonschema::make_json_schema(std::move(wrapper), evaluationOptions()));
-                } catch (...) {
-                    // The member keeps jsoncons' line only.
-                }
-                compiled = subschemas.emplace(key, std::move(subschema)).first;
-            }
-            if (!compiled->second) {
+            const std::shared_ptr<const CompiledSchema> subschema =
+                d->recheckFor(std::string(fragment.data(), fragment.size()), local);
+            if (!subschema) {
                 return;
             }
             const Report inner{errors, Messages::All, member, memberPath, &recheck, depth};
-            compiled->second->validate(member, [&inner, &prefix](const jsonschema::validation_message& reason) {
+            subschema->validate(member, [&inner, &prefix](const jsonschema::validation_message& reason) {
                 addMessage(inner, reason, prefix);
                 return jsonschema::walk_state::advance;
             });

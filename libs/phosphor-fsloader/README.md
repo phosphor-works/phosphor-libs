@@ -283,9 +283,13 @@ parse(mesh->bytes);
   keeps the first 500 and gains an ellipsis. The reasons an `anyOf`, `oneOf`
   or `allOf` failed follow its error, prefixed with the branch
   (`anyOf/1: ...`). So do the reasons a member failed an
-  `additionalProperties` subschema, which jsoncons does not give: the member
+  `additionalProperties` subschema, which jsoncons does not give. The member
   is checked against that subschema again, down to four such subschemas one
   inside another, and each reason is prefixed `additionalProperties: `.
+  Each subschema is compiled for that as a copy of the whole schema, at most
+  100 times in one `validate()`. The validator keeps the first 16 it
+  compiles for later calls, from any thread. `validate()`'s documentation
+  gives the cost.
 - A failed `dependentSchemas` subschema is reported below the member that
   triggered it (`/a/c` for member `c`, when `a` triggered it), as jsoncons
   reports it. A member that fails an `additionalProperties` subschema there
