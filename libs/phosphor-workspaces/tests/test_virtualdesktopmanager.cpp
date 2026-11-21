@@ -81,7 +81,6 @@ private Q_SLOTS:
     void updateScreenDesktop_emitsOnlyOnChange();
     void updateScreenDesktop_rejectsInvalid();
     void seedScreenDesktop_recordsWithoutASwitch();
-    void perScreenModeActive_tracksDivergence();
     void desktopCountShrink_clampsPerScreenEntries();
 
     // The id accessors and KWin call wrappers with no KWin behind them.
@@ -114,7 +113,6 @@ void TestVirtualDesktopManager::unknownScreen_fallsBackToGlobal()
 {
     VirtualDesktopManager vdm;
     QCOMPARE(vdm.currentDesktopForScreen(QStringLiteral("DP-1")), vdm.currentDesktop());
-    QVERIFY(!vdm.perScreenModeActive());
 }
 
 // hasScreenDesktopReport is true only for a REAL report (exact key, or the
@@ -209,26 +207,6 @@ void TestVirtualDesktopManager::seedScreenDesktop_recordsWithoutASwitch()
     // A later real switch on that screen still reports as one.
     vdm.updateScreenDesktop(QStringLiteral("DP-1"), 4);
     QCOMPARE(switched.count(), 1);
-}
-
-// Per-screen mode is active iff two screens are on different desktops, and
-// deactivates when they reconverge.
-void TestVirtualDesktopManager::perScreenModeActive_tracksDivergence()
-{
-    VirtualDesktopManager vdm;
-    QVERIFY(!vdm.perScreenModeActive()); // empty
-
-    vdm.updateScreenDesktop(QStringLiteral("DP-1"), 2);
-    QVERIFY(!vdm.perScreenModeActive()); // single screen
-
-    vdm.updateScreenDesktop(QStringLiteral("DP-2"), 2);
-    QVERIFY(!vdm.perScreenModeActive()); // two screens, same desktop
-
-    vdm.updateScreenDesktop(QStringLiteral("DP-2"), 5);
-    QVERIFY(vdm.perScreenModeActive()); // diverged
-
-    vdm.updateScreenDesktop(QStringLiteral("DP-2"), 2);
-    QVERIFY(!vdm.perScreenModeActive()); // reconverged
 }
 
 // clampScreenDesktopsToCount: a per-screen entry above a count committed with

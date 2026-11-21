@@ -5,12 +5,6 @@
 
 #include "phosphortiles_export.h"
 
-// Back-compat include: previewFromAlgorithm(...) used to be declared here;
-// it now lives in AutotilePreviewRender.h. Keep the include so existing
-// consumers that only included <PhosphorTiles/AutotileLayoutSource.h>
-// continue to pick up the free functions without modification.
-#include <PhosphorTiles/AutotilePreviewRender.h>
-
 #include <PhosphorLayoutApi/ILayoutSource.h>
 #include <PhosphorLayoutApi/LayoutPreview.h>
 

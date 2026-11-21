@@ -188,7 +188,7 @@ bool VirtualDesktopManager::commitDesktopList(QList<DesktopEntry> desktops, cons
 
     // How the POSITIONS moved, while the old list is still here to compare
     // against. Ids are stable across a renumber and positions are not, so this
-    // is the only moment the answer exists — see desktopRemovedAt's doc for
+    // is the only moment the answer exists — see desktopsRenumbered's doc for
     // why the count alone cannot supply it. One map for every shape of change
     // (F787). The first snapshot has no previous list and compares against the
     // previous session's, when the daemon handed one over.
@@ -196,7 +196,6 @@ bool VirtualDesktopManager::commitDesktopList(QList<DesktopEntry> desktops, cons
     const PhosphorEngine::DesktopRemap remap =
         PhosphorEngine::DesktopRemap::fromIds(liveChange ? m_desktopIds : m_baselineDesktopIds, newIds);
     m_baselineDesktopIds.clear();
-    const int removedPosition = liveChange ? remap.singleRemoval() : 0;
 
     // The current desktop by its id. An id this list lacks (the current
     // desktop was removed and no currentChanged named its replacement) goes
@@ -304,9 +303,6 @@ bool VirtualDesktopManager::commitDesktopList(QList<DesktopEntry> desktops, cons
     // nothing left to do.
     if (!remap.isIdentity()) {
         Q_EMIT desktopsRenumbered(remap);
-        if (removedPosition > 0) {
-            Q_EMIT desktopRemovedAt(removedPosition);
-        }
     }
     // The count notification belongs HERE, where the value is committed. The
     // one count committed ahead of the list is a growing one from the
@@ -580,21 +576,6 @@ int VirtualDesktopManager::currentDesktopForScreen(const QString& screenId) cons
     }
 
     return currentDesktop();
-}
-
-bool VirtualDesktopManager::perScreenModeActive() const
-{
-    if (m_screenDesktops.size() < 2) {
-        return false;
-    }
-    auto it = m_screenDesktops.constBegin();
-    const int first = it.value();
-    for (++it; it != m_screenDesktops.constEnd(); ++it) {
-        if (it.value() != first) {
-            return true;
-        }
-    }
-    return false;
 }
 
 QString VirtualDesktopManager::liveScreenIdFor(const QString& screenId) const

@@ -59,12 +59,6 @@ public:
 
     int currentDesktop() const override;
     int currentDesktopForScreen(const QString& screenId) const override;
-    /// Superseded, kept for the installed API (IVirtualDesktopManager): no
-    /// production code calls it, only this library's tests. It only tells
-    /// whether two recorded screens differ right now, which is not whether
-    /// KWin runs per-output desktops (two screens on the same desktop answer
-    /// false in that mode too).
-    bool perScreenModeActive() const override;
 
     /// Record a screen's current virtual desktop (1-based). This is fed by the
     /// KWin effect's per-output desktopChanged report (Plasma 6.7 per-output
@@ -74,8 +68,7 @@ public:
     void updateScreenDesktop(const QString& screenId, int desktop);
 
     /// Drop a screen's recorded per-output desktop when the output is removed,
-    /// so the map doesn't retain stale entries (and perScreenModeActive() doesn't
-    /// keep counting a gone screen) across monitor hot-plug. Driven by the
+    /// so the map doesn't retain stale entries across monitor hot-plug. Driven by the
     /// daemon's screenRemoved handler.
     void removeScreenDesktop(const QString& screenId);
     /// True when a per-output report exists for @p screenId (or, for a virtual
@@ -191,8 +184,8 @@ public:
     /// while the daemon was down) still renumbers the stores keyed on the old
     /// positions. Compared against the first committed snapshot, or against
     /// the current one at once when it has already landed; a difference goes
-    /// out as desktopsRenumbered and nothing else (the per-screen desktops and
-    /// desktopRemovedAt are about live changes only). An empty list is ignored.
+    /// out as desktopsRenumbered and nothing else (the per-screen desktops are
+    /// about live changes only). An empty list is ignored.
     void setBaselineDesktopIds(const QStringList& desktopIds);
 
 Q_SIGNALS:
@@ -212,26 +205,6 @@ Q_SIGNALS:
     /// something unrelated forced a refresh. Emitted only when the ids or
     /// names actually differ from the previous snapshot.
     void desktopsChanged();
-    /// Exactly one desktop was removed, and this is the 1-based POSITION it
-    /// held before it went. Emitted ahead of desktopCountChanged, because a
-    /// consumer keyed on positions has to act in that order: drop the removed
-    /// position's state first, then shift everything above it down one.
-    ///
-    /// desktopCountChanged cannot carry this. It reports the new count, and
-    /// after a mid-list removal every surviving position is still within it —
-    /// so a consumer seeing only the count cannot tell 2-of-4 was deleted from
-    /// 4-of-4, and pruning "everything past the new count" drops the TOPMOST
-    /// desktop's state instead of the removed one's.
-    ///
-    /// Only for the unambiguous case: exactly one id gone and none added. A
-    /// reorder, a simultaneous add and remove, or a multi-desktop change
-    /// leaves this silent.
-    ///
-    /// Superseded by desktopsRenumbered, which goes out just before it and
-    /// covers every shape of change. Nothing in this tree connects it; it is
-    /// kept for installed-API compatibility. Connect one of the two, never
-    /// both, or a store is shifted twice.
-    void desktopRemovedAt(int removedPosition);
     /// A single screen's current virtual desktop changed (per-output virtual
     /// desktops). The primary trigger the daemon's per-screen desktop handler
     /// subscribes to; in single-desktop mode it is driven the same for every
@@ -245,8 +218,11 @@ Q_SIGNALS:
     /// desktop NUMBER applies @p remap once. By the time it goes out the
     /// manager's own state is renumbered: the ids, the count, the current
     /// desktop, and each screen's desktop (moved through
-    /// DesktopRemap::successor, silently, for the reason desktopRemovedAt's
-    /// shift is silent). Ahead of desktopCountChanged, like desktopRemovedAt.
+    /// DesktopRemap::successor, silently). Ahead of desktopCountChanged,
+    /// because a consumer keyed on positions has to move its state before
+    /// anything reasons about the new count: after a mid-list removal every
+    /// surviving position is still within the count, so the count alone
+    /// cannot tell 2-of-4 was deleted from 4-of-4.
     /// Only in the fallback desktopCountChanged describes (a growing count
     /// committed before its list) does the count go first. Never sent for a
     /// change that moves no number (a rename, a desktop appended after the
