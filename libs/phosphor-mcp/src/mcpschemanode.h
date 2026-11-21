@@ -67,14 +67,15 @@ QString formatNumber(const Number& number);
 // it. QAnyStringView::size() counts the code units of the text's own
 // encoding (bytes, or UTF-16 code units), which is what reading it costs.
 //
-// Its length in code points, as 2020-12 counts characters (an unpaired
-// surrogate counts as one).
+// Its length in code points, as 2020-12 counts characters, for text without
+// an unpaired surrogate, which the walk before the check refuses.
 qsizetype codePoints(QAnyStringView text);
 // Whether the text has no unpaired UTF-16 surrogate, which only UTF-16 can
 // hold.
 bool isValidText(QAnyStringView text);
-// Whether the text is in UTF-16.
+// Whether the text is in UTF-16, or in UTF-8.
 bool isUtf16(QAnyStringView text);
+bool isUtf8(QAnyStringView text);
 // -1, 0 or 1: the order of the texts' code points, whatever their encodings.
 // 0 exactly when QAnyStringView::equal() is true (for text without an
 // unpaired surrogate).

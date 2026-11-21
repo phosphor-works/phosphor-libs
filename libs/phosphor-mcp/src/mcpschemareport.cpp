@@ -8,6 +8,11 @@
 
 #include <QLatin1StringView>
 
+#include <algorithm>
+#include <charconv>
+#include <iterator>
+#include <type_traits>
+
 namespace PhosphorMcp::Schema {
 
 namespace {
@@ -18,9 +23,43 @@ const QString TooLargeToList =
 const QString TooManyRefused =
     QStringLiteral(": is refused before the check, with too many errors for the server to list each one");
 
-QString tokenOf(const PathToken& token)
+// The UTF-16 code units that a text takes at the least. A byte of UTF-8 is
+// a third of one at the least.
+qsizetype leastUtf16(QAnyStringView text)
 {
-    return token.index >= 0 ? QString::number(token.index) : token.name.toString();
+    return text.visit([](auto view) -> qsizetype {
+        if constexpr (std::is_same_v<decltype(view), QStringView>
+                      || std::is_same_v<decltype(view), QLatin1StringView>) {
+            return view.size();
+        } else {
+            return view.size() / 3;
+        }
+    });
+}
+
+// The code points of a name that shownName() reads at most.
+constexpr qsizetype ShownPoints = MaxShownTokenLength + 1;
+
+// The start of a name, decoded: all of it, or enough code points (more than
+// MaxShownTokenLength) that shownName() cuts it where it cuts the whole name.
+QString headOf(QAnyStringView name)
+{
+    return name.visit([](auto view) -> QString {
+        using View = decltype(view);
+        if constexpr (std::is_same_v<View, QStringView>) {
+            return view.first(std::min(view.size(), 2 * ShownPoints)).toString();
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            return QString(view.first(std::min(view.size(), ShownPoints)));
+        } else {
+            // Up to four bytes a code point, cut at the start of one.
+            const auto* bytes = reinterpret_cast<const uchar*>(view.data());
+            qsizetype size = std::min(view.size(), 4 * ShownPoints);
+            while (size < view.size() && (bytes[size] & 0xC0) == 0x80) {
+                --size;
+            }
+            return view.first(size).toString();
+        }
+    });
 }
 
 } // namespace
@@ -61,41 +100,90 @@ QString shownName(const QString& name)
     return token;
 }
 
-qsizetype Report::add(const Path& path, const QString* last, const QString& description)
+void Place::pop()
+{
+    m_tokens.pop_back();
+    if (m_ends.size() > m_tokens.size() + 1) {
+        m_ends.resize(m_tokens.size() + 1);
+        m_pointer.truncate(m_ends.back());
+    }
+}
+
+const QString* Place::pointer(qint64& units)
+{
+    for (std::size_t k = m_ends.size() - 1; k < m_tokens.size(); ++k) {
+        const PathToken& token = m_tokens[k];
+        units += UnitsPerToken;
+        if (token.index >= 0) {
+            char digits[24];
+            const char* end = std::to_chars(std::begin(digits), std::end(digits), token.index).ptr;
+            m_pointer += QLatin1Char('/');
+            m_pointer += QLatin1StringView(std::begin(digits), end);
+        } else {
+            // A name too long for any pointer that the report keeps is not
+            // decoded.
+            if (m_pointer.size() + 1 + leastUtf16(token.name) > MaxErrorPointerLength) {
+                return nullptr;
+            }
+            units += decodeUnits(token.name);
+            m_pointer += QLatin1Char('/');
+            const qsizetype start = m_pointer.size();
+            token.name.visit([this](auto view) {
+                if constexpr (std::is_same_v<decltype(view), QStringView>
+                              || std::is_same_v<decltype(view), QLatin1StringView>) {
+                    m_pointer += view;
+                } else {
+                    m_pointer += QUtf8StringView(view.data(), view.size());
+                }
+            });
+            const QStringView added = QStringView(m_pointer).sliced(start);
+            if (added.contains(u'~') || added.contains(u'/')) {
+                const QString escaped = pointerToken(added.toString());
+                m_pointer.truncate(start);
+                m_pointer += escaped;
+            }
+        }
+        m_ends.push_back(m_pointer.size());
+    }
+    return m_pointer.size() > MaxErrorPointerLength ? nullptr : &m_pointer;
+}
+
+qint64 Report::add(Place& place, const QString& description)
 {
     if (m_overflow) {
         return 0;
     }
-    QString pointer;
-    for (const PathToken& token : path) {
-        pointer += QLatin1Char('/') + pointerToken(tokenOf(token));
-    }
-    if (last) {
-        pointer += QLatin1Char('/') + pointerToken(*last);
-    }
-    const QString key = pointer + QLatin1StringView(": ") + description;
-    if (m_seen.contains(key)) {
-        return pointer.size();
-    }
-    if (m_seen.size() >= MaxCountedErrors || m_pointerLength + pointer.size() > MaxErrorPointerLength) {
+    qint64 units = 0;
+    const QString* pointer = place.pointer(units);
+    if (!pointer) {
         m_overflow = true;
-        return pointer.size();
+        return units;
     }
-    m_seen.insert(key);
-    m_pointerLength += pointer.size();
+    // The pointer hashed, compared with those of its hash, and copied when
+    // it is new.
+    units += pointer->size() / CharactersPerUnit;
+    if (m_seen.contains(Seen{*pointer, description})) {
+        return units;
+    }
+    if (m_seen.size() >= MaxCountedErrors || m_pointerLength + pointer->size() > MaxErrorPointerLength) {
+        m_overflow = true;
+        return units;
+    }
+    // A copy of its own, since the place's pointer changes as the walk goes.
+    m_seen.insert(Seen{QString(pointer->constData(), pointer->size()), description});
+    m_pointerLength += pointer->size();
     if (m_lines.size() < MaxListedErrors) {
         QString shown;
-        for (const PathToken& token : path) {
-            shown += QLatin1Char('/') + shownName(pointerToken(tokenOf(token)));
-        }
-        if (last) {
-            shown += QLatin1Char('/') + shownName(pointerToken(*last));
+        for (const PathToken& token : place.tokens()) {
+            units += UnitsPerShownToken;
+            shown += QLatin1Char('/')
+                + (token.index >= 0 ? QString::number(token.index) : shownName(pointerToken(headOf(token.name))));
         }
         m_lines.append(shown + QLatin1StringView(": ") + description);
     } else {
         ++m_more;
     }
-    return pointer.size();
+    return units;
 }
 
 QStringList Report::take()
