@@ -167,7 +167,10 @@ distinct errors, or whose errors' paths come to more than 1 Mi UTF-16 code
 units together, get one line instead, which says that they do not match and
 are too large for the server to list each error. The check stops there.
 The places refused before the check (below) are errors like the others
-here: ten listed, a thousand counted.
+here, ten listed and a thousand counted. Past a thousand, their one line
+says only that the arguments are refused before the check, with too many
+errors for the server to list each one, since the check that would say
+whether they match never ran.
 
 Each line comes from the keyword that failed, its value in the schema and
 the arguments: `must be of type integer`, `is required`, `is not a known
@@ -179,16 +182,24 @@ integer with all its digits (9223372036854775808 too, below 10^21), any
 other number in its shortest form that reads back as the same double
 (`0.1`, `1e-07`, `1e+300`).
 
-The members of an object come in the order of their names, each with the
-errors of its name and of its value, then the properties that are
-missing. The keywords of a subschema come before the subschemas that it
-applies to the same value. A failed `anyOf`, or a `oneOf` that matches no
-branch, lists the errors of each branch and then its own line. A `oneOf`
-that matches more than one branch says so alone, and a failed `allOf`
-lists the errors of its branches. A `false` subschema has no reason of its
-own, so its line names the place and says that it does not match the
-schema. What `not`, the condition of an `if` and the items that `contains`
-tries find is never listed, since it is no error of the arguments.
+The errors of a subschema come in the order of its keywords. First those
+that apply no subschema (`type`, `const`, `enum`, and the keywords of
+numbers and strings), then those of an array (its counts, `uniqueItems`,
+`prefixItems`, `items`, `contains`) or of an object. The members of an
+object come in the order in which Qt keeps them, that of their names,
+each with the errors of its name and of its value. Then come the
+properties that `required` and `dependentRequired` miss, and the errors of
+`dependentSchemas`. After these come the subschemas applied to the same
+value (`$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then` and `else`),
+and last the members and items that `unevaluatedItems` and
+`unevaluatedProperties` refuse. A failed `anyOf`, or a `oneOf` that
+matches no branch, lists the errors of each branch and then its own line.
+A `oneOf` that matches more than one branch says so alone, and a failed
+`allOf` lists the errors of its branches. A `false` subschema has no
+reason of its own, so its line names the place and says that it does not
+match the schema. What `not`, the condition of an `if` and the items that
+`contains` tries find is never listed, since it is no error of the
+arguments.
 
 Each member that `additionalProperties: false` or `unevaluatedProperties:
 false` refuses has its line, and so has each item that `items: false` or
@@ -198,71 +209,95 @@ finds are listed at the member or item, and those of `propertyNames` at
 the member, as `the property name must be at most 256 characters long`. A
 member or item that a keyword of the schema evaluated is not called
 unknown, even when its value failed there, nor is one that a failed
-branch of a failed `anyOf` or `oneOf` declares: the arguments fail either
+branch of a failed `anyOf` or `oneOf` declares. The arguments fail either
 way, and the line that matters is the one about its value.
 
-The check itself has a bound, and it is exact: the checker counts what it
+The check itself has a bound, and it is exact. The checker counts what it
 does as it goes, and stops the moment the count passes the bound, with the
 line `- arguments: is too large for the server to check against the
 schema`. Nothing is estimated beforehand. Each step is charged by what it
 costs (a value walked, a subschema applied to a value, a keyword checked,
-a member's name read, a name looked up, sixteen characters of a string
-read or compared, a word of an annotation set merged, an error built), in
-units of at most about 22 ns of a release build (as measured on the
-shapes below), and the bound is 40 million units: under a second
-whatever the schema and the arguments. The memory the check holds beyond
-the arguments and the schema (the sets of members and items that
-`unevaluatedProperties` and `unevaluatedItems` read, the keys that
-`uniqueItems` sorts) is counted too, up to 64 MiB, and the list of errors
-is capped as above. A check is also stopped 3000 subschemas deep, and
-when its own frames take 4 MiB of stack, half of what a Linux thread has
-by default: a list nested 1000
-levels deep through `items` and `$ref` is checked in a release build, one
-whose levels each pass through four more `$ref` is refused at 500 levels.
+a member visited, a name looked up, sixteen code units of a string or a
+name read, compared or hashed, a word of an annotation set merged, an
+error built), in units of at most about 18 ns of a release build, as
+measured on the shapes below. The bound is 40 million units, under a
+second whatever the schema and the arguments.
 
-Measured in a release build (CPU time of `validate()`, the walk before the
-check included, on the arguments as Qt's parser left them), for the
-largest arguments in a line of 16 MiB, or as many as the bound lets
-through. `test_phosphor_mcp_bounds` has rows of these shapes, at sizes
-that a debug build with sanitizers checks in seconds.
+Strings and names are read where Qt's parser keeps them, and never
+decoded to be compared, hashed or counted (a name is decoded once for
+`propertyNames`, which checks it as a string). The parser keeps text that is not ASCII in UTF-8, where a
+code unit is a byte, so a string of CJK characters is charged three
+times what the same string in UTF-16 is. The length of a string is
+counted once for all the subschemas applied to it in place. The memory
+the check holds beyond the arguments and the schema is counted too, up
+to 64 MiB. It holds the sets of members and items that
+`unevaluatedProperties` and `unevaluatedItems` read, the keys that
+`uniqueItems` sorts, and the index of an object's names that `required`,
+`dependentRequired` and `dependentSchemas` look names up in. The list of
+errors is capped as above.
+
+A check is also stopped 3000 subschemas deep, and when its own frames
+take 4 MiB of stack, half of what a Linux thread has by default. Each
+subschema applied takes about a kilobyte of stack in a release build, so
+there the depth stops a check first. A list nested 1000 levels deep
+through `items` and `$ref` is checked in a release build, and one whose
+levels each pass through four more `$ref` is refused at 600 levels.
+
+Measured in a release build (CPU time of `validate()`, the walk before
+the check included), on arguments parsed from a request line as the
+server parses them, for the largest arguments in a line of 16 MiB, or as
+many as the bound lets through. `test_phosphor_mcp_checkwork` counts
+exactly the units of each step of these shapes, and
+`test_phosphor_mcp_bounds` checks many of them through the server, at
+sizes that a debug build with sanitizers checks in seconds.
 
 | Schema and arguments | Arguments | Result | Time |
 |---|---|---|---|
-| `items: {"type": "integer"}` | 6,600,000 integers | valid | 0.42 s |
-| the same | 6,700,000 integers | too large to check | 0.43 s |
-| the same | 8,000,000 integers (16 MiB) | too large to check | 0.39 s |
-| `items` with `type`, `minimum`, `maximum`, `multipleOf` | 4,000,000 integers | valid | 0.34 s |
+| `items: {"type": "integer"}` | 6,600,000 integers | valid | 0.44 s |
+| the same | 6,700,000 integers | too large to check | 0.44 s |
+| the same | 8,000,000 integers (16 MiB) | too large to check | 0.40 s |
+| `items` with `type`, `minimum`, `maximum`, `multipleOf` | 4,000,000 integers | valid | 0.36 s |
 | `items: {"type": "string"}` | 8,000,000 integers, every one wrong | too large to list | 0.14 s |
-| two `properties` | 1,000,000 objects | valid | 0.44 s |
-| two `$ref` to the schema at each level (2^depth subschemas) | 40 levels | too large to check | 0.41 s |
-| `anyOf` in `anyOf` 50 deep, the last branch matching | 100,000 integers | valid | 0.27 s |
-| `allOf` of 50 `maxLength` | 4,000,000 CJK characters | valid | 0.02 s |
-| `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.01 s |
-| `const` of an object of 100 members | 20,000 such objects | valid | 0.27 s |
-| `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.01 s |
+| two `properties` | 1,000,000 objects | valid | 0.35 s |
+| two `$ref` to the schema at each level (2^depth subschemas) | 40 levels | too large to check | 0.38 s |
+| `anyOf` in `anyOf` 50 deep, the last branch matching | 100,000 integers | valid | 0.31 s |
+| `allOf` of 50 `maxLength` | 4,000,000 CJK characters | valid | 0.003 s |
+| `allOf` of 300 `maxLength`, below the string's bytes | 5,500,000 CJK characters (16 MiB) | valid | 0.004 s |
+| `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.002 s |
+| `enum` of 3000 strings of 100 CJK characters | 50,000 such strings | valid | 0.008 s |
+| `const` of an object of 100 members | 20,000 such objects | valid | 0.16 s |
+| `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.005 s |
+| `allOf` of 300 `required` | an object of 1,000,000 members | valid | 0.11 s |
 | `dependentRequired` of 2000 triggers | 1,000,000 empty objects | valid | 0.07 s |
-| `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.12 s |
-| `propertyNames: {"maxLength": 20}` | 1,000,000 members | valid | 0.21 s |
-| Afterglow's `env` (`additionalProperties` with `anyOf`, `propertyNames`) | 300,000 members | valid | 0.10 s |
-| `contains` that no item matches | 4,000,000 integers | one line | 0.23 s |
-| `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.26 s |
-| `allOf` of 200 `properties` and `unevaluatedProperties` | 50,000 members | valid | 0.38 s |
-| `uniqueItems` | 1,000,000 distinct integers (31 MB of keys) | valid | 0.12 s |
-| `uniqueItems` | 1,000,000 equal objects | one line | 0.23 s |
-| `uniqueItems` | 2,100,000 items (past 64 MiB of keys) | too large to check | at once |
+| `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.08 s |
+| `allOf` of 50 `additionalProperties` | 300,000 members named with CJK characters | too large to check | 0.47 s |
+| `propertyNames: {"maxLength": 20}` | 1,000,000 members | valid | 0.17 s |
+| `propertyNames: {"maxLength": 50}` | 300,000 members of 40 CJK characters | valid | 0.09 s |
+| Afterglow's `env` without its `maxProperties` (`additionalProperties` with `anyOf`, `propertyNames`) | 300,000 members | valid | 0.08 s |
+| `contains` that no item matches | 4,000,000 integers | one line | 0.24 s |
+| `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.27 s |
+| `allOf` of 200 `properties` and `unevaluatedProperties` | 50,000 members | valid | 0.20 s |
+| `uniqueItems` | 1,000,000 distinct integers (32 MB of keys) | valid | 0.12 s |
+| `uniqueItems` | 1,000,000 equal objects | one line | 0.41 s |
+| `uniqueItems` | 300,000 distinct CJK strings | valid | 0.05 s |
+| `uniqueItems`, items chosen for one hash under `QT_HASH_SEED=0` | 400,000 pairs | valid | 0.61 s |
+| the same | 550,000 pairs | too large to check | 0.57 s |
+| `uniqueItems` | 2,100,000 items (past 64 MiB of keys) | too large to check | 0.04 s |
 | a list of lists through `items` and `$ref` | 1000 levels | valid | 0.001 s |
-| `{"type": "object"}` | 8,000,000 nested arrays | too large to check (the walk before the check) | 0.40 s |
+| `{"type": "object"}` | 5,500,000 empty arrays (16 MiB) | valid | 0.13 s |
 
 So a valid list of 6.6 million small integers under `items: {"type":
 "integer"}` is checked, and one of 8 million, the most a 16 MiB line holds,
-is refused after 0.4 s. Each row that ends at the bound took 0.4 s, since
-the units it spent were cheaper than the dearest. A value with more members
-and items than the bound can walk is refused whatever the schema: the walk
-before the check alone charges 3 units for each value, and 5 for an array
-or object. Qt's parser itself takes more time and
-memory for such a line than the check (some 1.2 GB for 8 million nested
-arrays), which the line limit bounds: an application whose tools take no
-long text lowers it with `setMaxLineBytes`.
+is refused after 0.4 s. Each row that ends at the bound took 0.4 to 0.6 s,
+since the units it spent were cheaper than the dearest. Items chosen for
+one hash need the seed, which a model does not know. With the random seed
+of a running server their hashes differ, and 550,000 such pairs are valid
+in 0.13 s. The walk before the check charges 3 units for each value, and
+5 for an array or an object, so the most values that a 16 MiB line holds
+are walked in some 28 million units. Qt's parser takes time and memory for
+such a line too (some 130 MB for 5.5 million empty arrays), which the line
+limit bounds. An application whose tools take no long text lowers it with
+`setMaxLineBytes`.
 
 Before the check, the server refuses what a handler would read
 differently from the check, or what a reply cannot carry, with a line for
@@ -441,7 +476,7 @@ application asks for it, and one server at a time holds them. The server
 puts back what it found as soon as it ends without waiting for its replies
 (a signal, a closed or failed output), before the cancel callbacks run,
 unless another handler was installed since. A signal during a slow callback
-or teardown then has its usual effect: the second one after a signal, and
+or teardown then has its usual effect, the second one after a signal and
 the first one after a closed or failed output. After the end of stdin or a
 failed read the server keeps the signals while its replies drain, so that a
 signal cuts the wait short, and puts them back at its finish (at the latest
@@ -510,8 +545,8 @@ depends on what stdout is.
 MCP schemas are JSON Schema 2020-12 unless they name another dialect, and
 clients read them that way. The library checks arguments and structured
 content in 2020-12 with a checker of its own (`src/mcpschema*.cpp`), on
-Qt's JSON as the handler reads it: names and strings are compared code
-unit by code unit, U+0000 included, and numbers by their value. A client
+Qt's JSON as the handler reads it. Names and strings are compared
+character by character, U+0000 included, and numbers by their value. A client
 must read 2020-12 and need not read another dialect, so `addTool` refuses
 a `$schema` other than `https://json-schema.org/draft/2020-12/schema`
 (with or without an empty fragment), and a `$schema` anywhere but at the
@@ -522,9 +557,9 @@ argument, and a warning).
 | | Keywords |
 |---|---|
 | Checked | `type`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `required`, `dependentRequired`, `properties`, `additionalProperties`, `propertyNames`, `dependentSchemas`, `prefixItems`, `items` (one schema), `contains`, `minContains`, `maxContains`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `unevaluatedProperties`, `unevaluatedItems`, `$ref` (within the schema), `$defs`, `$anchor`, `$schema` (2020-12, at the root), and `patternProperties` when it is empty |
-| Annotations, never checked | `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `contentMediaType`, `contentEncoding`, `contentSchema`, `format`. 2020-12 makes `format` an annotation unless a schema asks for the format vocabulary, and a client reads it so: the server lets `"format": "email"` pass any string. The value of each is checked for its type, and `contentSchema` must be a schema's form, an object or a boolean, but is never compiled, and a `$ref` cannot point into it. |
-| Refused: regular expressions | `pattern`, and `patternProperties` that is not empty. A regular expression engine run on text that the model chose is a risk of its own, which the server does not take: the recursion of some engines grows with the text, backtracking can take forever, and engines differ on UTF-16 code units and code points. Use `enum`, or check the value in the handler. |
-| Refused: references | A `$ref` that leaves the schema (another document, the meta-schema): the server fetches nothing. A `$ref` that leads back to its own schema without descending into the value, through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `dependentSchemas` or another `$ref`, which no check could finish. `$id`, `$dynamicRef`, `$dynamicAnchor` and `$vocabulary`. |
+| Annotations, never checked | `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `contentMediaType`, `contentEncoding`, `contentSchema`, `format`. 2020-12 makes `format` an annotation unless a schema asks for the format vocabulary, and a client reads it so. The server lets `"format": "email"` pass any string. The value of each is checked for its type. `contentSchema` is checked as any subschema is, by the same rules, as a client that reads the meta-schema checks it, but it is never applied, and a `$ref` cannot lead into it. |
+| Refused: regular expressions | `pattern`, and `patternProperties` that is not empty. A regular expression engine run on text that the model chose is a risk of its own, which the server does not take. The recursion of some engines grows with the text, backtracking can take forever, and engines differ on UTF-16 code units and code points. Use `enum`, or check the value in the handler. |
+| Refused: references | A `$ref` that leaves the schema (another document, the meta-schema), since the server fetches nothing. A `$ref` that leads back to its own schema without descending into the value, through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `dependentSchemas` or another `$ref`, which would recurse without end, wherever it is, in a subschema that no value reaches too. Without a loop, a chain of more than 3000 subschemas applied to the same value through `$ref`, and more than 20 million subschemas applied to the same value counting every branch (two `$ref` to the same schema at each of 23 levels), which would stop the check of any value that reaches them. `$id`, `$dynamicRef`, `$dynamicAnchor` and `$vocabulary`. |
 | Refused: other drafts | `definitions` (use `$defs`), `dependencies` (use `dependentRequired` or `dependentSchemas`), `additionalItems` (use `items` beside `prefixItems`), `$recursiveRef`, `$recursiveAnchor`, and `items` as an array (use `prefixItems`) |
 | Refused: other | every other keyword |
 
@@ -540,11 +575,11 @@ when it holds.
 A `$ref` is `#` (the whole schema), `#` and a JSON pointer, or `#` and an
 `$anchor`. A pointer is percent-decoded and must then be UTF-8, its
 characters percent-encoded where a URI cannot hold them
-(`#/$defs/a%20b`), and it must lead to a subschema through the keywords
-that hold subschemas: `#/required` and `#/properties/a/enum/0` are refused.
-An anchor (letters, digits, `-`, `_` and `.`, starting with a letter or
-`_`, as 2020-12 has it) is compared as it is written: `#%66oo` does not
-name the anchor `foo`. A `$ref` may lead to a boolean schema, and into
+(`#/$defs/a%20b`), with no `~` but in `~0` and `~1`. It must lead to a
+subschema through the keywords that hold subschemas, so `#/required` and
+`#/properties/a/enum/0` are refused. An anchor (letters, digits, `-`, `_`
+and `.`, starting with a letter or `_`, as 2020-12 has it) is compared as
+it is written, so `#%66oo` does not name the anchor `foo`. A `$ref` may lead to a boolean schema, and into
 `items` beside `prefixItems`. A `$ref` may recurse through a keyword that
 descends into the value (`properties`, `items`, `additionalProperties`, and
 so on), and the bound of the check keeps a schema that doubles its work at
@@ -552,14 +587,22 @@ each level from going on.
 
 Numbers compare exactly. An integral number of the schema or the
 arguments that fits a 64-bit integer is held as one, any other as a
-double, and an integer and a double compare exactly too: so
+double, and an integer and a double compare exactly too. So
 `"maximum": 9007199254740993` refuses 9007199254740994, and
 9223372036854775807 is below an `exclusiveMaximum` of 2^63. `const`,
 `enum` and `uniqueItems` take 1 and 1.0 for the same value, never `true`
-and 1, and objects with the same members in any order. `uniqueItems` sorts
-the items, by a hash and then by value, so it takes O(n log n) whatever
-their number, and its line names the first item that repeats an earlier
-one. `multipleOf` divides exactly when it is an integer: 10^17 is not a
+and 1, and objects with the same members in any order, whatever the order
+in which Qt keeps them. An object built in C++ keeps its members in the
+order of their UTF-16 code units, and a parsed one in that of their code
+points, which differ for U+E000 to U+FFFF and the characters past U+FFFF.
+`required`, `dependentRequired` and `dependentSchemas` look names up in an
+index of their own as well, since `QJsonObject::contains()` misses names
+in an object that a handler built from a parsed one and then added to.
+`uniqueItems` sorts the items by a hash and then by value, so it takes
+O(n log n) whatever their number, and its line names the first item that
+repeats an earlier one. The hash is keyed by Qt's global seed, random in
+each process unless `QT_HASH_SEED` is 0, so a model cannot choose items
+whose hashes are the same. `multipleOf` divides exactly when it is an integer: 10^17 is not a
 multiple of 3, and 9223372036854775807 is one of 7. A `multipleOf` with a
 fraction divides as doubles, as Python's `jsonschema` and JavaScript
 validators do, and the value passes when the quotient is a whole number:
@@ -576,7 +619,7 @@ greater than 0. `required` and each list of `dependentRequired` may not
 name a property twice. Names in `properties`, `required`,
 `dependentRequired`, `dependentSchemas` and `$defs`, and the strings and
 member names in `enum` and `const`, may not hold an unpaired UTF-16
-surrogate: no argument that holds one gets to the check, and no URI
+surrogate. No argument that holds one gets to the check, and no URI
 reaches such a name. A number
 in `enum`, `const` or a bound must be finite. A Draft 4 boolean
 `exclusiveMinimum` and an unknown type name are refused as well. Names
@@ -586,7 +629,7 @@ keywords. A tool without an input schema takes no arguments, as with
 `{"type": "object", "additionalProperties": false}`.
 
 A schema of more than 10000 subschemas, or with subschemas nested more
-than 256 deep, is refused: a tool's schema goes to the model with every
+than 256 deep, is refused. A tool's schema goes to the model with every
 `tools/list`, and Afterglow's largest has some sixty. The compile keeps
 for each subschema its parent and one token, not its path, and takes time
 in proportion to the schema. Measured in a release build: 9999 empty
@@ -599,8 +642,10 @@ and an `enum` of 100,000 strings (1.2 MB) in 24 ms. A megabyte of schema
 - `QtCore`. No QtGui, QtQml or QtNetwork, so a server inside a command-line
   program pulls in nothing more. The JSON Schema checker is the library's
   own, so there is nothing else to build, install or license. A build
-  directory from the jsoncons days that has `PHOSPHORMCP_USE_SYSTEM_JSONCONS`
-  in its cache gets a warning, and the entry is removed.
+  directory from the jsoncons days keeps `PHOSPHORMCP_USE_SYSTEM_JSONCONS`
+  in its cache. The entry is removed whatever its value, with a warning
+  unless it is `AUTO`, the default, in any case. The jsoncons entries that
+  phosphor-fsloader reads too, such as `JSONCONS_INCLUDE_DIR`, stay.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
