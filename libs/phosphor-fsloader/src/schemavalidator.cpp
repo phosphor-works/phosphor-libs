@@ -773,11 +773,41 @@ std::optional<std::string> invalidAdditionalProperty(const jsonschema::validatio
     return text.substr(head.size(), text.size() - head.size() - tail.size());
 }
 
+// Whether jsoncons reached a message through a dependentSchemas keyword. Its
+// evaluation path is a list of keywords, where properties, patternProperties,
+// allOf, anyOf, oneOf and prefixItems are each followed by a member name or
+// an index (and dependentSchemas by nothing): a property of that name is not
+// the keyword.
+bool isBelowDependentSchemas(const jsoncons::jsonpointer::json_pointer& evalPath)
+{
+    for (auto token = evalPath.begin(); token != evalPath.end(); ++token) {
+        if (*token == "dependentSchemas") {
+            return true;
+        }
+        if (*token == "properties" || *token == "patternProperties" || *token == "allOf" || *token == "anyOf"
+            || *token == "oneOf" || *token == "prefixItems") {
+            if (++token == evalPath.end()) {
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 // Finds the member `name` of the object at `message`'s instance location and
 // rechecks it. Adds nothing when there is no such member.
+//
+// Nor below dependentSchemas. jsoncons validates a dependentSchemas subschema
+// against the same object but appends the name of the member that triggered
+// it to the instance location, so the location names that member's value,
+// and a member found there is not the one that failed. Such a member keeps
+// jsoncons' line only.
 void recheckMember(const Report& report, const jsonschema::validation_message& message, const std::string& name,
                    const QString& memberPath, const QString& prefix)
 {
+    if (isBelowDependentSchemas(message.eval_path())) {
+        return;
+    }
     std::error_code ec;
     const Json& object = jsoncons::jsonpointer::get(report.instance, message.instance_location(), ec);
     if (ec || !object.is_object()) {

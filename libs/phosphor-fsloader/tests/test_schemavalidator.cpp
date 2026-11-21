@@ -665,6 +665,31 @@ private Q_SLOTS:
                  QStringLiteral("additionalProperties: additionalProperties: additionalProperties: "
                                 "additionalProperties: Additional property 'e' found but was "
                                 "invalid."));
+
+        // Below dependentSchemas, jsoncons appends the name of the member
+        // that triggered it to the location of the object it validates, so
+        // the location names that member's value. A member that failed there
+        // keeps jsoncons' line only, and no reason is read from the wrong
+        // value: the member "a" failed, an object, and "/a/a" holds 5, which
+        // the recheck reported as "Expected string, found integer".
+        const SchemaValidator dependent(
+            QByteArrayLiteral(R"({"dependentSchemas": {"a": {"additionalProperties": {"type": "string"}}}})"));
+        QVERIFY(dependent.isValid());
+        const auto triggered = dependent.validate(parse(R"({"a": {"a": 5}})"));
+        QVERIFY(triggered.has_value());
+        QCOMPARE(triggered->size(), 1);
+        QCOMPARE(triggered->first().path, QStringLiteral("/a/a"));
+        QCOMPARE(triggered->first().message, QStringLiteral("Additional property 'a' found but was invalid."));
+        // A property named "dependentSchemas" is not the keyword: its member
+        // is rechecked.
+        const SchemaValidator named(
+            QByteArrayLiteral(R"({"properties": {"dependentSchemas": {"additionalProperties": {"type": "string"}}}})"));
+        QVERIFY(named.isValid());
+        const auto reasons = named.validate(parse(R"({"dependentSchemas": {"k": 1}})"));
+        QVERIFY(reasons.has_value());
+        QCOMPARE(reasons->size(), 2);
+        QCOMPARE(reasons->last().path, QStringLiteral("/dependentSchemas/k"));
+        QCOMPARE(reasons->last().message, QStringLiteral("additionalProperties: Expected string, found integer"));
     }
 
     void unknownKeywordsAreIgnored()

@@ -113,8 +113,12 @@ public:
         /// subschema is reported below the member that triggered it, also
         /// jsoncons' way: with @c {"dependentSchemas": {"a": {"properties":
         /// {"c": {"type": "string"}}}}}, the document @c {"a": 1, "c": 2}
-        /// fails at "/a/c", not "/c". The characters that could forge a log
-        /// line are escaped in it, as in @c message.
+        /// fails at "/a/c", not "/c". A member that fails an
+        /// @c additionalProperties subschema below @c dependentSchemas keeps
+        /// jsoncons' line only, without the reasons @c message describes,
+        /// since that location does not name the object validated. The
+        /// characters that could forge a log line are escaped in the path, as
+        /// in @c message.
         QString path;
 
         /// Human-readable description of why the node failed. The reasons

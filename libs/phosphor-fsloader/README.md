@@ -285,9 +285,12 @@ parse(mesh->bytes);
   (`anyOf/1: ...`). So do the reasons a member failed an
   `additionalProperties` subschema, which jsoncons does not give: the member
   is checked against that subschema again, down to four such subschemas one
-  inside another, and each reason is prefixed `additionalProperties: `. A failed `dependentSchemas` subschema is reported
-  below the member that triggered it (`/a/c` for member `c`, when `a`
-  triggered it), as jsoncons reports it.
+  inside another, and each reason is prefixed `additionalProperties: `.
+- A failed `dependentSchemas` subschema is reported below the member that
+  triggered it (`/a/c` for member `c`, when `a` triggered it), as jsoncons
+  reports it. A member that fails an `additionalProperties` subschema there
+  keeps jsoncons' line only, since that location does not name the object
+  validated.
 - In a path or a message, each C0 and C1 control character, DEL, U+2028,
   U+2029 and each bidirectional control (U+202A to U+202E, U+2066 to U+2069)
   is written as `\uXXXX`, so a member name or a quoted string from a data
