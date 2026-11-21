@@ -245,7 +245,9 @@ parse(mesh->bytes);
   `additionalItems`, `$recursiveRef`, `$recursiveAnchor`, an array under
   `items`). It is checked against the 2020-12 meta-schema when it is
   constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there,
-  with the meta-schema's most specific reason.
+  with the meta-schema's most specific reason, inside up to four maps
+  (`$defs`, `properties`, `patternProperties`, `dependentSchemas`) one inside
+  another. For a member of a fifth, the reason is only that it was invalid.
   A refused schema refuses every document, with the reason.
 - References stay within the schema: a `$ref` is `#`, `#/<JSON pointer>` or
   `#<anchor>`, not percent-encoded, and names one of its subschemas; an

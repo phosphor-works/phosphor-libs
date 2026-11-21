@@ -207,9 +207,12 @@ public:
      *         100th, the reasons of a failed @c additionalProperties member
      *         are not looked for, so the count holds what jsoncons reported.
      *         A validator whose schema was refused always returns a
-     *         one-element list, whose message says why (for a schema the
-     *         meta-schema refuses, its most specific reason, at the node of
-     *         the schema it names).
+     *         one-element list, whose message says why. For a schema the
+     *         meta-schema refuses, that is its most specific reason, at the
+     *         node of the schema it names, inside up to four maps (@c $defs,
+     *         @c properties, @c patternProperties, @c dependentSchemas) one
+     *         inside another. For a member of a fifth, it is only that the
+     *         member was invalid.
      */
     [[nodiscard]] std::optional<QList<Error>> validate(const QJsonValue& document) const;
 

@@ -51,7 +51,8 @@ constexpr qsizetype kMaxErrors = 100;
 /// and a member that fails inside it is rechecked in turn, which validates a
 /// part of that value once more: without a bound, a chain of members nested
 /// N deep would be validated about N times. Rechecks stop at this many
-/// additionalProperties subschemas, one inside another.
+/// additionalProperties subschemas, one inside another, and the meta-schema
+/// check of a schema at as many maps.
 constexpr int kMaxRecheckDepth = 4;
 /// How many compiled rechecks a validator keeps for later validate() calls.
 /// Each is a copy of the whole schema, compiled, so they take at most this
@@ -1018,7 +1019,13 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
             if (map.empty() || !isSubschemaMapKeyword(fromUtf8(*map.rbegin()))) {
                 return;
             }
-            // A schema is small and checked once: no depth is too deep.
+            // A recheck validates the member's subschemas again, so without a
+            // bound a schema of maps nested N deep and refused at the bottom
+            // was validated about N times: 108 s to refuse one 500 deep in a
+            // Release build. A member below the bound keeps jsoncons' line.
+            if (depth > kMaxRecheckDepth) {
+                return;
+            }
             const Report inner{problems, Messages::Leaves, member, memberPath, &metaRecheck, depth};
             metaSchema().validate(member, [&inner, &prefix](const jsonschema::validation_message& reason) {
                 addMessage(inner, reason, prefix);

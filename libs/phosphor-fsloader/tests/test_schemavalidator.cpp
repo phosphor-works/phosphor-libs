@@ -767,8 +767,11 @@ private Q_SLOTS:
         // "x"} compiled, and then every validate() went down its catch path.
         // The 2020-12 meta-schema now refuses each at construction, with the
         // most specific reason it gives. Below properties and $defs that is
-        // the reason the member failed, not only that it was invalid; below
-        // dependentRequired it is only that.
+        // the reason the member failed, not only that it was invalid. Below
+        // dependentRequired it is only that, and so it is below four maps one
+        // inside another, where the rechecks for the reason stop: a schema
+        // of maps nested 500 deep took 108 s to refuse in Release, and takes
+        // 5 s.
         const struct
         {
             const char* schema;
@@ -786,6 +789,12 @@ private Q_SLOTS:
              "/dependentSchemas/a/not: Expected object, or boolean, found integer (and 7 more)"},
             {R"({"dependentRequired": {"a": "b"}})",
              "/dependentRequired/a: Additional property 'a' found but was invalid."},
+            {R"({"properties": {"a": {"properties": {"a": {"properties": {"a": {"properties": {"a": {"type": 1}}}}}}}}})",
+             "/properties/a/properties/a/properties/a/properties/a/type: '1' is not a valid enum value. (and 1 more)"},
+            {R"({"properties": {"a": {"properties": {"a": {"properties": {"a": {"properties": {"a": {"properties": )"
+             R"({"a": {"type": 1}}}}}}}}}}})",
+             "/properties/a/properties/a/properties/a/properties/a/properties/a: Additional property 'a' found but "
+             "was invalid."},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
