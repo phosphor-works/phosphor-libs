@@ -1122,6 +1122,11 @@ private Q_SLOTS:
         row("uniqueItems nested", "{'uniqueItems': true}", "[[1, [true]], [1, [1]]]", true);
         row("uniqueItems nested refuses", "{'uniqueItems': true}", "[[1, {'x': [2.0]}], [1, {'x': [2]}]]", false);
         row("uniqueItems false", "{'uniqueItems': false}", "[1, 1]", true);
+        row("uniqueItems objects of other names", "{'uniqueItems': true}", "[{'a': 1}, {'b': 1}]", true);
+        // The server's hashes of these two numbers are the same (they are
+        // sorted by hash, then by value).
+        row("uniqueItems with equal hashes", "{'uniqueItems': true}", "[4602678819172646975, 0.5]", true);
+        row("const object of other names", "{'const': {'a': 1}}", "{'b': 1}", false);
         row("uniqueItems qint64 max and 2^63", "{'uniqueItems': true}", "[9223372036854775807, 9223372036854775808]",
             true);
         row("dependentRequired", "{'dependentRequired': {'a': ['b']}}", "{'a': 1}", false);
@@ -1575,6 +1580,9 @@ private Q_SLOTS:
             "- arguments/v: does not match the schema");
         row("uniqueItems", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
             "{'v': [1, 2, 'a', 2.0, 1]}", "- arguments/v: must have unique items, and items 1 and 3 are equal");
+        row("uniqueItems with equal hashes", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
+            "{'v': [4602678819172646975, 0.5, 4602678819172646975]}",
+            "- arguments/v: must have unique items, and items 0 and 2 are equal");
         row("uniqueItems of objects", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
             "{'v': [{'a': [1], 'b': 2}, {'b': 2.0, 'a': [1.0]}]}",
             "- arguments/v: must have unique items, and items 0 and 1 are equal");
