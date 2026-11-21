@@ -1061,6 +1061,9 @@ private Q_SLOTS:
         row("exclusiveMaximum refuses", "{'exclusiveMaximum': 1}", "1", false);
         row("minLength", "{'type': 'string', 'minLength': 2}", "'a'", false);
         row("minLength accepts", "{'type': 'string', 'minLength': 2}", "'ab'", true);
+        // Raw UTF-8, which Qt keeps as it is: fewer characters than bytes.
+        row("minLength of UTF-8", "{'type': 'string', 'minLength': 4}", "'\xE4\xB8\xAD\xE4\xB8\xAD'", false);
+        row("minLength of UTF-8 accepts", "{'type': 'string', 'minLength': 5}", "'aaaa\xE4\xB8\xAD'", true);
         // Departure: an unpaired surrogate, which Python counts as a
         // character.
         row("minLength unpaired surrogate", "{'type': 'string', 'minLength': 1}", "'\\ud800'", false);
@@ -1203,7 +1206,8 @@ private Q_SLOTS:
         row("uniqueItems nested refuses", "{'uniqueItems': true}", "[[1, {'x': [2.0]}], [1, {'x': [2]}]]", false);
         row("uniqueItems false", "{'uniqueItems': false}", "[1, 1]", true);
         row("uniqueItems objects of other names", "{'uniqueItems': true}", "[{'a': 1}, {'b': 1}]", true);
-        // An integer and a double with bits alike. The hashes are keyed,
+        // An integer whose bits are those of 0.5 as a double (0x3FE0...)
+        // but for the last six (0x3FE000000000003F). The hashes are keyed,
         // and test_phosphor_mcp_checkwork sorts items whose hashes are the
         // same.
         row("uniqueItems with bits alike", "{'uniqueItems': true}", "[4602678819172646975, 0.5]", true);

@@ -405,6 +405,17 @@ private Q_SLOTS:
                 }()
                 + "]",
             (3 + 2) + 256 * 3 + (2 + 2 + 1) + 256 * 1 + 256 * (1 + 4), 256 * UniqueBytes);
+        // The keys of one array released before those of the next.
+        const QByteArray distinct = "[" + [] {
+            QByteArray list;
+            for (int i = 0; i < 256; ++i) {
+                list += (i ? "," : "") + QByteArray::number(i);
+            }
+            return list;
+        }() + "]";
+        row("uniqueItems twice", "{'items': {'uniqueItems': true}}", "[" + distinct + "," + distinct + "]",
+            (3 + 2) + 2 * ((3 + 2) + 256 * 3) + (2 + 2 + 1) + 2 * ((2 + 2 + 1) + 256 * 1 + 256 * (1 + 4)),
+            256 * UniqueBytes);
         // Strings hashed (3 for 16 code units), and two equal items compared
         // (1 for 16 code units).
         row("uniqueItems of strings", "{'uniqueItems': true}", repeat("'" + A32 + "'", 256),
@@ -551,6 +562,8 @@ private Q_SLOTS:
         // Strings: equal 1 for each 16 code units of the two, by code point
         // 2, hashed 3 for each 16 of the first.
         row("strings", item("'" + A32 + "'"), item("'" + A32 + "'"), 1 + 4, 1 + 2 * 4, 1 + 3 * 2);
+        // Both in UTF-8: 66 bytes, compared as they are.
+        row("strings, UTF-8", item("'" + Cjk11 + "'"), item("'" + Cjk11 + "'"), 1 + 4, 1 + 2 * 4, 1 + 3 * 2);
         // Where one is UTF-8 and the other not, Qt decodes as it compares:
         // 4 for each 16 code units of the two (33 bytes and 11 code units).
         row("strings, UTF-8 and UTF-16", item("'" + Cjk11 + "'"), item("'" + QByteArray("\\u4e2d").repeated(11) + "'"),
@@ -870,6 +883,23 @@ private Q_SLOTS:
         QCOMPARE(counts.work,
                  qint64(3 * (3 + 2 + 2 + 4) + 3 + 3 * (4 + 1 + 1 + 6) + 2 * (4 + 1) + 2 + (2 + 1) + 24
                         + 2 * (2 + 400000 / 16 + 400000 / 16) + 2));
+
+        // The same with names of UTF-8, which holds a code unit of UTF-16 in
+        // three bytes at the least: seven names of 140,000 CJK characters
+        // decoded (2, 4 for each 16 bytes, and 1 for each 16 code units
+        // scanned), and an eighth of 80,000 that would not fit, begun (2).
+        // Counted as bytes, or as a code unit for each four, it would be
+        // decoded first.
+        QByteArray cjkValue = "1";
+        for (int i = 0; i < 8; ++i) {
+            const QByteArray name = QByteArray("\xE4\xB8\xAD").repeated(i == 0 ? 80000 : 140000);
+            cjkValue = "{'" + name + QByteArray::number(i) + "': " + cjkValue + "}";
+        }
+        const Counts cjkCounts = count(deep, parse(cjkValue));
+        QCOMPARE(cjkCounts.lines, counts.lines);
+        QCOMPARE(cjkCounts.work,
+                 qint64(8 * (3 + 2 + 2 + 4) + 3 + 8 * (4 + 1 + 1 + 6) + 7 * (4 + 1) + 2 + (2 + 1) + 24
+                        + 7 * (2 + 4 * (420001 / 16) + 140001 / 16) + 2));
     }
 };
 
