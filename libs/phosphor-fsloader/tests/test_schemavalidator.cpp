@@ -498,6 +498,25 @@ private Q_SLOTS:
             {"{\"properties\": {\"a\": {\"$id\": \"urn:other\"}}}",
              "/properties/a/$id: $id below the root is not supported, because this validator resolves $ref within one "
              "resource"},
+            // jsoncons does not compile contentSchema (2020-12 makes it an
+            // annotation), so nothing below it can be named, by pointer or
+            // by anchor.
+            {"{\"contentSchema\": {\"type\": \"string\"}, \"properties\": {\"x\": {\"$ref\": \"#/contentSchema\"}}}",
+             "/properties/x/$ref: $ref \"#/contentSchema\" names a subschema of contentSchema, which jsoncons does "
+             "not compile (2020-12 makes contentSchema an annotation)"},
+            {"{\"contentSchema\": {\"$anchor\": \"a\"}, \"properties\": {\"x\": {\"$ref\": \"#a\"}}}",
+             "/properties/x/$ref: $ref \"#a\" names a subschema of contentSchema, which jsoncons does not compile "
+             "(2020-12 makes contentSchema an annotation)"},
+            // jsoncons compiles items beside prefixItems as additionalItems,
+            // so nothing below it can be named by its pointer.
+            {"{\"prefixItems\": [{}], \"items\": {\"properties\": {\"a\": {}}}, \"properties\": {\"x\": "
+             "{\"$ref\": \"#/items/properties/a\"}}}",
+             "/properties/x/$ref: $ref \"#/items/properties/a\" names a subschema of items beside prefixItems by its "
+             "pointer, which jsoncons does not resolve (an $anchor there resolves)"},
+            {"{\"$defs\": {\"d\": {\"prefixItems\": [{}], \"items\": {}}}, \"properties\": {\"x\": {\"$ref\": "
+             "\"#/$defs/d/items\"}}}",
+             "/properties/x/$ref: $ref \"#/$defs/d/items\" names a subschema of items beside prefixItems by its "
+             "pointer, which jsoncons does not resolve (an $anchor there resolves)"},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
@@ -506,16 +525,18 @@ private Q_SLOTS:
                      QStringLiteral("schema refused at ") + QString::fromUtf8(row.refusal));
         }
 
-        // A $ref into contentSchema is followed here, since contentSchema
-        // holds a subschema. jsoncons does not compile it (2020-12 makes it
-        // an annotation) and throws on the $ref: the one schema known to
-        // reach the constructor's catch, refused with what jsoncons says.
-        const SchemaValidator content(QByteArrayLiteral(
-            "{\"contentSchema\": {\"type\": \"string\"}, \"properties\": {\"x\": {\"$ref\": \"#/contentSchema\"}}}"));
-        QVERIFY(!content.isValid());
-        QCOMPARE(content.validate(QJsonValue(1)).value().first().message,
-                 QStringLiteral("schema failed to compile: Don't know how to load JSON Schema "
-                                "'https://jsoncons.com#/contentSchema'"));
+        // An $anchor below items beside prefixItems resolves, and so does a
+        // pointer into items without prefixItems or into prefixItems.
+        const SchemaValidator items(QByteArrayLiteral(
+            "{\"prefixItems\": [{\"type\": \"integer\"}], \"items\": {\"$anchor\": \"s\", \"type\": "
+            "\"string\"}, \"properties\": {\"a\": {\"$ref\": \"#s\"}, \"b\": {\"$ref\": \"#/prefixItems/0\"}, "
+            "\"c\": {\"$ref\": \"#/$defs/plain/items\"}}, \"$defs\": {\"plain\": {\"items\": {\"maximum\": "
+            "1}}}}"));
+        QVERIFY(items.isValid());
+        QVERIFY(!items.validate(parse(R"({"a": "x", "b": 1, "c": 1})")).has_value());
+        const auto itemErrors = items.validate(parse(R"({"a": 1, "b": "x", "c": 2})"));
+        QVERIFY(itemErrors.has_value());
+        QCOMPARE(itemErrors->size(), 3);
 
         // An $id at the root is allowed, and a $ref by pointer or by anchor
         // resolves within the schema.
@@ -729,6 +750,25 @@ private Q_SLOTS:
         QCOMPARE(reasons->size(), 2);
         QCOMPARE(reasons->last().path, QStringLiteral("/dependentSchemas/k"));
         QCOMPARE(reasons->last().message, QStringLiteral("additionalProperties: Expected string, found integer"));
+
+        // jsoncons files the subschemas of "a{b" and "a%7Bb" under one
+        // percent-encoded pointer, so a recheck of either could compile the
+        // other and give its reason (here "Expected integer"). A member that
+        // fails either keeps jsoncons' line only.
+        const SchemaValidator shared(
+            QByteArrayLiteral("{\"properties\": {\"a{b\": {\"additionalProperties\": {\"maxLength\": 1}}, \"a%7Bb\": "
+                              "{\"additionalProperties\": {\"type\": \"integer\"}}}}"));
+        QVERIFY(shared.isValid());
+        for (const QString& name : {QStringLiteral("a{b"), QStringLiteral("a%7Bb")}) {
+            QJsonObject inner;
+            inner.insert(QStringLiteral("k"), QStringLiteral("abc"));
+            QJsonObject document;
+            document.insert(name, inner);
+            const auto lines = shared.validate(document);
+            QVERIFY(lines.has_value());
+            QCOMPARE(lines->size(), 1);
+            QCOMPARE(lines->first().message, QStringLiteral("Additional property 'k' found but was invalid."));
+        }
     }
 
     void rechecksAreKeptAcrossCallsAndThreads()
@@ -995,11 +1035,30 @@ private Q_SLOTS:
         QCOMPARE(errors->at(99).path, QStringLiteral("/99"));
         QVERIFY(errors->last().path.isEmpty());
         QCOMPARE(errors->last().message, QStringLiteral("and 50 more errors not listed"));
+        // 101 failing items: the count is of one.
+        while (items.size() > 101) {
+            items.removeLast();
+        }
+        errors = validator.validate(items);
+        QVERIFY(errors.has_value());
+        QCOMPARE(errors->last().message, QStringLiteral("and 1 more error not listed"));
 
         const SchemaValidator pattern(QByteArrayLiteral(R"({"pattern": "^a+$"})"));
         errors = pattern.validate(QJsonValue(QString(10000, u'b')));
         QVERIFY(errors.has_value());
         QCOMPARE(errors->first().message.size(), 501);
+        QVERIFY(errors->first().message.endsWith(QChar(0x2026)));
+
+        // A refused schema's message holds a path and a message of its own,
+        // and is cut to the same length.
+        const QByteArray name(490, 'n');
+        const SchemaValidator refused("{\"properties\": {\"" + name + "\": {\"$ref\": \"#/$defs/" + QByteArray(480, 'r')
+                                      + "\"}}}");
+        QVERIFY(!refused.isValid());
+        errors = refused.validate(QJsonValue(1));
+        QVERIFY(errors.has_value());
+        QCOMPARE(errors->first().message.size(), 501);
+        QVERIFY(errors->first().message.startsWith(QStringLiteral("schema refused at /properties/nnn")));
         QVERIFY(errors->first().message.endsWith(QChar(0x2026)));
     }
 

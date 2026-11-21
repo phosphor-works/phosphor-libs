@@ -52,9 +52,12 @@ namespace PhosphorFsLoader {
  *   @c "#", @c "#/<JSON pointer>" or @c "#<anchor>", not percent-encoded,
  *   and names one of the schema's subschemas. An @c $anchor is defined once.
  *   @c $id is allowed at the root only, and @c $dynamicRef and
- *   @c $dynamicAnchor are refused. A @c $ref into @c contentSchema is
- *   refused with what jsoncons says, since jsoncons does not compile
- *   @c contentSchema (2020-12 makes it an annotation).
+ *   @c $dynamicAnchor are refused. jsoncons cannot resolve two kinds of
+ *   @c $ref, which are refused too. One names a subschema of
+ *   @c contentSchema, which jsoncons does not compile (2020-12 makes it an
+ *   annotation). The other names a subschema of @c items beside
+ *   @c prefixItems by its pointer, since jsoncons compiles that @c items as
+ *   @c additionalItems (an @c $anchor there resolves).
  * - No @c $ref that leads back to its own schema without descending into the
  *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
  *   @c then and @c else beside an @c if (2020-12 ignores them without one),
@@ -119,9 +122,11 @@ public:
         /// fails at "/a/c", not "/c". A member that fails an
         /// @c additionalProperties subschema below @c dependentSchemas keeps
         /// jsoncons' line only, without the reasons @c message describes,
-        /// since that location does not name the object validated. The
-        /// characters that could forge a log line are escaped in the path, as
-        /// in @c message.
+        /// since that location does not name the object validated. So does
+        /// one that fails a subschema whose name, once percent-decoded, is
+        /// another's of the same map ("a{b" and "a%7Bb"), which jsoncons
+        /// files under one name. The characters that could forge a log line
+        /// are escaped in the path, as in @c message.
         QString path;
 
         /// Human-readable description of why the node failed. The reasons
