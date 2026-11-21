@@ -203,9 +203,9 @@ private Q_SLOTS:
         QTest::newRow("lists 500 deep, wrong") << lists << "{'a': " + nest(500, "[", "]").replace("1", "'x'") + "}"
                                                << QStringLiteral("- arguments/a") + QStringLiteral("/0").repeated(500)
                 + QStringLiteral(": must be of type array or integer");
-        // ...and through four $ref more, five: 3000 subschemas deep are 600
-        // levels, with the root and "a". The stack bound stops a build with
-        // sanitizers sooner.
+        // ...and through three $ref more, five subschemas for each level, so
+        // that 3000 subschemas deep are 600 levels, with the root and "a".
+        // The stack bound stops a build with sanitizers sooner.
         const QJsonObject chained = parse(
             "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'type': ['array', "
             "'integer'], 'items': {'$ref': '#/$defs/b'}}, 'b': {'$ref': '#/$defs/c'}, 'c': {'$ref': '#/$defs/d'}, "

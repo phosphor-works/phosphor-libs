@@ -1025,9 +1025,11 @@ private Q_SLOTS:
         row("integer or string 1e19", "{'type': ['integer', 'string']}", "1e19", false);
         // A number, which the handler reads with toDouble().
         row("integer or number 1e19", "{'type': ['integer', 'number']}", "1e19", true);
-        // Qt's parser rounds these to a double, as the README says: the
-        // first arrives as qint64's minimum, the second as 2^63. Departure:
-        // Python reads the second exactly, an integer.
+        // Qt's parser rounds these to a double, as the README says. The first
+        // arrives as qint64's minimum, and the second as 2^63, past qint64.
+        // Departure: Python reads the second as the float 2^63 too, and lets
+        // it pass, since 2020-12 takes a number without a fraction for an
+        // integer.
         row("integer rounded to qint64 min", "{'type': 'integer'}", "-9223372036854775809", true);
         row("integer qint64 max with a fraction", "{'type': 'integer'}", "9223372036854775807.0", false);
         row("number", "{'type': 'number'}", "2.5", true);
