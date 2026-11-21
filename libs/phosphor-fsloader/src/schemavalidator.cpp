@@ -406,10 +406,11 @@ QString otherDraftKeyword(const QString& keyword)
 QString unsupportedKeyword(const QString& keyword, const PointerPath& path)
 {
     if (keyword == QLatin1StringView("$dynamicRef") || keyword == QLatin1StringView("$dynamicAnchor")) {
-        return QStringLiteral("is not supported: this validator resolves only $ref and $anchor");
+        return QStringLiteral("is not supported, because this validator resolves only $ref and $anchor");
     }
     if (keyword == QLatin1StringView("$id") && path.depth() > 1) {
-        return QStringLiteral("below the root is not supported: this validator resolves $ref within one resource");
+        return QStringLiteral(
+            "below the root is not supported, because this validator resolves $ref within one resource");
     }
     return QString();
 }
@@ -534,8 +535,9 @@ void checkDialect(const QJsonValue& schema, PointerPath& path, ErrorList& errors
 //
 // The references followed are those jsoncons resolves within the schema: "#",
 // "#/<JSON pointer>" and "#<$anchor>". Anything else is refused, so that no
-// reference jsoncons follows is missed here: one to another document (which
-// it would not load anyway), one that is percent-encoded (it compares
+// reference jsoncons follows is missed here: one that is not a fragment
+// (which names another document, which it would not load anyway, or this one
+// through its $id), one that is percent-encoded (it compares
 // fragments as written, which a decoded comparison here could misread), and
 // one that names no subschema. $dynamicRef and $id below the root are refused
 // before this runs, by checkDialect, and so are U+0000 and unpaired surrogates,
@@ -548,6 +550,10 @@ public:
     // schema without descending.
     void run(const QJsonObject& root, ErrorList& errors)
     {
+        m_rootId = root.value(QLatin1StringView("$id")).toString();
+        if (m_rootId.endsWith(QChar(u'#'))) {
+            m_rootId.chop(1);
+        }
         add(root, QString(), errors);
         if (!errors.isEmpty()) {
             return;
@@ -627,10 +633,18 @@ private:
         const QString reference = value.toString();
         const QString at = node.pointer + QStringLiteral("/$ref");
         if (!reference.startsWith(QChar(u'#'))) {
-            errors.add(at,
-                       QStringLiteral("$ref \"%1\" names another document, and this validator resolves only "
-                                      "\"#\", \"#/<JSON pointer>\" and \"#<$anchor>\" within the schema")
-                           .arg(reference));
+            if (!m_rootId.isEmpty() && (reference == m_rootId || reference.startsWith(m_rootId + QChar(u'#')))) {
+                const QString fragment = reference.mid(m_rootId.size());
+                errors.add(at,
+                           QStringLiteral("$ref \"%1\" names this schema through its $id, which this validator does "
+                                          "not resolve (write \"%2\")")
+                               .arg(reference, fragment.isEmpty() ? QStringLiteral("#") : fragment));
+            } else {
+                errors.add(at,
+                           QStringLiteral("$ref \"%1\" does not start with \"#\", and this validator resolves only "
+                                          "\"#\", \"#/<JSON pointer>\" and \"#<$anchor>\" within the schema")
+                               .arg(reference));
+            }
             return;
         }
         if (reference.contains(QChar(u'%'))) {
@@ -720,6 +734,8 @@ private:
     std::vector<Node> m_nodes;
     QHash<QString, int> m_byPointer;
     QHash<QString, int> m_anchors;
+    // The root's $id, without the empty fragment it may end with.
+    QString m_rootId;
 };
 
 jsonschema::evaluation_options evaluationOptions()

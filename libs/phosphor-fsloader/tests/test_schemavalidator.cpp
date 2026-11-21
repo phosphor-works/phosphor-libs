@@ -471,8 +471,18 @@ private Q_SLOTS:
             const char* refusal;
         } rows[] = {
             {"{\"$ref\": \"other.json\"}",
-             "/$ref: $ref \"other.json\" names another document, and this validator resolves only \"#\", "
+             "/$ref: $ref \"other.json\" does not start with \"#\", and this validator resolves only \"#\", "
              "\"#/<JSON pointer>\" and \"#<$anchor>\" within the schema"},
+            {"{\"$id\": \"urn:example:s\", \"$defs\": {\"a\": {}}, \"properties\": {\"x\": {\"$ref\": "
+             "\"urn:example:s#/$defs/a\"}}}",
+             "/properties/x/$ref: $ref \"urn:example:s#/$defs/a\" names this schema through its $id, which this "
+             "validator does not resolve (write \"#/$defs/a\")"},
+            {"{\"$id\": \"urn:example:s#\", \"properties\": {\"x\": {\"$ref\": \"urn:example:s\"}}}",
+             "/properties/x/$ref: $ref \"urn:example:s\" names this schema through its $id, which this validator "
+             "does not resolve (write \"#\")"},
+            {"{\"$id\": \"urn:example:s\", \"properties\": {\"x\": {\"$ref\": \"urn:example:st#\"}}}",
+             "/properties/x/$ref: $ref \"urn:example:st#\" does not start with \"#\", and this validator resolves "
+             "only \"#\", \"#/<JSON pointer>\" and \"#<$anchor>\" within the schema"},
             {"{\"$defs\": {\"a b\": {}}, \"$ref\": \"#/$defs/a%20b\"}",
              "/$ref: $ref \"#/$defs/a%20b\" is percent-encoded, which this validator does not resolve"},
             {"{\"properties\": {\"a\": {\"$ref\": \"#/$defs/b\"}}}",
@@ -481,12 +491,12 @@ private Q_SLOTS:
             {"{\"$defs\": {\"a\": {\"$anchor\": \"x\"}, \"b\": {\"$anchor\": \"x\"}}}",
              "/$defs/b/$anchor: $anchor \"x\" is defined at /$defs/a too"},
             {"{\"$dynamicRef\": \"#meta\"}",
-             "/$dynamicRef: $dynamicRef is not supported: this validator resolves only $ref and $anchor"},
+             "/$dynamicRef: $dynamicRef is not supported, because this validator resolves only $ref and $anchor"},
             {"{\"$defs\": {\"a\": {\"$dynamicAnchor\": \"meta\"}}}",
-             "/$defs/a/$dynamicAnchor: $dynamicAnchor is not supported: this validator resolves only $ref and "
+             "/$defs/a/$dynamicAnchor: $dynamicAnchor is not supported, because this validator resolves only $ref and "
              "$anchor"},
             {"{\"properties\": {\"a\": {\"$id\": \"urn:other\"}}}",
-             "/properties/a/$id: $id below the root is not supported: this validator resolves $ref within one "
+             "/properties/a/$id: $id below the root is not supported, because this validator resolves $ref within one "
              "resource"},
         };
         for (const auto& row : rows) {
