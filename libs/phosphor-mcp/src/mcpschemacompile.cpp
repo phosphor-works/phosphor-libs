@@ -909,10 +909,12 @@ QString SchemaBuilder::resolveReference(int index)
 // Without a loop, $ref still lets a schema apply more subschemas to one
 // value than its nesting shows: a chain of $ref longer than the check goes
 // deep, or two $ref to the same schema at each of forty levels, 2^40 of
-// them. Each such schema would stop the check of a value that reaches it, so
-// it is refused too: a chain of more than MaxCheckDepth subschemas applied to
-// the same value, or more of them than the bound of the work lets the check
-// apply, counting every branch.
+// them. Such a schema would stop the check of a value that takes its
+// branches, so it is refused too: a chain of more than MaxCheckDepth
+// subschemas applied to the same value, or more of them than the bound of
+// the work lets the check apply. The count takes every branch of allOf,
+// anyOf, oneOf and dependentSchemas, not and if, and the larger of then and
+// else, since a value takes one of the two.
 QString SchemaBuilder::findCycle()
 {
     enum class Mark : quint8 {
@@ -929,8 +931,8 @@ QString SchemaBuilder::findCycle()
     std::vector<Mark> marks(m_nodes.size(), Mark::New);
     std::vector<Frame> stack;
     // For each node done: the longest chain of subschemas that it applies
-    // to its value, itself included, and how many it applies in all, up to
-    // the most that the work allows.
+    // to its value, itself included, and how many it applies at the most,
+    // up to the most that the work allows.
     constexpr qint64 MostApplied = MaxWork / UnitsPerApply;
     std::vector<int> chain(m_nodes.size(), 0);
     std::vector<qint64> applied(m_nodes.size(), 0);
@@ -959,12 +961,31 @@ QString SchemaBuilder::findCycle()
             Frame& top = stack.back();
             if (top.position == top.next.size()) {
                 const std::size_t done = std::size_t(top.node);
+                const Node& node = m_nodes[done];
                 int longest = 0;
-                qint64 total = 1;
                 for (const int next : top.next) {
                     longest = std::max(longest, chain[std::size_t(next)]);
-                    total = std::min(MostApplied + 1, total + applied[std::size_t(next)]);
                 }
+                qint64 total = 1;
+                const auto add = [&](qint64 count) {
+                    total = std::min(MostApplied + 1, total + count);
+                };
+                const auto count = [&](int child) -> qint64 {
+                    return child >= 0 ? applied[std::size_t(child)] : 0;
+                };
+                for (const auto* branches : {&node.allOf, &node.anyOf, &node.oneOf}) {
+                    for (const int branch : *branches) {
+                        add(count(branch));
+                    }
+                }
+                for (const auto& dependent : node.dependentSchemas) {
+                    add(count(dependent.second));
+                }
+                add(count(node.notSchema));
+                add(count(node.ifSchema));
+                add(std::max(count(node.thenSchema), count(node.elseSchema)));
+                add(count(node.ref));
+                // The subschemas of inPlace(), but for then and else.
                 chain[done] = longest + 1;
                 applied[done] = total;
                 if (chain[done] > MaxCheckDepth) {
@@ -975,8 +996,8 @@ QString SchemaBuilder::findCycle()
                 }
                 if (total > MostApplied) {
                     return QStringLiteral(
-                               "%1: applies more than %2 subschemas to the same value, counting every branch, which "
-                               "the server does not check")
+                               "%1: applies more than %2 subschemas to the same value, counting each branch that a "
+                               "value can take, which the server does not check")
                         .arg(nodePointer(m_nodes, top.node), QString::number(MostApplied));
                 }
                 marks[done] = Mark::Done;
