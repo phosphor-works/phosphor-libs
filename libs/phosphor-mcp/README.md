@@ -157,100 +157,131 @@ path. Request 4 of the session above gets this text:
 
 ```
 Invalid arguments for tool count_words:
-- arguments/text: must be of type string
 - arguments/lang: is not a known property
+- arguments/text: must be of type string
 ```
 
 The text lists at most ten errors, and then a line such as
 `- arguments: and 3 more errors`. Arguments with more than a thousand
-errors, or whose errors' paths come to more than 1 Mi UTF-16 code units
-together, get one line instead, which says that they do not match and are
-too large for the server to list each error. The check stops there.
+distinct errors, or whose errors' paths come to more than 1 Mi UTF-16 code
+units together, get one line instead, which says that they do not match and
+are too large for the server to list each error. The check stops there.
+The places refused before the check (below) are errors like the others
+here: ten listed, a thousand counted.
 
 Each line comes from the keyword that failed, its value in the schema and
-the arguments, never from jsoncons' English: `must be of type integer`,
-`is required`, `is not a known property`, `must be at most 5 characters
-long`, `must be one of the values of enum`, `is required when "card" is
-present`, `must have an item that matches contains`, and so on. A number in
-a line is written as the schema has it, the same in every locale. A failed
-`anyOf`, or a `oneOf` that matches no branch, lists the errors of each
-branch and then its own line. A `oneOf` that matches more than one branch
-says so alone, and a failed `allOf` lists the errors of its branches. A
-`false` subschema has no reason of its own, so its line names the place and
-says that it does not match the schema. jsoncons names neither the member
-that the schema of `additionalProperties` refuses nor the name that
-`propertyNames` refuses, so the server checks each one again on its own,
-and lists its errors at its place (`the property name must be at most 256
-characters long`). jsoncons reports only the first item that a `false`
-`items` or `unevaluatedItems` refuses, and the first property that
-`unevaluatedProperties: false` refuses. It counts an item or a property that
-fails another keyword as unevaluated, so `unevaluatedItems` and
-`unevaluatedProperties` add a line for it, where Python's jsonschema, for
-one, does not. The arguments fail either way.
+the arguments: `must be of type integer`, `is required`, `is not a known
+property`, `must be at most 5 characters long`, `must be one of the values
+of enum`, `is required when "card" is present`, `must have an item that
+matches contains`, `must have unique items, and items 1 and 3 are equal`,
+and so on. A number in a line is written the same in every locale: an
+integer with all its digits (9223372036854775808 too, below 10^21), any
+other number in its shortest form that reads back as the same double
+(`0.1`, `1e-07`, `1e+300`).
 
-The check itself has a bound. Before it the server works out, from the
-schema and the arguments, how much jsoncons would do, and refuses arguments
-whose check could take more than about a second in a release build, or keep
-more than 128 MB of errors, with the line
-`- arguments: is too large for the server to check against the schema`.
-jsoncons does more than the size of the arguments suggests. It copies its
-path in the schema and the place in the value into each keyword it checks,
-so the work grows with the depth, and it keeps a copy of that path for each
-level of the walk, so the memory grows with the square of the depth. It
-keeps every error inside an `allOf`, `anyOf`, `oneOf`, `not`, `contains`,
-the condition of an `if` and the schema of `additionalProperties` until it
-knows whether they pass, and copies those errors twice more for each
-`allOf`, `anyOf` and `oneOf` around them. A `$ref` to a schema that holds it
-is followed anew at each level of the value, so two of them double the work
-at each level. The server reckons each of these, and refuses a schema
-path longer than 1024 tokens (a value 512 levels deep under a schema that
-recurses through `items` and `$ref`). Measured in a release build, as the
-CPU time of the check of the largest arguments that the bound lets through:
+The members of an object come in the order of their names, each with the
+errors of its name and of its value, then the properties that are
+missing. The keywords of a subschema come before the subschemas that it
+applies to the same value. A failed `anyOf`, or a `oneOf` that matches no
+branch, lists the errors of each branch and then its own line. A `oneOf`
+that matches more than one branch says so alone, and a failed `allOf`
+lists the errors of its branches. A `false` subschema has no reason of its
+own, so its line names the place and says that it does not match the
+schema. What `not`, the condition of an `if` and the items that `contains`
+tries find is never listed, since it is no error of the arguments.
 
-| Schema and arguments | Largest checked | Time |
-|---|---|---|
-| `items: {"type": "integer"}`, valid integers | 2,480,000 integers | 0.58 s |
-| `items` with four keywords, valid integers | 914,000 integers | 0.42 s |
-| `items: {"type": "string"}`, every item wrong | 2,480,000 integers | 0.22 s |
-| `anyOf` of an array of strings and null, every item wrong | 53,000 integers (the 128 MB of errors) | 0.05 s |
-| the same in three `anyOf` | 19,900 integers | 0.05 s |
-| `oneOf` of 20 arrays, every item wrong | 2,700 integers | 0.06 s |
-| `allOf` of 50 `maxLength`, text that mixes ASCII and CJK | 4 MB | 0.62 s |
-| `minLength` and `maxLength` | 16 MB | 0.12 s |
-| `enum` of 3000 strings, a CJK string | 15 MB | 0.03 s |
-| `anyOf` of four `enum`, an array of strings (each `enum` writes it out) | 566,000 strings | 0.20 s |
-| `required` of 1000 names, objects without them | 19,800 objects | 0.01 s |
-| `additionalProperties: {"type": "integer"}` | 167,000 members | 0.09 s |
-| Afterglow's `env` (`additionalProperties` with `anyOf`, `propertyNames`), every member wrong | 22,300 members | 0.01 s |
-| `propertyNames` with an `anyOf`, every name wrong | 28,000 names | 0.01 s |
-| `contains` that no item matches | 87,000 integers | 0.06 s |
-| `prefixItems`, `items` and `unevaluatedItems` | 1,660,000 integers | 0.40 s |
-| `allOf`, `anyOf` and `unevaluatedProperties: false` | 2,000,000 members | 0.70 s |
-| a `default` of 2000 members, objects without the property | 5,800 objects | 0.21 s |
-| `items` through `$ref` to `{"not": {}}` | 890,000 integers | 0.10 s |
-| a list of lists through `items` and `$ref` | 510 levels | 0.03 s |
-| `allOf`, `$ref`, `anyOf` and `items` at each level | 40 levels | 0.01 s |
-| two `$ref` to the schema at each level | 9 levels | 0.01 s |
+Each member that `additionalProperties: false` or `unevaluatedProperties:
+false` refuses has its line, and so has each item that `items: false` or
+`unevaluatedItems: false` refuses. The errors that the schema of
+`additionalProperties`, `unevaluatedProperties` or `unevaluatedItems`
+finds are listed at the member or item, and those of `propertyNames` at
+the member, as `the property name must be at most 256 characters long`. A
+member or item that a keyword of the schema evaluated is not called
+unknown, even when its value failed there, nor is one that a failed
+branch of a failed `anyOf` or `oneOf` declares: the arguments fail either
+way, and the line that matters is the one about its value.
 
-So a valid list of 2.5 million small integers is checked, and one of three
-million, about 1.3 s of jsoncons' work, is refused. The bound is reckoned
-for the worst case, so arguments whose `anyOf` matches at its first branch
-are refused as soon as those that fail every branch. Before any check the
-server converts the arguments once into jsoncons' JSON, whatever the schema,
-which takes 0.14 to 0.65 s of CPU time for a 16 MiB line, the most for many
-small objects. That work grows with the longest line the server reads, so an
-application whose tools take no long text lowers it with `setMaxLineBytes`.
+The check itself has a bound, and it is exact: the checker counts what it
+does as it goes, and stops the moment the count passes the bound, with the
+line `- arguments: is too large for the server to check against the
+schema`. Nothing is estimated beforehand. Each step is charged by what it
+costs (a value walked, a subschema applied to a value, a keyword checked,
+a member's name read, a name looked up, sixteen characters of a string
+read or compared, a word of an annotation set merged, an error built), in
+units of at most about 22 ns of a release build (as measured on the
+shapes below), and the bound is 40 million units: under a second
+whatever the schema and the arguments. The memory the check holds beyond
+the arguments and the schema (the sets of members and items that
+`unevaluatedProperties` and `unevaluatedItems` read, the keys that
+`uniqueItems` sorts) is counted too, up to 64 MiB, and the list of errors
+is capped as above. A check is also stopped 3000 subschemas deep, and
+when its own frames take 4 MiB of stack, half of what a Linux thread has
+by default: a list nested 1000
+levels deep through `items` and `$ref` is checked in a release build, one
+whose levels each pass through four more `$ref` is refused at 500 levels.
 
-A string or a member name with an unpaired UTF-16 surrogate, and an
-integral number outside the range of a 64-bit integer (1e19, 2^63, 1e300),
-are refused whatever the schema says, since jsoncons, which reads UTF-8 and
-64-bit integers, would read them differently from the handler. So is a value
-nested more than 1024 levels deep, which only a handler can build. The range
-is checked on the number as Qt's JSON parser reads it, and the parser rounds
-a number outside it, and one written with a fraction or an exponent, to the
-nearest double. So -9223372036854775809, down to -9223372036854776832,
-passes as -9223372036854775808, the value that the handler reads, and
-9223372036854775807.0 is refused as 2^63.
+Measured in a release build (CPU time of `validate()`, the walk before the
+check included, on the arguments as Qt's parser left them), for the
+largest arguments in a line of 16 MiB, or as many as the bound lets
+through. `test_phosphor_mcp_bounds` has rows of these shapes, at sizes
+that a debug build with sanitizers checks in seconds.
+
+| Schema and arguments | Arguments | Result | Time |
+|---|---|---|---|
+| `items: {"type": "integer"}` | 6,600,000 integers | valid | 0.42 s |
+| the same | 6,700,000 integers | too large to check | 0.43 s |
+| the same | 8,000,000 integers (16 MiB) | too large to check | 0.39 s |
+| `items` with `type`, `minimum`, `maximum`, `multipleOf` | 4,000,000 integers | valid | 0.34 s |
+| `items: {"type": "string"}` | 8,000,000 integers, every one wrong | too large to list | 0.14 s |
+| two `properties` | 1,000,000 objects | valid | 0.44 s |
+| two `$ref` to the schema at each level (2^depth subschemas) | 40 levels | too large to check | 0.41 s |
+| `anyOf` in `anyOf` 50 deep, the last branch matching | 100,000 integers | valid | 0.27 s |
+| `allOf` of 50 `maxLength` | 4,000,000 CJK characters | valid | 0.02 s |
+| `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.01 s |
+| `const` of an object of 100 members | 20,000 such objects | valid | 0.27 s |
+| `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.01 s |
+| `dependentRequired` of 2000 triggers | 1,000,000 empty objects | valid | 0.07 s |
+| `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.12 s |
+| `propertyNames: {"maxLength": 20}` | 1,000,000 members | valid | 0.21 s |
+| Afterglow's `env` (`additionalProperties` with `anyOf`, `propertyNames`) | 300,000 members | valid | 0.10 s |
+| `contains` that no item matches | 4,000,000 integers | one line | 0.23 s |
+| `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.26 s |
+| `allOf` of 200 `properties` and `unevaluatedProperties` | 50,000 members | valid | 0.38 s |
+| `uniqueItems` | 1,000,000 distinct integers (31 MB of keys) | valid | 0.12 s |
+| `uniqueItems` | 1,000,000 equal objects | one line | 0.23 s |
+| `uniqueItems` | 2,100,000 items (past 64 MiB of keys) | too large to check | at once |
+| a list of lists through `items` and `$ref` | 1000 levels | valid | 0.001 s |
+| `{"type": "object"}` | 8,000,000 nested arrays | too large to check (the walk before the check) | 0.40 s |
+
+So a valid list of 6.6 million small integers under `items: {"type":
+"integer"}` is checked, and one of 8 million, the most a 16 MiB line holds,
+is refused after 0.4 s. Each row that ends at the bound took 0.4 s, since
+the units it spent were cheaper than the dearest. A value with more members
+and items than the bound can walk is refused whatever the schema: the walk
+before the check alone charges 3 units for each value, and 5 for an array
+or object. Qt's parser itself takes more time and
+memory for such a line than the check (some 1.2 GB for 8 million nested
+arrays), which the line limit bounds: an application whose tools take no
+long text lowers it with `setMaxLineBytes`.
+
+Before the check, the server refuses what a handler would read
+differently from the check, or what a reply cannot carry, with a line for
+each place: a string or a member name with an unpaired UTF-16 surrogate
+(the reply writes it as U+FFFD), a number that is not finite (only a
+handler can build one, in structured content), and a value nested more
+than 1024 levels deep (only a handler can build one too). A number
+without a fraction outside the range of a 64-bit integer (1e19, 2^63,
+1e300) is an integer in JSON Schema, but `QJsonValue::toInteger()` gives a
+handler 0 for it, so `"type": "integer"` refuses it with `must be from
+-9223372036854775808 to 9223372036854775807`. Where the schema allows a
+`number`, it passes, and the handler reads it with `toDouble()`. So
+`{"not": {"type": "integer"}}` lets 1e19 through, where a client that
+reads 2020-12 refuses it. Qt's parser reads a number outside the range of
+qint64, and one written with a fraction or an exponent, as the nearest
+double, and the check sees what the handler sees. So
+-9223372036854775809, down to -9223372036854776832, passes as
+-9223372036854775808, 9223372036854775807.0 is refused as 2^63, and
+9223372036854775809 is 2^63 against an `exclusiveMinimum` of 2^63.
 
 A notification (a message with a method and no id) is never answered, not
 even when its params are wrong. The server ignores every notification but
@@ -478,87 +509,108 @@ depends on what stdout is.
 
 MCP schemas are JSON Schema 2020-12 unless they name another dialect, and
 clients read them that way. The library checks arguments and structured
-content with jsoncons, in 2020-12. A client must read 2020-12 and need not
-read another dialect, so `addTool` refuses a `$schema` other than
-`https://json-schema.org/draft/2020-12/schema` (with or without an empty
-fragment). It refuses as well the keywords that the server cannot check as
-2020-12 says, each with the reason and the JSON pointer of the place
-(`error` argument, and a warning).
+content in 2020-12 with a checker of its own (`src/mcpschema*.cpp`), on
+Qt's JSON as the handler reads it: names and strings are compared code
+unit by code unit, U+0000 included, and numbers by their value. A client
+must read 2020-12 and need not read another dialect, so `addTool` refuses
+a `$schema` other than `https://json-schema.org/draft/2020-12/schema`
+(with or without an empty fragment), and a `$schema` anywhere but at the
+root. It refuses as well the keywords that the server does not check,
+each with the reason and the JSON pointer of the place (`error`
+argument, and a warning).
 
 | | Keywords |
 |---|---|
-| Checked | `type`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`, `required`, `dependentRequired`, `properties`, `additionalProperties`, `propertyNames`, `prefixItems`, `items` (one schema), `contains`, `minContains`, `maxContains`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `unevaluatedProperties` (`true` or `false`), `unevaluatedItems`, `$ref` (within the schema), `$defs`, `$anchor`, `$schema` (2020-12, at the root) |
-| Annotations, never checked | `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `contentMediaType`, `contentEncoding`, `format`. 2020-12 makes `format` an annotation unless a schema asks for the format vocabulary, and a client reads it so: the server lets `"format": "email"` pass any string. |
-| Refused: regular expressions | `pattern`, `patternProperties`. jsoncons matches them with `std::regex`, whose libstdc++ executor recurses once for each character. A string of a few hundred thousand characters overflows the stack and kills the process (GCC bug 86164), and nested quantifiers take forever. It also matches UTF-8 bytes, where a client matches UTF-16 code units (`^.{1,5}$` and "naïve" differ). Use `enum`, or check the value in the handler. |
-| Refused: cost | `uniqueItems`. jsoncons compares every pair of items, so 20000 items take seconds. Check for repeated items in the handler. |
-| Refused: jsoncons gets them wrong | `dependentSchemas`, whose subschemas jsoncons files under one name and whose errors it reports at a member that does not exist ([jsoncons#816](https://github.com/danielaparker/jsoncons/issues/816); use `if`, `required` and `then`). `unevaluatedProperties` with a schema, whose errors jsoncons reports at the place of the object instead of each property ([jsoncons#817](https://github.com/danielaparker/jsoncons/issues/817)). `unevaluatedProperties` and `unevaluatedItems` beside a `not` that applies to the same value, since jsoncons counts what the subschema of `not` evaluated, where 2020-12 drops it ([jsoncons#814](https://github.com/danielaparker/jsoncons/issues/814)). `unevaluatedItems` beside a `contains`, since jsoncons counts the items of a nested array that `contains` matched as items of the outer one ([jsoncons#815](https://github.com/danielaparker/jsoncons/issues/815)). |
-| Refused: references | A `$ref` that leaves the schema (another document, the meta-schema): the server fetches nothing. A `$ref` that leads back to its own schema without descending into the value, through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else` or another `$ref`, which jsoncons would follow until the stack overflows ([jsoncons#813](https://github.com/danielaparker/jsoncons/issues/813)). A `$ref` to a boolean schema, or into an `items` beside `prefixItems`, which jsoncons files under another name. `$id`, `$dynamicRef`, `$dynamicAnchor` and `$vocabulary`. |
-| Refused: other drafts | `definitions` (use `$defs`), `dependencies` (use `dependentRequired`), `additionalItems` (use `items` beside `prefixItems`), `$recursiveRef`, `$recursiveAnchor`, and `items` as an array (use `prefixItems`) |
+| Checked | `type`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `required`, `dependentRequired`, `properties`, `additionalProperties`, `propertyNames`, `dependentSchemas`, `prefixItems`, `items` (one schema), `contains`, `minContains`, `maxContains`, `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `unevaluatedProperties`, `unevaluatedItems`, `$ref` (within the schema), `$defs`, `$anchor`, `$schema` (2020-12, at the root), and `patternProperties` when it is empty |
+| Annotations, never checked | `title`, `description`, `default`, `examples`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `contentMediaType`, `contentEncoding`, `contentSchema`, `format`. 2020-12 makes `format` an annotation unless a schema asks for the format vocabulary, and a client reads it so: the server lets `"format": "email"` pass any string. The value of each is checked for its type, and `contentSchema` must be a schema's form, an object or a boolean, but is never compiled, and a `$ref` cannot point into it. |
+| Refused: regular expressions | `pattern`, and `patternProperties` that is not empty. A regular expression engine run on text that the model chose is a risk of its own, which the server does not take: the recursion of some engines grows with the text, backtracking can take forever, and engines differ on UTF-16 code units and code points. Use `enum`, or check the value in the handler. |
+| Refused: references | A `$ref` that leaves the schema (another document, the meta-schema): the server fetches nothing. A `$ref` that leads back to its own schema without descending into the value, through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`, `else`, `dependentSchemas` or another `$ref`, which no check could finish. `$id`, `$dynamicRef`, `$dynamicAnchor` and `$vocabulary`. |
+| Refused: other drafts | `definitions` (use `$defs`), `dependencies` (use `dependentRequired` or `dependentSchemas`), `additionalItems` (use `items` beside `prefixItems`), `$recursiveRef`, `$recursiveAnchor`, and `items` as an array (use `prefixItems`) |
 | Refused: other | every other keyword |
 
-A `$ref` is `#` (the whole schema), `#` and a JSON pointer, its characters
-percent-encoded where a URI cannot hold them (`#/$defs/a%20b`), or `#` and
-an `$anchor`. jsoncons takes an `$anchor` that starts with a letter only,
-where 2020-12 also allows "_" ([jsoncons#818](https://github.com/danielaparker/jsoncons/issues/818)). The server resolves
-each `$ref` itself, since jsoncons cannot reach a name that holds a "%"
-([jsoncons#819](https://github.com/danielaparker/jsoncons/issues/819)). A `$ref` may recurse through a keyword that
-descends into the value (`properties`, `items`, `additionalProperties`, and
-so on), and the work bound above keeps such a schema from doubling its work
-without end.
+`unevaluatedProperties` and `unevaluatedItems` read the annotations of
+2020-12: the members that `properties`, `additionalProperties`,
+`unevaluatedProperties` and `dependentSchemas` evaluated, and the items
+that `prefixItems`, `items`, `contains` and `unevaluatedItems` evaluated,
+in the subschema and in those it applies to the same value. A subschema
+that failed evaluates nothing, nor does `not`, nor the branch of `if`
+that was not taken, and the condition of `if` evaluates what it matched
+when it holds.
 
-Integers compare exactly, with 64 bits: the server holds every integral
-number of the schema and the arguments that fits a 64-bit integer as one. So
-`"maximum": 9007199254740993` refuses 9007199254740994. jsoncons compares an
-integer with another number as doubles, which round the largest 64-bit
-integers to 2^63, so 2^63 itself is refused in a bound, `enum` or `const`.
-jsoncons checks `multipleOf` with doubles and lets a value pass within one
-unit in its last place of a multiple. So 2.5 fails `multipleOf: 1`, 0.3
-passes `multipleOf: 0.1` (which a client that divides doubles may refuse),
-and an integer of 2^53 or more in magnitude under `multipleOf` is refused,
-since doubles do not tell 10^17 from a multiple of 3.
+A `$ref` is `#` (the whole schema), `#` and a JSON pointer, or `#` and an
+`$anchor`. A pointer is percent-decoded and must then be UTF-8, its
+characters percent-encoded where a URI cannot hold them
+(`#/$defs/a%20b`), and it must lead to a subschema through the keywords
+that hold subschemas: `#/required` and `#/properties/a/enum/0` are refused.
+An anchor (letters, digits, `-`, `_` and `.`, starting with a letter or
+`_`, as 2020-12 has it) is compared as it is written: `#%66oo` does not
+name the anchor `foo`. A `$ref` may lead to a boolean schema, and into
+`items` beside `prefixItems`. A `$ref` may recurse through a keyword that
+descends into the value (`properties`, `items`, `additionalProperties`, and
+so on), and the bound of the check keeps a schema that doubles its work at
+each level from going on.
+
+Numbers compare exactly. An integral number of the schema or the
+arguments that fits a 64-bit integer is held as one, any other as a
+double, and an integer and a double compare exactly too: so
+`"maximum": 9007199254740993` refuses 9007199254740994, and
+9223372036854775807 is below an `exclusiveMaximum` of 2^63. `const`,
+`enum` and `uniqueItems` take 1 and 1.0 for the same value, never `true`
+and 1, and objects with the same members in any order. `uniqueItems` sorts
+the items, by a hash and then by value, so it takes O(n log n) whatever
+their number, and its line names the first item that repeats an earlier
+one. `multipleOf` divides exactly when it is an integer: 10^17 is not a
+multiple of 3, and 9223372036854775807 is one of 7. A `multipleOf` with a
+fraction divides as doubles, as Python's `jsonschema` and JavaScript
+validators do, and the value passes when the quotient is a whole number:
+0.5 is a multiple of 0.1 (0.5 / 0.1 is 5), and 0.3 is not
+(0.3 / 0.1 is 2.9999999999999996), though both are in decimal. Only when
+the quotient overflows (1e308 against 0.5) is the test made exactly on the
+binary values, as Python does too.
 
 Only the root of an input schema must have `"type": "object"`. The root of
 an output schema may be any type, since structured content may be any JSON
 value. Keyword values are checked too, everywhere below the root. Lengths
 and counts are integers from 0 to 9007199254740991, and `multipleOf` is
-greater than 0. `required` and each list of `dependentRequired` may not name
-a property twice. Names, and the strings in `enum` and `const`, may not
-hold an unpaired UTF-16 surrogate, which UTF-8 cannot hold. A Draft 4
-boolean `exclusiveMinimum` and an unknown type name are refused as well.
-Names inside `properties`, `$defs` and `dependentRequired` and values inside
-`enum`, `const`, `default` and `examples` are data, not keywords. A tool
-without an input schema takes no arguments, as with
+greater than 0. `required` and each list of `dependentRequired` may not
+name a property twice. Names in `properties`, `required`,
+`dependentRequired`, `dependentSchemas` and `$defs`, and the strings and
+member names in `enum` and `const`, may not hold an unpaired UTF-16
+surrogate: no argument that holds one gets to the check, and no URI
+reaches such a name. A number
+in `enum`, `const` or a bound must be finite. A Draft 4 boolean
+`exclusiveMinimum` and an unknown type name are refused as well. Names
+inside `properties`, `$defs`, `dependentRequired` and `dependentSchemas`,
+and values inside `enum`, `const`, `default` and `examples`, are data, not
+keywords. A tool without an input schema takes no arguments, as with
 `{"type": "object", "additionalProperties": false}`.
+
+A schema of more than 10000 subschemas, or with subschemas nested more
+than 256 deep, is refused: a tool's schema goes to the model with every
+`tools/list`, and Afterglow's largest has some sixty. The compile keeps
+for each subschema its parent and one token, not its path, and takes time
+in proportion to the schema. Measured in a release build: 9999 empty
+`properties` compile in 8 ms, 9002 subschemas 251 levels deep in 6 ms,
+and an `enum` of 100,000 strings (1.2 MB) in 24 ms. A megabyte of schema
+900 levels deep is refused at once.
 
 ## Dependencies
 
 - `QtCore`. No QtGui, QtQml or QtNetwork, so a server inside a command-line
-  program pulls in nothing more.
-- jsoncons 1.7.0 or later (header-only, BSL-1.0). By default it comes from
-  the archive that `cmake/PhosphorDependencies.cmake` pins (1.10.0), and its
-  notice then installs as `licenses/phosphor-libs/LICENSE.jsoncons`. With
-  `-DPHOSPHORMCP_USE_SYSTEM_JSONCONS=ON` the system's headers are used, found
-  through `JSONCONS_INCLUDE_DIR`, the cache variable that phosphor-fsloader
-  uses too, and the configure checks the version floor by compiling against
-  them (1.7.0 is the first with `jsonschema::walk_state`). The option's
-  default is `AUTO`, which follows `PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS` at
-  every configure, so phosphor-fsloader's switch moves both libraries to the
-  system's copy. `ON` and `OFF` choose for this library alone. The keyword
-  policy and the lines of the errors were checked against 1.10.0, and an
-  older release may report its errors otherwise, which then read as "does
-  not match the schema". jsoncons is private to the library, and a consumer
-  needs nothing of it.
+  program pulls in nothing more. The JSON Schema checker is the library's
+  own, so there is nothing else to build, install or license. A build
+  directory from the jsoncons days that has `PHOSPHORMCP_USE_SYSTEM_JSONCONS`
+  in its cache gets a warning, and the entry is removed.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
 
 - [`phosphor-fsloader`](../phosphor-fsloader/README.md). It checks JSON files
-  against schemas with the same pinned jsoncons, and this library follows
-  its system switch. The two keep separate validators on purpose. They share
-  only the few calls that drive jsoncons, while this one adds what arguments
-  from a model need: the keywords that jsoncons checks as 2020-12 says, a
-  check of the value before jsoncons sees it, a bound on the work of the
-  check, and a short list of errors in plain words.
+  against schemas too, with jsoncons, for data files that the application
+  ships or a user writes. This library checks arguments that a model
+  chose, so it keeps a checker of its own, with a check before it that
+  refuses what a handler would misread, an exact bound on the work, and a
+  short list of errors in plain words.
 - [`phosphor-ipc`](../phosphor-ipc/README.md). JSON over a Unix socket, for
   scripts and shells that drive a running Phosphor application. This library
   serves an agent that starts the application as a child instead.
