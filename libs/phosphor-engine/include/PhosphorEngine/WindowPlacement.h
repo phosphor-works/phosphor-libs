@@ -111,7 +111,6 @@ struct WindowPlacement
     /// has not been taken.
     int virtualDesktop = 0;
     QString activity; ///< empty = all-activities / unknown
-    WindowKind kind = WindowKind::Unknown;
 
     // ── Per-engine managed state, keyed by engineId() ──
     QHash<QString, EngineSlot> engines;
@@ -244,7 +243,7 @@ struct WindowPlacement
     bool sameContentAs(const WindowPlacement& o) const
     {
         return windowId == o.windowId && appId == o.appId && screenId == o.screenId
-            && virtualDesktop == o.virtualDesktop && activity == o.activity && kind == o.kind && engines == o.engines
+            && virtualDesktop == o.virtualDesktop && activity == o.activity && engines == o.engines
             && freeGeometryByScreen == o.freeGeometryByScreen;
     }
 
@@ -305,7 +304,6 @@ struct WindowPlacement
         if (!activity.isEmpty()) {
             obj[QLatin1String("activity")] = activity;
         }
-        obj[QLatin1String("kind")] = static_cast<int>(kind);
 
         QJsonObject eng;
         for (auto it = engines.constBegin(); it != engines.constEnd(); ++it) {
@@ -387,7 +385,6 @@ struct WindowPlacement
         const int rawDesktop = obj.value(QLatin1String("desktop")).toInt();
         p.virtualDesktop = (rawDesktop > 0 && rawDesktop <= MAX_PLAUSIBLE_VIRTUAL_DESKTOP) ? rawDesktop : 0;
         p.activity = obj.value(QLatin1String("activity")).toString();
-        p.kind = clampWindowKindFromWire(obj.value(QLatin1String("kind")).toInt());
 
         const QJsonObject eng = obj.value(QLatin1String("engines")).toObject();
         for (auto it = eng.constBegin(); it != eng.constEnd(); ++it) {

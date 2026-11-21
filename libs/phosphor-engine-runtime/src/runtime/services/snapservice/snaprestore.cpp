@@ -172,16 +172,11 @@ void SnapService::snapToEmptyZone(const QString& windowId, const QString& window
 // unified WindowPlacementStore via resolveWindowRestore. The old D-Bus slot had
 // no remaining caller (the effect uses resolveWindowRestore).
 
-void SnapService::resolveWindowRestore(const QString& windowId, const QString& screenId, bool sticky, int windowKind,
-                                       int restoreReason, int minWidth, int minHeight, int& snapX, int& snapY,
-                                       int& snapWidth, int& snapHeight, bool& shouldSnap)
+void SnapService::resolveWindowRestore(const QString& windowId, const QString& screenId, bool sticky, int restoreReason,
+                                       int& snapX, int& snapY, int& snapWidth, int& snapHeight, bool& shouldSnap)
 {
     snapX = snapY = snapWidth = snapHeight = 0;
     shouldSnap = false;
-    // Pinned by the API v9 wire signature, accepted and ignored: they sized a
-    // cross-screen tiling reclaim, which the reopen contract removed.
-    Q_UNUSED(minWidth)
-    Q_UNUSED(minHeight)
 
     if (windowId.isEmpty() || screenId.isEmpty()) {
         return;
@@ -361,8 +356,7 @@ void SnapService::resolveWindowRestore(const QString& windowId, const QString& s
                                        : svc->owningModeEngineId(windowId, engineScreen));
     }
 
-    const PhosphorEngine::WindowKind kind = PhosphorEngine::clampWindowKindFromWire(windowKind);
-    SnapResult result = m_engine->resolveWindowRestore(windowId, engineScreen, sticky, kind, reason);
+    SnapResult result = m_engine->resolveWindowRestore(windowId, engineScreen, sticky, reason);
 
     if (!result.shouldSnap) {
         // A window the engine already holds in a zone on the desktop it landed

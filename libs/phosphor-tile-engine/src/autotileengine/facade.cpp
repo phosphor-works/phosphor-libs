@@ -389,7 +389,6 @@ AutotileEngine::capturePlacementForKey(const QString& windowId, const PhosphorEn
             preserved.screenId = key.screenId;
             preserved.virtualDesktop = key.desktop;
             preserved.activity = key.activity;
-            preserved.kind = existing->kind;
             preserved.engines.insert(engineId(), slot);
             return preserved;
         }

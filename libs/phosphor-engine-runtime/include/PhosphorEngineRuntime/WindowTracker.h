@@ -403,18 +403,16 @@ public Q_SLOTS:
     /**
      * Clean up all tracking data for a closed window
      * @param windowId Window ID that was closed
-     * @param windowKind PhosphorEngine::WindowKind wire value (Unknown/Normal/
-     *        Transient). Unused: it gated the pending-restore queue, which was
-     *        removed; kept so the wire signature does not change
      * @param screenId The window's authoritative current screen at close (the effect's
      *        getWindowScreenId). Threaded into the final placement capture so a
      *        window dragged cross-screen and closed records its float-back on the
      *        screen it actually closed on — by close time a cross-screen move has
      *        torn down every engine's tracking, so no capturePlacement can
-     *        report the real screen. Empty = legacy/opt-out.
+     *        report the real screen. Empty when the compositor knows no
+     *        screen for it; the capture then keeps the record's prior screen.
      * @note Call this when KWin reports a window has been closed to prevent memory leaks
      */
-    void windowClosed(const QString& windowId, int windowKind, const QString& screenId = QString());
+    void windowClosed(const QString& windowId, const QString& screenId);
 
     /**
      * Notify daemon that a window was activated/focused
