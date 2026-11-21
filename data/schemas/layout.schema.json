@@ -18,10 +18,10 @@
         },
         "description": { "type": "string" },
         "type": {
-            "description": "Legacy layout-type key. The loader ignores it, so the schema accepts any value."
+            "description": "Legacy layout-type key. The loader ignores it, so the schema puts no constraint on it. Like any number in the file, a number outside the int64 range is still refused by the runtime validator."
         },
         "isSystem": {
-            "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so the schema accepts any value."
+            "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so the schema puts no constraint on it."
         },
         "fixedGeometryInDevicePixels": {
             "type": "boolean",
