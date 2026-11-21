@@ -47,9 +47,10 @@
 #
 # Bumping a pin: change its VERSION, URL, FILE and SHA256 together, with the
 # hash taken from a download you checked, never from whatever the next
-# configure fetched. Then, in PlasmaZones, run scripts/check-conventions.py: its
-# dep-pins rule names every packaging recipe there that does not carry the new
-# pin. It does not name a recipe that still fetches an archive no longer
+# configure fetched. Then, in PlasmaZones, run
+# PHOSPHOR_LIBS_DIR=<this checkout> scripts/check-conventions.py (without it,
+# the check reads the phosphor-libs commit PlasmaZones pins now): its dep-pins
+# rule names every packaging recipe there that does not carry the new pin. It does not name a recipe that still fetches an archive no longer
 # pinned at all, as after replacing one dependency with another, so remove
 # those by hand.
 

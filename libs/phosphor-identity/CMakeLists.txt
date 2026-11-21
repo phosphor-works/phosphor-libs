@@ -24,7 +24,8 @@
 # target exposes the include dir + the Qt6::Core requirement to consumers
 # without producing a build artifact or a runtime dlopen cost.
 
-cmake_minimum_required(VERSION 3.16)
+# 3.23: the headers are declared with target_sources(FILE_SET HEADERS).
+cmake_minimum_required(VERSION 3.23)
 
 set(PHOSPHORIDENTITY_VERSION "0.1.0")
 

@@ -23,11 +23,12 @@
 # config, so it still configures alone from its own directory. Add new
 # libraries under libs/ following the phosphor-<name> convention.
 
-# 3.21: the highest floor among the libraries this file adds (phosphor-control
-# reads PROJECT_IS_TOP_LEVEL). The pinned archives need 3.18, for
-# file(ARCHIVE_EXTRACT) in cmake/PhosphorDependencies.cmake. The presets
-# (CMakePresets.json) need 3.25, which only the cmake --workflow route asks for.
-cmake_minimum_required(VERSION 3.21)
+# 3.23: phosphor-identity, which this file always adds, declares its headers
+# with target_sources(FILE_SET), new in 3.23. The pinned archives need 3.18
+# (file(ARCHIVE_EXTRACT) in cmake/PhosphorDependencies.cmake) and
+# phosphor-control 3.21 (PROJECT_IS_TOP_LEVEL). The presets (CMakePresets.json)
+# need 3.25, and so do the CMake packages of Qt 6.12, which check it themselves.
+cmake_minimum_required(VERSION 3.23)
 
 project(PhosphorLibs VERSION 0.1.0 LANGUAGES C CXX)
 

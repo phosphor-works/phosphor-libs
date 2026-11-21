@@ -18,10 +18,10 @@
         },
         "description": { "type": "string" },
         "type": {
-            "description": "Legacy key from older layouts. The loader ignores it, so any value is accepted."
+            "description": "Legacy layout-type key. The loader ignores it, so the schema accepts any value."
         },
         "isSystem": {
-            "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so any value is accepted."
+            "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so the schema accepts any value."
         },
         "fixedGeometryInDevicePixels": {
             "type": "boolean",

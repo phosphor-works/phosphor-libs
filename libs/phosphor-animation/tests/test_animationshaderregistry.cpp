@@ -38,10 +38,10 @@ void writeMetadata(const QString& dir, const QString& id, const QString& fragSha
     obj.insert(QLatin1String("name"), id);
     obj.insert(QLatin1String("fragmentShader"), fragShader);
     obj.insert(QLatin1String("category"), QStringLiteral("Test"));
-    // Baseline fields required by animation-metadata.schema.json. Tests that
-    // need parameters pass them via `extra` (insert below overrides the empty
-    // default). Keeps every fixture a schema-valid pack now that the registry
-    // validates metadata.json on load.
+    // Baseline fields of a typical pack, so every fixture is a schema-valid
+    // pack now that the registry validates metadata.json on load. Only id,
+    // name and fragmentShader are required. Tests that need parameters pass
+    // them via `extra` (insert below overrides the empty default).
     obj.insert(QLatin1String("description"), QStringLiteral("Test effect"));
     obj.insert(QLatin1String("author"), QStringLiteral("Test"));
     obj.insert(QLatin1String("version"), QStringLiteral("1.0"));
