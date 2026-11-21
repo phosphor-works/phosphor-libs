@@ -169,27 +169,7 @@ void LayoutService::setAllDesktopAssignments(const QVariantMap& assignments)
 
     for (auto it = assignments.begin(); it != assignments.end(); ++it) {
         // Split on '|' delimiter (screen IDs contain colons, so ':' is not safe)
-        int sep = it.key().lastIndexOf(QLatin1Char('|'));
-        if (sep < 0) {
-            // Backward compat: try legacy ':' delimiter for old KCM round-trips.
-            // lastIndexOf is correct here because desktop numbers are always the
-            // last component (e.g., "DP-2:3"), and screen IDs contain colons
-            // (e.g., "DEL:DELL U2722D:115107:3" → last ':' before "3").
-            // Warning: virtual screen IDs (physId/vs:N) also contain ':' — the
-            // numeric guard below may misparse "physId/vs:0" as desktop=0.
-            // This is caught by the virtualDesktop < 1 check on line below.
-            sep = it.key().lastIndexOf(QLatin1Char(':'));
-            // Guard: verify the desktop part is actually a number, not part of a screen ID
-            if (sep > 0) {
-                bool isDesktop = false;
-                it.key().mid(sep + 1).toInt(&isDesktop);
-                if (!isDesktop) {
-                    qCWarning(lcDbusLayout) << "Desktop assignment key has non-numeric desktop part"
-                                            << "with ':' delimiter:" << it.key();
-                    sep = -1;
-                }
-            }
-        }
+        const int sep = it.key().lastIndexOf(QLatin1Char('|'));
         if (sep < 1) {
             qCWarning(lcDbusLayout) << "Invalid desktop assignment key format:" << it.key();
             continue;
@@ -232,16 +212,7 @@ void LayoutService::setAllActivityAssignments(const QVariantMap& assignments)
 
     for (auto it = assignments.begin(); it != assignments.end(); ++it) {
         // Split on '|' delimiter (screen IDs contain colons, so ':' is not safe)
-        int sep = it.key().indexOf(QLatin1Char('|'));
-        if (sep < 0) {
-            // Backward compat: try legacy ':' delimiter for old configs.
-            // Use lastIndexOf because activity IDs are UUIDs (contain hyphens, no colons),
-            // so the last ':' correctly separates "DEL:DELL U2722D:115107:activity-uuid"
-            // into screen ID + activity. For connector-name keys ("DP-2:activity-uuid"),
-            // lastIndexOf also works correctly since there's only one ':'.
-            // New KCM always sends '|', so this path only triggers for pre-migration data.
-            sep = it.key().lastIndexOf(QLatin1Char(':'));
-        }
+        const int sep = it.key().indexOf(QLatin1Char('|'));
         if (sep < 1) {
             qCWarning(lcDbusLayout) << "Invalid activity assignment key format:" << it.key();
             continue;
