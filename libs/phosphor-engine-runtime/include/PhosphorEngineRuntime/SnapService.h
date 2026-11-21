@@ -193,9 +193,6 @@ public Q_SLOTS:
      *        placement-rule / empty-zone / last-zone fallback chain) in one call.
      *        A screen id the daemon does not know (resolveBusScreen answers empty)
      *        gets the no-snap answer and runs nothing.
-     * @param windowKind Structural kind of the opening window (0=Unknown, 1=Normal, 2=Transient).
-     *                   Accepted for wire compatibility and ignored: nothing sets a
-     *                   placement record's kind from a live window, so none carries one.
      * @param restoreReason Why this resolve is running — see
      *                   PhosphorEngine::RestoreReason. Clamped from the wire, so an
      *                   unrecognised value reads as Open. Gates the open claim,
@@ -204,11 +201,9 @@ public Q_SLOTS:
      *                   the engine, where it gates the FIFO, a re-entry re-snap,
      *                   a leaver's rule and the free-size restore of a floated
      *                   open (#1106).
-     * @param minWidth, minHeight Pinned by the v9 signature, accepted and ignored.
      */
-    void resolveWindowRestore(const QString& windowId, const QString& screenId, bool sticky, int windowKind,
-                              int restoreReason, int minWidth, int minHeight, int& snapX, int& snapY, int& snapWidth,
-                              int& snapHeight, bool& shouldSnap);
+    void resolveWindowRestore(const QString& windowId, const QString& screenId, bool sticky, int restoreReason,
+                              int& snapX, int& snapY, int& snapWidth, int& snapHeight, bool& shouldSnap);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Resnap / snap-all D-Bus slots

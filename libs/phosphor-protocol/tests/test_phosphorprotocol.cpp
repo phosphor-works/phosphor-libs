@@ -406,8 +406,13 @@ private Q_SLOTS:
         // purpose, windowWorkspaceMoveRequested replaces the by-id desktop
         // move and the bare output move with one step that carries both
         // legs, and the workspace map stream is gone.
-        QCOMPARE(Service::ApiVersion, 11);
-        QCOMPARE(Service::MinPeerApiVersion, 11);
+        //
+        // v12 drops arguments the daemon accepted and ignored:
+        // Snap.resolveWindowRestore's windowKind, minWidth and minHeight, and
+        // WindowTracking.windowClosed's windowKind. A mismatched peer cannot
+        // marshal either call.
+        QCOMPARE(Service::ApiVersion, 12);
+        QCOMPARE(Service::MinPeerApiVersion, 12);
     }
 
     /// The switch purpose is a wire int: its two values must keep their

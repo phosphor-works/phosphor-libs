@@ -438,7 +438,7 @@ void WindowTracker::setWindowSticky(const QString& windowId, bool sticky)
 // Window Lifecycle - Delegate to Service
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void WindowTracker::windowClosed(const QString& windowId, int windowKind, const QString& screenId)
+void WindowTracker::windowClosed(const QString& windowId, const QString& screenId)
 {
     if (!validateWindowId(windowId, QStringLiteral("clean up closed window"))) {
         return;
@@ -457,8 +457,6 @@ void WindowTracker::windowClosed(const QString& windowId, int windowKind, const 
     // A screen report held for this window has nothing left to replay into.
     m_heldScreenReports.remove(QLatin1String("screen:") + shadowWindowId(windowId));
     m_heldScreenReports.remove(QLatin1String("crossed:") + shadowWindowId(windowId));
-
-    const PhosphorEngine::WindowKind kind = PhosphorEngine::clampWindowKindFromWire(windowKind);
 
     // The closed window's open claim goes with it.
     m_service->placementStore().releaseOpenClaim(windowId);
@@ -504,7 +502,7 @@ void WindowTracker::windowClosed(const QString& windowId, int windowKind, const 
     // Session-transient suspension-float classification dies with the window.
     m_service->clearSuspensionFloat(windowId);
 
-    m_service->windowClosed(windowId, kind);
+    m_service->windowClosed(windowId);
 
     // Drop the shadow maps AFTER the service teardown: windowClosed's cascade
     // can synchronously re-enter the float relay and re-insert a zombie.

@@ -60,7 +60,7 @@ bool WindowPlacementStore::record(WindowPlacement incoming)
                 continue;
             }
             // Merge incoming into a copy of the existing record. Context (screen /
-            // desktop / activity / kind) is the OWNING engine's business, so only a
+            // desktop / activity) is the OWNING engine's business, so only a
             // real engine capture updates it — a geometry-only write (no engine slot,
             // e.g. recordFreeGeometry) must NOT clobber the managed-context fields.
             WindowPlacement merged = bucket.at(i);
@@ -76,9 +76,6 @@ bool WindowPlacementStore::record(WindowPlacement incoming)
                 }
                 merged.virtualDesktop = incoming.virtualDesktop;
                 merged.activity = incoming.activity;
-                if (incoming.kind != WindowKind::Unknown) {
-                    merged.kind = incoming.kind;
-                }
             }
             for (auto e = incoming.engines.constBegin(); e != incoming.engines.constEnd(); ++e) {
                 EngineSlot slot = e.value();

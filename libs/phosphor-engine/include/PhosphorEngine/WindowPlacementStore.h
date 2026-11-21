@@ -55,7 +55,7 @@ public:
     /// Restore lookup: the first record whose `accept` predicate passes, trying
     /// the same-instance match before the appId FIFO (oldest first). The matched
     /// record is REMOVED (consumed) and returned. `accept` lets the caller reject
-    /// cross-screen / disabled-context / wrong-kind candidates.
+    /// cross-screen / disabled-context candidates.
     ///
     /// `preferred` (optional) ranks the appId-FIFO branch ONLY: when supplied, the
     /// oldest entry satisfying BOTH `accept` and `preferred` is consumed first, and
