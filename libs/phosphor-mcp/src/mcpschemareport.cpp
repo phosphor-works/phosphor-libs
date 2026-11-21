@@ -14,10 +14,13 @@ namespace {
 
 const QString TooLargeToList =
     QStringLiteral(": does not match the schema, and is too large for the server to list each error");
+// The walk before the check does not know whether the value matches.
+const QString TooManyRefused =
+    QStringLiteral(": is refused before the check, with too many errors for the server to list each one");
 
 QString tokenOf(const PathToken& token)
 {
-    return token.index >= 0 ? QString::number(token.index) : token.name;
+    return token.index >= 0 ? QString::number(token.index) : token.name.toString();
 }
 
 } // namespace
@@ -65,7 +68,7 @@ qsizetype Report::add(const Path& path, const QString* last, const QString& desc
     }
     QString pointer;
     for (const PathToken& token : path) {
-        pointer += QLatin1Char('/') + (token.index >= 0 ? QString::number(token.index) : pointerToken(token.name));
+        pointer += QLatin1Char('/') + pointerToken(tokenOf(token));
     }
     if (last) {
         pointer += QLatin1Char('/') + pointerToken(*last);
@@ -98,7 +101,7 @@ qsizetype Report::add(const Path& path, const QString* last, const QString& desc
 QStringList Report::take()
 {
     if (m_overflow) {
-        return {TooLargeToList};
+        return {m_kind == Kind::Precheck ? TooManyRefused : TooLargeToList};
     }
     QStringList lines = std::move(m_lines);
     if (m_more == 1) {

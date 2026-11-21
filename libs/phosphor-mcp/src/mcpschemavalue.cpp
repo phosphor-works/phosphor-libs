@@ -11,8 +11,10 @@
 #include <QLocale>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 
 namespace PhosphorMcp::Schema {
 
@@ -20,10 +22,6 @@ namespace {
 
 // 2^63, the first double past qint64.
 constexpr double TwoTo63 = 9223372036854775808.0;
-
-// Charged for each this many UTF-16 code units of a string read, compared or
-// hashed.
-constexpr qint64 CharactersPerUnit = 16;
 
 // The order of the JSON types in compareValues().
 int typeRank(const QJsonValue& value)
@@ -92,16 +90,198 @@ quint64 mix(quint64 hash, quint64 value)
     return x ^ (x >> 31);
 }
 
-quint64 hashNumber(const Number& number)
+// The start of the hash of each kind of value, from the key: values of two
+// kinds (an integer and a double, say) collide only by chance, whatever
+// their bits, since their starts are unknown without the key.
+enum Kind : quint64 {
+    KindNull = 1,
+    KindBoolean,
+    KindInteger,
+    KindDouble,
+    KindString,
+    KindArray,
+    KindObject,
+    KindName,
+};
+
+quint64 start(quint64 key, Kind kind)
+{
+    return mix(key, kind);
+}
+
+quint64 hashNumber(const Number& number, quint64 key)
 {
     if (number.isInteger) {
-        return mix(2, quint64(number.integer));
+        return mix(start(key, KindInteger), quint64(number.integer));
     }
     quint64 bits = 0;
     static_assert(sizeof(bits) == sizeof(number.real));
     std::memcpy(&bits, &number.real, sizeof(bits));
-    return mix(3, bits);
+    return mix(start(key, KindDouble), bits);
 }
+
+// Calls `f` with each code point of `text`. Qt's UTF-8 is valid (its parser
+// refuses any other), and an unpaired surrogate of UTF-16 is passed as it
+// is.
+template<typename F>
+void forEachCodePoint(QAnyStringView text, F&& f)
+{
+    text.visit([&f](auto view) {
+        using View = decltype(view);
+        if constexpr (std::is_same_v<View, QStringView>) {
+            const qsizetype size = view.size();
+            for (qsizetype i = 0; i < size; ++i) {
+                const char16_t c = view.utf16()[i];
+                if (QChar::isHighSurrogate(c) && i + 1 < size && QChar::isLowSurrogate(view.utf16()[i + 1])) {
+                    f(QChar::surrogateToUcs4(c, view.utf16()[i + 1]));
+                    ++i;
+                } else {
+                    f(char32_t(c));
+                }
+            }
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            for (const char c : view) {
+                f(char32_t(uchar(c)));
+            }
+        } else {
+            const auto* bytes = reinterpret_cast<const uchar*>(view.data());
+            const qsizetype size = view.size();
+            for (qsizetype i = 0; i < size;) {
+                const uchar lead = bytes[i];
+                const int length = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+                char32_t c = length == 1 ? lead : lead & (0x7F >> length);
+                for (int k = 1; k < length && i + k < size; ++k) {
+                    c = (c << 6) | (bytes[i + k] & 0x3F);
+                }
+                f(c);
+                i += length;
+            }
+        }
+    });
+}
+
+// The code points of a text one after the other, for a comparison of two
+// texts of different encodings.
+template<typename View>
+class CodePointReader
+{
+public:
+    explicit CodePointReader(View text)
+        : m_text(text)
+    {
+    }
+    // The next code point, or -1 at the end.
+    qint32 next()
+    {
+        const qsizetype size = m_text.size();
+        if (m_position >= size) {
+            return -1;
+        }
+        if constexpr (std::is_same_v<View, QStringView>) {
+            const char16_t c = m_text.utf16()[m_position++];
+            if (QChar::isHighSurrogate(c) && m_position < size && QChar::isLowSurrogate(m_text.utf16()[m_position])) {
+                return qint32(QChar::surrogateToUcs4(c, m_text.utf16()[m_position++]));
+            }
+            return c;
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            return uchar(m_text.data()[m_position++]);
+        } else {
+            const auto* bytes = reinterpret_cast<const uchar*>(m_text.data());
+            const uchar lead = bytes[m_position];
+            const int length = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+            qint32 c = length == 1 ? lead : lead & (0x7F >> length);
+            for (int k = 1; k < length && m_position + k < size; ++k) {
+                c = (c << 6) | (bytes[m_position + k] & 0x3F);
+            }
+            m_position += length;
+            return c;
+        }
+    }
+
+private:
+    View m_text;
+    qsizetype m_position = 0;
+};
+
+// The code point order of two UTF-16 code units that differ: a surrogate
+// (U+D800 to U+DFFF, the half of a code point past U+FFFF) comes after
+// U+E000 to U+FFFF.
+int compareUnits(char16_t a, char16_t b)
+{
+    const auto fix = [](char16_t c) {
+        return c >= 0xE000 ? c - 0x800 : (c >= 0xD800 ? c + 0x2000 : c);
+    };
+    return fix(a) < fix(b) ? -1 : 1;
+}
+
+int compareBytes(const char* a, qsizetype aSize, const char* b, qsizetype bSize)
+{
+    const int c = std::memcmp(a, b, std::size_t(std::min(aSize, bSize)));
+    if (c != 0) {
+        return c < 0 ? -1 : 1;
+    }
+    return aSize < bSize ? -1 : (aSize > bSize ? 1 : 0);
+}
+
+// The members of an object in the order of their names' code points, for
+// the comparisons that may not take Qt's order. The memory is counted.
+class SortedMembers
+{
+public:
+    SortedMembers(const QJsonObject& object, Budget& budget)
+        : m_budget(budget)
+        , m_bytes(qint64(object.size()) * qint64(sizeof(Member)))
+    {
+        if (!m_budget.allocate(m_bytes)) {
+            return;
+        }
+        const qint64 comparisons = std::bit_width(quint64(object.size()));
+        qint64 units = 0;
+        m_members.reserve(std::size_t(object.size()));
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            m_members.push_back(Member{it.keyView(), it});
+            units += UnitsPerMember + comparisons * (1 + it.keyView().size() / CharactersPerUnit);
+        }
+        if (!m_budget.charge(units)) {
+            return;
+        }
+        std::sort(m_members.begin(), m_members.end(), [](const Member& a, const Member& b) {
+            return compareText(a.name, b.name) < 0;
+        });
+        m_ready = true;
+    }
+    ~SortedMembers()
+    {
+        m_budget.release(m_bytes);
+    }
+    SortedMembers(const SortedMembers&) = delete;
+    SortedMembers& operator=(const SortedMembers&) = delete;
+
+    // False when the budget was spent before the members were sorted.
+    [[nodiscard]] bool isReady() const
+    {
+        return m_ready;
+    }
+    [[nodiscard]] QAnyStringView name(std::size_t i) const
+    {
+        return m_members[i].name;
+    }
+    [[nodiscard]] QJsonValue value(std::size_t i) const
+    {
+        return m_members[i].at.value();
+    }
+
+private:
+    struct Member
+    {
+        QAnyStringView name;
+        QJsonObject::const_iterator at;
+    };
+    Budget& m_budget;
+    qint64 m_bytes;
+    std::vector<Member> m_members;
+    bool m_ready = false;
+};
 
 } // namespace
 
@@ -187,12 +367,126 @@ QString formatNumber(const Number& number)
     return QString::number(number.real, 'g', QLocale::FloatingPointShortest);
 }
 
-bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+qsizetype codePoints(QAnyStringView text)
 {
-    return equalValues(a, b, nullptr, budget);
+    return text.visit([](auto view) -> qsizetype {
+        using View = decltype(view);
+        qsizetype length = 0;
+        if constexpr (std::is_same_v<View, QStringView>) {
+            const char16_t* units = view.utf16();
+            for (qsizetype i = 0; i < view.size(); ++i) {
+                length += QChar::isLowSurrogate(units[i]) ? 0 : 1;
+            }
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            length = view.size();
+        } else {
+            // Each code point has one byte that is not a continuation.
+            for (const auto c : view) {
+                length += (uchar(c) & 0xC0) == 0x80 ? 0 : 1;
+            }
+        }
+        return length;
+    });
 }
 
-bool equalValues(const QJsonValue& a, const QJsonValue& b, const QString* bText, Budget& budget)
+bool isValidText(QAnyStringView text)
+{
+    return text.visit([](auto view) {
+        if constexpr (std::is_same_v<decltype(view), QStringView>) {
+            return view.isValidUtf16();
+        } else {
+            return true;
+        }
+    });
+}
+
+bool isUtf16(QAnyStringView text)
+{
+    return text.visit([](auto view) {
+        return std::is_same_v<decltype(view), QStringView>;
+    });
+}
+
+int compareText(QAnyStringView a, QAnyStringView b)
+{
+    return a.visit([&](auto x) {
+        return b.visit([&](auto y) {
+            using X = decltype(x);
+            using Y = decltype(y);
+            if constexpr (std::is_same_v<X, QStringView> && std::is_same_v<Y, QStringView>) {
+                // UTF-16 in order is code points in order, but for the
+                // surrogates.
+                const qsizetype n = std::min(x.size(), y.size());
+                for (qsizetype i = 0; i < n; ++i) {
+                    if (x.utf16()[i] != y.utf16()[i]) {
+                        return compareUnits(x.utf16()[i], y.utf16()[i]);
+                    }
+                }
+                return x.size() < y.size() ? -1 : (x.size() > y.size() ? 1 : 0);
+            } else if constexpr (std::is_same_v<X, Y>) {
+                // Latin-1 or UTF-8: bytes in order are code points in order.
+                return compareBytes(reinterpret_cast<const char*>(x.data()), x.size(),
+                                    reinterpret_cast<const char*>(y.data()), y.size());
+            } else {
+                CodePointReader<X> first(x);
+                CodePointReader<Y> second(y);
+                for (;;) {
+                    const qint32 c = first.next();
+                    const qint32 d = second.next();
+                    if (c != d) {
+                        return c < d ? -1 : 1;
+                    }
+                    if (c < 0) {
+                        return 0;
+                    }
+                }
+            }
+        });
+    });
+}
+
+quint64 hashText(QAnyStringView text, quint64 key)
+{
+    // Three code points of 21 bits to each word that is mixed in.
+    quint64 hash = key;
+    quint64 word = 0;
+    int count = 0;
+    qint64 total = 0;
+    forEachCodePoint(text, [&](char32_t c) {
+        word = (word << 21) | quint64(c);
+        if (++count == 3) {
+            hash = mix(hash, word);
+            word = 0;
+            count = 0;
+        }
+        ++total;
+    });
+    return mix(mix(hash, word), quint64(total));
+}
+
+int NameTable::value(QAnyStringView name) const
+{
+    return name.visit([this](auto view) -> int {
+        using View = decltype(view);
+        if constexpr (std::is_same_v<View, QStringView>) {
+            return m_utf16.value(QString::fromRawData(view.data(), view.size()), -1);
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            // ASCII is UTF-8 too. Other Latin-1 comes only from a handler.
+            uchar high = 0;
+            for (const char c : view) {
+                high |= uchar(c);
+            }
+            if (high < 0x80) {
+                return m_utf8.value(QByteArray::fromRawData(view.data(), view.size()), -1);
+            }
+            return m_utf16.value(QString(view), -1);
+        } else {
+            return m_utf8.value(QByteArray::fromRawData(reinterpret_cast<const char*>(view.data()), view.size()), -1);
+        }
+    });
+}
+
+bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
 {
     budget.charge(1);
     const int rank = typeRank(a);
@@ -208,12 +502,10 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, const QString* bText,
     case QJsonValue::Double:
         return compareNumbers(numberOf(a), numberOf(b)) == 0;
     case QJsonValue::String: {
-        const QString first = a.toString();
-        const QString second = bText ? *bText : b.toString();
-        // Each string is read whole, and compared when the lengths agree.
-        budget.charge((first.size() + (bText ? 0 : second.size())) / CharactersPerUnit
-                      + (first.size() == second.size() ? first.size() / CharactersPerUnit : 0));
-        return first == second;
+        const QAnyStringView first = a.toStringView();
+        const QAnyStringView second = b.toStringView();
+        budget.charge((first.size() + second.size()) / CharactersPerUnit);
+        return QAnyStringView::equal(first, second);
     }
     case QJsonValue::Array: {
         const QJsonArray x = a.toArray();
@@ -222,25 +514,48 @@ bool equalValues(const QJsonValue& a, const QJsonValue& b, const QString* bText,
             return false;
         }
         for (qsizetype i = 0; i < x.size(); ++i) {
-            if (budget.exceeded() || !equalValues(x.at(i), y.at(i), nullptr, budget)) {
+            if (budget.exceeded() || !equalValues(x.at(i), y.at(i), budget)) {
                 return false;
             }
         }
         return true;
     }
     case QJsonValue::Object: {
-        // Qt keeps the members of an object sorted by name, so two objects
-        // with the same members list them in the same order.
         const QJsonObject x = a.toObject();
         const QJsonObject y = b.toObject();
         if (x.size() != y.size()) {
             return false;
         }
+        // Most often both keep their members in the same order. When a
+        // name differs there, the members are sorted first.
+        bool sameOrder = true;
         for (auto i = x.begin(), j = y.begin(); i != x.end(); ++i, ++j) {
-            const QString first = i.key();
-            const QString second = j.key();
-            budget.charge(2 + (first.size() + second.size()) / CharactersPerUnit);
-            if (budget.exceeded() || first != second || !equalValues(i.value(), j.value(), nullptr, budget)) {
+            const QAnyStringView first = i.keyView();
+            const QAnyStringView second = j.keyView();
+            budget.charge(UnitsPerMember + (first.size() + second.size()) / CharactersPerUnit);
+            if (budget.exceeded()) {
+                return false;
+            }
+            if (!QAnyStringView::equal(first, second)) {
+                sameOrder = false;
+                break;
+            }
+            if (!equalValues(i.value(), j.value(), budget)) {
+                return false;
+            }
+        }
+        if (sameOrder) {
+            return true;
+        }
+        const SortedMembers first(x, budget);
+        const SortedMembers second(y, budget);
+        if (!first.isReady() || !second.isReady()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < std::size_t(x.size()); ++i) {
+            budget.charge(UnitsPerMember + (first.name(i).size() + second.name(i).size()) / CharactersPerUnit);
+            if (budget.exceeded() || !QAnyStringView::equal(first.name(i), second.name(i))
+                || !equalValues(first.value(i), second.value(i), budget)) {
                 return false;
             }
         }
@@ -267,11 +582,10 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     case QJsonValue::Double:
         return compareNumbers(numberOf(a), numberOf(b));
     case QJsonValue::String: {
-        const QString first = a.toString();
-        const QString second = b.toString();
+        const QAnyStringView first = a.toStringView();
+        const QAnyStringView second = b.toStringView();
         budget.charge((first.size() + second.size()) / CharactersPerUnit * 2);
-        const int c = first.compare(second);
-        return c < 0 ? -1 : (c > 0 ? 1 : 0);
+        return compareText(first, second);
     }
     case QJsonValue::Array: {
         const QJsonArray x = a.toArray();
@@ -291,15 +605,20 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
         if (x.size() != y.size()) {
             return x.size() < y.size() ? -1 : 1;
         }
-        for (auto i = x.begin(), j = y.begin(); i != x.end() && !budget.exceeded(); ++i, ++j) {
-            const QString first = i.key();
-            const QString second = j.key();
-            budget.charge(2 + (first.size() + second.size()) / CharactersPerUnit * 2);
-            const int k = first.compare(second);
+        // Member by member in the order of their names, whatever order Qt
+        // keeps them in.
+        const SortedMembers first(x, budget);
+        const SortedMembers second(y, budget);
+        if (!first.isReady() || !second.isReady()) {
+            return 0;
+        }
+        for (std::size_t i = 0; i < std::size_t(x.size()) && !budget.exceeded(); ++i) {
+            budget.charge(UnitsPerMember + (first.name(i).size() + second.name(i).size()) / CharactersPerUnit * 2);
+            const int k = compareText(first.name(i), second.name(i));
             if (k != 0) {
-                return k < 0 ? -1 : 1;
+                return k;
             }
-            const int c = compareValues(i.value(), j.value(), budget);
+            const int c = compareValues(first.value(i), second.value(i), budget);
             if (c != 0) {
                 return c;
             }
@@ -310,40 +629,42 @@ int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
     return 0;
 }
 
-quint64 hashValue(const QJsonValue& value, Budget& budget)
+quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget)
 {
     budget.charge(1);
     switch (value.type()) {
     case QJsonValue::Null:
     case QJsonValue::Undefined:
-        return 0x6e756c6cULL;
+        return start(key, KindNull);
     case QJsonValue::Bool:
-        return value.toBool() ? 0x74727565ULL : 0x66616c73ULL;
+        return mix(start(key, KindBoolean), value.toBool() ? 1 : 0);
     case QJsonValue::Double:
-        return hashNumber(numberOf(value));
+        return hashNumber(numberOf(value), key);
     case QJsonValue::String: {
-        const QString text = value.toString();
+        const QAnyStringView text = value.toStringView();
         budget.charge(text.size() / CharactersPerUnit * 2);
-        return mix(4, qHash(text, 0));
+        return hashText(text, start(key, KindString));
     }
     case QJsonValue::Array: {
-        quint64 hash = 5;
+        quint64 hash = start(key, KindArray);
         const QJsonArray array = value.toArray();
         for (qsizetype i = 0; i < array.size() && !budget.exceeded(); ++i) {
-            hash = mix(hash, hashValue(array.at(i), budget));
+            hash = mix(hash, hashValue(array.at(i), key, budget));
         }
         return mix(hash, quint64(array.size()));
     }
     case QJsonValue::Object: {
-        quint64 hash = 6;
+        // A sum of the hashes of the members, which does not depend on
+        // their order.
+        quint64 sum = 0;
         const QJsonObject object = value.toObject();
+        const quint64 names = start(key, KindName);
         for (auto it = object.begin(); it != object.end() && !budget.exceeded(); ++it) {
-            const QString key = it.key();
-            budget.charge(2 + key.size() / CharactersPerUnit * 2);
-            hash = mix(hash, qHash(key, 0));
-            hash = mix(hash, hashValue(it.value(), budget));
+            const QAnyStringView name = it.keyView();
+            budget.charge(UnitsPerMember + name.size() / CharactersPerUnit * 2);
+            sum += mix(hashText(name, names), hashValue(it.value(), key, budget));
         }
-        return mix(hash, quint64(object.size()));
+        return mix(mix(start(key, KindObject), sum), quint64(object.size()));
     }
     }
     return 0;

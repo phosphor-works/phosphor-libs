@@ -101,6 +101,8 @@ constexpr int Bound = 60000;
 const QString TooLargeToList =
     QStringLiteral("- arguments: does not match the schema, and is too large for the server to list each error");
 const QString TooLargeToCheck = QStringLiteral("- arguments: is too large for the server to check against the schema");
+const QString TooManyRefused =
+    QStringLiteral("- arguments: is refused before the check, with too many errors for the server to list each one");
 
 } // namespace
 
@@ -176,7 +178,7 @@ private Q_SLOTS:
                    "- arguments/where: must be of type string\n- arguments/where: must be one of the values of enum");
         // The checks before the schema's are capped as the others.
         QTest::newRow("400000 surrogates")
-            << envSchema() << "{'where': [" + repeat("'\\ud800'", 400000) + "]}" << TooLargeToList;
+            << envSchema() << "{'where': [" + repeat("'\\ud800'", 400000) + "]}" << TooManyRefused;
 
         // Lists of lists, which recurse through items and $ref, two
         // subschemas deep for each level...

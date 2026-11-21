@@ -7,11 +7,13 @@
 // it, mcpschemavalue.cpp compares JSON values, and mcpschemareport.cpp
 // writes the lines of the errors. None of it is part of the library's ABI.
 
+#include <QAnyStringView>
+#include <QByteArray>
+#include <QByteArrayList>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -57,6 +59,54 @@ bool isMultipleOf(const Number& value, const Number& divisor);
 // round-trip form.
 QString formatNumber(const Number& number);
 
+// The text of a string or of a member name, as Qt keeps it and as the
+// checker reads it, in place: Qt's parser keeps ASCII as Latin-1 and other
+// text as UTF-8 (it refuses UTF-8 that is not valid), and a string with an
+// escape, or one built from a QString that is not ASCII, as UTF-16. Decoding
+// it to a QString would cost a pass over it for each subschema that reads
+// it. QAnyStringView::size() counts the code units of the text's own
+// encoding (bytes, or UTF-16 code units), which is what reading it costs.
+//
+// Its length in code points, as 2020-12 counts characters (an unpaired
+// surrogate counts as one).
+qsizetype codePoints(QAnyStringView text);
+// Whether the text has no unpaired UTF-16 surrogate, which only UTF-16 can
+// hold.
+bool isValidText(QAnyStringView text);
+// Whether the text is in UTF-16.
+bool isUtf16(QAnyStringView text);
+// -1, 0 or 1: the order of the texts' code points, whatever their encodings.
+// 0 exactly when QAnyStringView::equal() is true (for text without an
+// unpaired surrogate).
+int compareText(QAnyStringView a, QAnyStringView b);
+// A hash of the text's code points, the same in every encoding, keyed by
+// `key`.
+quint64 hashText(QAnyStringView text, quint64 key);
+
+// Names or strings of the schema, to look a value's text up in whatever its
+// encoding: by UTF-16 for text in UTF-16, and by UTF-8 for text in UTF-8 or
+// ASCII.
+class NameTable
+{
+public:
+    // A name inserted twice keeps the last value.
+    void insert(const QString& name, int value)
+    {
+        m_utf16.insert(name, value);
+        m_utf8.insert(name.toUtf8(), value);
+    }
+    // The value of `name`, or -1.
+    [[nodiscard]] int value(QAnyStringView name) const;
+    [[nodiscard]] bool isEmpty() const
+    {
+        return m_utf16.isEmpty();
+    }
+
+private:
+    QHash<QString, int> m_utf16;
+    QHash<QByteArray, int> m_utf8;
+};
+
 // The JSON types, as bits of Node::types.
 enum TypeBit : quint8 {
     TypeNull = 1,
@@ -91,15 +141,17 @@ struct Node
     quint8 types = 0;
     QStringList typeNames;
 
-    // const and enum. Their strings are read once here, so that a string of
-    // the value is compared with them without reading them again, and a
-    // long enum of strings is looked up in a hash.
+    // const and enum. Their strings are kept here in UTF-16 and in UTF-8,
+    // so that a string of the value is compared with them in its own
+    // encoding, and a long enum of strings is looked up in a table.
     bool hasConst = false;
     QJsonValue constValue;
     QString constString;
+    QByteArray constUtf8;
     bool hasEnum = false;
     QStringList enumStrings;
-    QSet<QString> enumStringSet;
+    QByteArrayList enumUtf8;
+    NameTable enumTable;
     std::vector<QJsonValue> enumOthers;
 
     enum NumberKeyword : quint8 {
@@ -131,11 +183,13 @@ struct Node
     std::vector<std::pair<QString, QStringList>> dependentRequired;
     // The triggers of dependentRequired by name, to look the members of an
     // object up in when it has fewer members than there are triggers.
-    QHash<QString, int> dependentRequiredIndex;
+    NameTable dependentRequiredIndex;
 
     // Applicators.
-    QHash<QString, int> properties;
+    NameTable properties;
     std::vector<std::pair<QString, int>> dependentSchemas;
+    // By name, for a $ref through dependentSchemas.
+    QHash<QString, int> dependentSchemaIndex;
     QHash<QString, int> definitions;
     std::vector<int> prefixItems;
     std::vector<int> allOf;
@@ -154,6 +208,10 @@ struct Node
     int ref = -1;
     QString refValue;
     bool hasRef = false;
+    // contentSchema, checked as any subschema is but never applied: the
+    // node, and whether this node is inside one, where no $ref may lead.
+    int contentSchema = -1;
+    bool inContentSchema = false;
 };
 
 struct CompiledSchema

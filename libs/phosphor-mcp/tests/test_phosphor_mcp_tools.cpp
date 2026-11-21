@@ -123,6 +123,9 @@ QString patternReason()
 const QString CountRefusal = QStringLiteral(": must be an integer from 0 to 9007199254740991");
 const QString TooLargeToList =
     QStringLiteral("- arguments: does not match the schema, and is too large for the server to list each error");
+// The walk before the check does not know whether the value matches.
+const QString TooManyRefused =
+    QStringLiteral("- arguments: is refused before the check, with too many errors for the server to list each one");
 
 } // namespace
 
@@ -348,15 +351,29 @@ private Q_SLOTS:
             "{'type': 'object', '$defs': {'a': {'$anchor': 'foo'}}, 'properties': {'a': {'$ref': '#%66oo'}}}",
             QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
         row("$ref with a broken pointer escape", "{'type': 'object', '$defs': {'a': {}}, '$ref': '#/$defs/~2'}",
-            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+            QStringLiteral("/$ref: is not a valid JSON pointer, where \"~\" must be followed by \"0\" or \"1\""));
         row("$ref past the end of prefixItems", "{'type': 'object', 'prefixItems': [{}], '$ref': '#/prefixItems/1'}",
             QStringLiteral("/$ref: refers to no schema in the tool's schema"));
         row("$ref with a leading zero", "{'type': 'object', 'prefixItems': [{}], '$ref': '#/prefixItems/00'}",
             QStringLiteral("/$ref: refers to no schema in the tool's schema"));
         row("$ref into a boolean schema", "{'type': 'object', '$defs': {'f': false}, '$ref': '#/$defs/f/items'}",
             QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        // contentSchema is checked as a subschema is, but never applied.
+        const QString intoContent = QStringLiteral(
+            ": refers to a schema inside \"contentSchema\", which is an annotation that the server never applies");
         row("$ref into contentSchema", "{'type': 'object', 'contentSchema': {}, '$ref': '#/contentSchema'}",
-            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+            QStringLiteral("/$ref") + intoContent);
+        row("$ref below contentSchema",
+            "{'type': 'object', 'contentSchema': {'items': {}}, '$ref': '#/contentSchema/items'}",
+            QStringLiteral("/$ref") + intoContent);
+        row("$ref to an anchor inside contentSchema",
+            "{'type': 'object', 'contentSchema': {'$defs': {'a': {'$anchor': 'in'}}}, 'properties': {'a': {'$ref': "
+            "'#in'}}}",
+            QStringLiteral("/properties/a/$ref") + intoContent);
+        row("contentSchema with a type of a number", "{'type': 'object', 'contentSchema': {'type': 5}}",
+            QStringLiteral("/contentSchema/type: must be a type name or a non-empty array of them"));
+        row("patternProperties a number", "{'type': 'object', 'patternProperties': 5}",
+            QStringLiteral("/patternProperties: must be an object of schemas"));
         row("$ref to nothing", "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/x'}}}",
             QStringLiteral("/properties/a/$ref: refers to no schema in the tool's schema"));
         row("$ref to a keyword's value",
@@ -407,6 +424,39 @@ private Q_SLOTS:
             "{'type': 'object', '$defs': {'a': {'$ref': '#/$defs/b'}, 'b': {'$ref': '#/$defs/c'}, 'c': {'$ref': "
             "'#/$defs/a'}}}",
             loop(QStringLiteral("/$defs/a/$ref")));
+        // A loop that no value reaches is refused too.
+        row("$ref loop that no value reaches", "{'type': 'object', '$defs': {'a': {'$ref': '#/$defs/a'}}}",
+            loop(QStringLiteral("/$defs/a/$ref")));
+
+        // Without a loop, $ref applies more subschemas to the same value
+        // than the nesting shows: a chain longer than a check goes deep...
+        const auto defs = [](int count, const auto& schema) -> QByteArray {
+            QByteArray text = "{'type': 'object', '$defs': {";
+            for (int i = 0; i < count; ++i) {
+                text += (i ? ", 'd" : "'d") + QByteArray::number(i).rightJustified(4, '0') + "': " + schema(i);
+            }
+            return text + "}}";
+        };
+        const auto next = [](int i) -> QByteArray {
+            return "'#/$defs/d" + QByteArray::number(i + 1).rightJustified(4, '0') + "'";
+        };
+        row("a chain of 3001 $ref",
+            defs(3002,
+                 [&](int i) -> QByteArray {
+                     return i == 3001 ? QByteArray("{}") : QByteArray("{'$ref': " + next(i) + "}");
+                 }),
+            QStringLiteral("/$defs/d0001: applies a chain of more than 3000 subschemas to the same value, which the "
+                           "server does not check"));
+        // ...or two $ref to the same schema at each of forty levels, 2^40
+        // subschemas, past what the bound of the work lets a check apply.
+        row("$ref doubling 40 levels",
+            defs(41,
+                 [&](int i) -> QByteArray {
+                     return i == 40 ? QByteArray("{}")
+                                    : QByteArray("{'allOf': [{'$ref': " + next(i) + "}, {'$ref': " + next(i) + "}]}");
+                 }),
+            QStringLiteral("/$defs/d0017: applies more than 20000000 subschemas to the same value, counting every "
+                           "branch, which the server does not check"));
 
         // Names and strings that no argument can have, since an unpaired
         // surrogate in one is refused.
@@ -821,7 +871,7 @@ private Q_SLOTS:
         surrogates.append(QString(QChar(0xdc00)));
         arguments.insert(QLatin1StringView("tags"), surrogates);
         QVERIFY(peer.send(callRequest(4, QStringLiteral("pane_tool"), arguments)));
-        QCOMPARE(errorLines(peer.readOne()), TooLargeToList);
+        QCOMPARE(errorLines(peer.readOne()), TooManyRefused);
     }
 
     void namesAreComparedWhole()
@@ -1123,9 +1173,10 @@ private Q_SLOTS:
         row("uniqueItems nested refuses", "{'uniqueItems': true}", "[[1, {'x': [2.0]}], [1, {'x': [2]}]]", false);
         row("uniqueItems false", "{'uniqueItems': false}", "[1, 1]", true);
         row("uniqueItems objects of other names", "{'uniqueItems': true}", "[{'a': 1}, {'b': 1}]", true);
-        // The server's hashes of these two numbers are the same (they are
-        // sorted by hash, then by value).
-        row("uniqueItems with equal hashes", "{'uniqueItems': true}", "[4602678819172646975, 0.5]", true);
+        // An integer and a double with bits alike. The hashes are keyed,
+        // and test_phosphor_mcp_checkwork sorts items whose hashes are the
+        // same.
+        row("uniqueItems with bits alike", "{'uniqueItems': true}", "[4602678819172646975, 0.5]", true);
         row("const object of other names", "{'const': {'a': 1}}", "{'b': 1}", false);
         row("uniqueItems qint64 max and 2^63", "{'uniqueItems': true}", "[9223372036854775807, 9223372036854775808]",
             true);
@@ -1580,7 +1631,9 @@ private Q_SLOTS:
             "- arguments/v: does not match the schema");
         row("uniqueItems", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
             "{'v': [1, 2, 'a', 2.0, 1]}", "- arguments/v: must have unique items, and items 1 and 3 are equal");
-        row("uniqueItems with equal hashes", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
+        // The line names the first repeat whatever the hashes (see
+        // test_phosphor_mcp_checkwork for items whose hashes are the same).
+        row("uniqueItems around another item", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
             "{'v': [4602678819172646975, 0.5, 4602678819172646975]}",
             "- arguments/v: must have unique items, and items 0 and 2 are equal");
         row("uniqueItems of objects", "{'type': 'object', 'properties': {'v': {'uniqueItems': true}}}",
