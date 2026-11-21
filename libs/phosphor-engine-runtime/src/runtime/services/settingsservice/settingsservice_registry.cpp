@@ -49,13 +49,6 @@
 namespace PhosphorEngineRuntime {
 
 namespace {
-// The rule vocabulary's follow-the-accent token (PhosphorRules::
-// BorderColorToken::Accent), accepted on the colour keys as an alias for the
-// empty theme-fallback sentinel so pre-v6 clients and rule-vocabulary
-// scripts keep working against the unified surface. Spelled locally to keep
-// this TU off the rules library; the migration freezes the same literal.
-constexpr QLatin1String kAccentToken{"accent"};
-
 // Exact-match predicate for the three window-appearance scope-token keys,
 // mirroring their validStringOr schema validator's closed set. File-scope so
 // the REGISTER_VALIDATED_STRING_SETTING lambdas can reach it without
@@ -196,11 +189,9 @@ void SettingsService::initializeRegistry()
 // names no colour at all. Parsing it and storing the resulting invalid QColor
 // would leave the old value in place while setSetting reported success, which
 // is the one thing its documented post-condition must not do. Reject instead:
-// a malformed hex returns false and the caller sees the write fail. Two
-// SENTINEL spellings are accepted and put the key back on the theme: the
-// empty string (the stored theme-fallback sentinel) and the legacy "accent"
-// token the pre-v6 wire accepted — both store the sentinel via the QColor
-// setter's invalid-colour branch. The getter marshals the RESOLVED colour;
+// a malformed hex returns false and the caller sees the write fail. The
+// empty string (the stored theme-fallback sentinel) puts the key back on the
+// theme, through the QColor setter's invalid-colour branch. The getter marshals the RESOLVED colour;
 // the resolution chain (resolvedSystemColor / the stored #AARRGGBB) cannot
 // produce an invalid QColor, so no isValid() guard is needed before name().
 // The stored sentinel itself is visible through the *Raw companion keys.
@@ -211,7 +202,7 @@ void SettingsService::initializeRegistry()
     };                                                                                                                 \
     m_setters[QStringLiteral(keyName)] = [this](const QVariant& v) {                                                   \
         const QString s = v.toString();                                                                                \
-        if (s.isEmpty() || s == kAccentToken) {                                                                        \
+        if (s.isEmpty()) {                                                                                             \
             m_settings->setter(QColor());                                                                              \
             return true;                                                                                               \
         }                                                                                                              \
@@ -361,8 +352,7 @@ void SettingsService::initializeRegistry()
     // serves a concrete palette-derived colour while the stored value is the
     // empty theme-fallback sentinel), so the wire keeps its concrete-colour
     // contract; setting one over D-Bus pins a concrete colour, and writing
-    // the empty sentinel (or the legacy "accent" token) puts it back on the
-    // theme. The stored follow/pin state itself is readable and writable
+    // the empty sentinel puts it back on the theme. The stored follow/pin state itself is readable and writable
     // through the *Raw companion keys registered further down.
     REGISTER_COLOR_SETTING("highlightColor", highlightColor, setHighlightColor)
     REGISTER_COLOR_SETTING("inactiveColor", inactiveColor, setInactiveColor)
@@ -386,12 +376,11 @@ void SettingsService::initializeRegistry()
     // resolution targets are the same system colours the effect resolves a
     // rule-side "accent" token against (zone highlight for the active/tint
     // slots, zone inactive for the inactive slot), so config-default and
-    // rule-side accent stay one colour. The setter accepts the sentinel
-    // (empty, or the legacy "accent" token these keys historically stored)
+    // rule-side accent stay one colour. The setter accepts the empty sentinel
     // or any colour QColor parses, rejecting garbage at the boundary the
     // way REGISTER_THEME_FALLBACK_COLOR_SETTING (the scrolling TU's
     // raw-string form) does — every themeColor-vocabulary key accepts the
-    // same sentinel spellings. The stored sentinel is visible through the
+    // same sentinel. The stored sentinel is visible through the
     // *Raw companion keys registered below.
 #define REGISTER_RESOLVED_FALLBACK_COLOR(keyName, getter, setter, resolver)                                            \
     m_getters[QStringLiteral(keyName)] = [this]() {                                                                    \
@@ -400,9 +389,6 @@ void SettingsService::initializeRegistry()
     };                                                                                                                 \
     m_setters[QStringLiteral(keyName)] = [this](const QVariant& v) {                                                   \
         QString s = v.toString();                                                                                      \
-        if (s == kAccentToken) {                                                                                       \
-            s = QString();                                                                                             \
-        }                                                                                                              \
         if (!s.isEmpty() && !QColor(s).isValid()) {                                                                    \
             return false;                                                                                              \
         }                                                                                                              \
@@ -457,9 +443,6 @@ void SettingsService::initializeRegistry()
     };                                                                                                                 \
     m_setters[QStringLiteral(keyName)] = [capture](const QVariant& v) {                                                \
         QString s = v.toString();                                                                                      \
-        if (s == kAccentToken) {                                                                                       \
-            s = QString();                                                                                             \
-        }                                                                                                              \
         if (!s.isEmpty() && !QColor(s).isValid()) {                                                                    \
             return false;                                                                                              \
         }                                                                                                              \

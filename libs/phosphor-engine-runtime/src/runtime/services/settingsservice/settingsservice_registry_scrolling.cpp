@@ -93,11 +93,8 @@ void SettingsService::initializeRegistryScrolling()
     };                                                                                                                 \
     m_schemas[QStringLiteral(name)] = QStringLiteral("double");
 
-// ISettings-flavoured theme-fallback colour: EMPTY (follow the theme), the
-// legacy "accent" token (aliased to empty so every themeColor-typed key
-// accepts one uniform vocabulary — the frozen PhosphorRules::
-// BorderColorToken::Accent spelling, mirrored from the core TU's
-// kAccentToken), or a colour QColor can parse; anything else is refused at
+// ISettings-flavoured theme-fallback colour: EMPTY (follow the theme) or a
+// colour QColor can parse; anything else is refused at
 // the boundary so it never reaches a QML `color` property, and the false
 // return surfaces the rejection to the D-Bus caller instead of silently
 // dropping the write. Schema token "themeColor" (shared with the *Raw
@@ -109,9 +106,6 @@ void SettingsService::initializeRegistryScrolling()
     };                                                                                                                 \
     m_setters[QStringLiteral(name)] = [this](const QVariant& v) {                                                      \
         QString s = v.toString();                                                                                      \
-        if (s == QLatin1String("accent")) {                                                                            \
-            s = QString();                                                                                             \
-        }                                                                                                              \
         if (!s.isEmpty() && !QColor(s).isValid()) {                                                                    \
             return false;                                                                                              \
         }                                                                                                              \
@@ -122,12 +116,10 @@ void SettingsService::initializeRegistryScrolling()
 
 // The resolved half of a theme-fallback pair whose sentinel is resolved in the
 // config layer: the getter serves a concrete #AARRGGBB and the setter pins one,
-// with empty (or the legacy accent token) storing the sentinel through the
-// QColor setter's invalid-means-unset guard. The resolution chain cannot
+// with empty storing the sentinel through the QColor setter's
+// invalid-means-unset guard. The resolution chain cannot
 // produce an invalid QColor, so no isValid() guard is needed before name().
-// Copied from the core TU's REGISTER_COLOR_SETTING per the sync rule above,
-// with the accent token spelled inline: kAccentToken is that TU's file-local
-// constant and a second definition here would collide in a unity batch.
+// Copied from the core TU's REGISTER_COLOR_SETTING per the sync rule above.
 #define REGISTER_COLOR_SETTING(keyName, getter, setter)                                                                \
     m_getters[QStringLiteral(keyName)] = [this]() {                                                                    \
         QColor color = m_settings->getter();                                                                           \
@@ -135,7 +127,7 @@ void SettingsService::initializeRegistryScrolling()
     };                                                                                                                 \
     m_setters[QStringLiteral(keyName)] = [this](const QVariant& v) {                                                   \
         const QString s = v.toString();                                                                                \
-        if (s.isEmpty() || s == QLatin1String("accent")) {                                                             \
+        if (s.isEmpty()) {                                                                                             \
             m_settings->setter(QColor());                                                                              \
             return true;                                                                                               \
         }                                                                                                              \
@@ -150,17 +142,13 @@ void SettingsService::initializeRegistryScrolling()
 
 // The stored half of that pair, on the concrete Settings: the sentinel itself,
 // readable and writable so a round-trip can restore "follow the theme". Same
-// body as the core TU's REGISTER_RAW_THEME_COLOR, accent token inlined for the
-// reason above.
+// body as the core TU's REGISTER_RAW_THEME_COLOR.
 #define REGISTER_RAW_THEME_COLOR(keyName, capture, obj, getter, setter)                                                \
     m_getters[QStringLiteral(keyName)] = [capture]() {                                                                 \
         return obj->getter();                                                                                          \
     };                                                                                                                 \
     m_setters[QStringLiteral(keyName)] = [capture](const QVariant& v) {                                                \
         QString s = v.toString();                                                                                      \
-        if (s == QLatin1String("accent")) {                                                                            \
-            s = QString();                                                                                             \
-        }                                                                                                              \
         if (!s.isEmpty() && !QColor(s).isValid()) {                                                                    \
             return false;                                                                                              \
         }                                                                                                              \
