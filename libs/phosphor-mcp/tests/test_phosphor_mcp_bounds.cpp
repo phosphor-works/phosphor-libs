@@ -7,17 +7,19 @@
 // long or hold too much. Each shape that the audits of the checker found
 // costly has a row. The rows that pass the bound burn all of its work, about
 // half a second of a release build, so they are a test of their own.
+// test_phosphor_mcp_checkwork counts what each step is charged.
 
 #include "mcptesthelpers.h"
 
 #include <PhosphorMcp/McpServer.h>
 
-#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QTest>
+
+#include <ctime>
 
 using namespace PhosphorMcp;
 using namespace PhosphorMcpTests;
@@ -93,10 +95,22 @@ QJsonArray repeated(const QJsonValue& item, int count)
     return array;
 }
 
-// A hang guard, which a release build stays far below (the rows take
-// milliseconds, half a second for those that spend the whole bound): a
-// debug build with sanitizers is some twenty times slower.
-constexpr int Bound = 60000;
+// A hang guard on the CPU time of the thread, where the server runs too,
+// which a release build stays far below (the rows take milliseconds, half a
+// second for those that spend the whole bound): a debug build with
+// sanitizers is some twenty times slower. A loaded machine stretches the
+// wall-clock time, not this.
+constexpr double BoundSeconds = 60;
+// How long a row waits for its answer on the wall clock. The test's own
+// timeout ends a hang.
+constexpr int WaitMs = 600000;
+
+double threadSeconds()
+{
+    timespec now{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+    return double(now.tv_sec) + double(now.tv_nsec) / 1e9;
+}
 
 const QString TooLargeToList =
     QStringLiteral("- arguments: does not match the schema, and is too large for the server to list each error");
@@ -121,11 +135,11 @@ private:
         QVERIFY2(server.addTool(McpTool(QStringLiteral("t")).setInputSchema(schema), noop(), &error),
                  qPrintable(error));
         QVERIFY(server.start(peer.serverFd(), peer.serverFd()));
-        QElapsedTimer timer;
-        timer.start();
+        const double start = threadSeconds();
         QVERIFY(sendCall(peer, 1, QStringLiteral("t"), arguments));
-        const QJsonObject reply = peer.readOne(Bound);
-        QVERIFY2(timer.elapsed() < Bound, qPrintable(QString::number(timer.elapsed())));
+        const QJsonObject reply = peer.readOne(WaitMs);
+        const double spent = threadSeconds() - start;
+        QVERIFY2(spent < BoundSeconds, qPrintable(QString::number(spent)));
         if (expected.isEmpty()) {
             QCOMPARE(firstText(reply), QStringLiteral("ok"));
         } else {
@@ -189,9 +203,9 @@ private Q_SLOTS:
         QTest::newRow("lists 500 deep, wrong") << lists << "{'a': " + nest(500, "[", "]").replace("1", "'x'") + "}"
                                                << QStringLiteral("- arguments/a") + QStringLiteral("/0").repeated(500)
                 + QStringLiteral(": must be of type array or integer");
-        // ...and through four $ref more, six: 3000 subschemas deep are 500
-        // levels. A release build checks the first a thousand levels deep,
-        // and the stack bound stops a build with sanitizers sooner.
+        // ...and through four $ref more, five: 3000 subschemas deep are 600
+        // levels, with the root and "a". The stack bound stops a build with
+        // sanitizers sooner.
         const QJsonObject chained = parse(
             "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'type': ['array', "
             "'integer'], 'items': {'$ref': '#/$defs/b'}}, 'b': {'$ref': '#/$defs/c'}, 'c': {'$ref': '#/$defs/d'}, "
@@ -234,7 +248,7 @@ private Q_SLOTS:
 
         // The shapes that the audits of the jsoncons checker found costly,
         // each cheap now. dependentRequired with 2000 triggers looked each up
-        // in each object (J27).
+        // in each object.
         QJsonObject triggers;
         for (int i = 0; i < 2000; ++i) {
             triggers.insert(QStringLiteral("t%1").arg(i), QJsonArray{QStringLiteral("x")});
@@ -243,7 +257,7 @@ private Q_SLOTS:
             QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("dependentRequired"), triggers}}}})
                                                                              << "{'v': [" + repeat("{}", 1000000) + "]}"
                                                                              << QString();
-        // additionalProperties that fails for many members (J28).
+        // additionalProperties that fails for many members.
         QJsonObject maps;
         QByteArray mapArguments = "{";
         for (int i = 0; i < 300; ++i) {
@@ -263,7 +277,7 @@ private Q_SLOTS:
                    "- arguments/p103/z: must be of type string\n- arguments/p104/z: must be of type string\n"
                    "- arguments/p105/z: must be of type string\n- arguments/p106/z: must be of type string\n"
                    "- arguments: and 290 more errors");
-        // required inside not and anyOf, every name missing (J78).
+        // required inside not and anyOf, every name missing.
         QJsonArray fields;
         for (int i = 0; i < 1000; ++i) {
             fields.append(QStringLiteral("field%1").arg(i));
@@ -276,7 +290,7 @@ private Q_SLOTS:
         QTest::newRow("required of 1000 inside anyOf, 200000 objects")
             << withV(QJsonObject{{QLatin1StringView("anyOf"), QJsonArray{requiredItems, parse("{'type': 'null'}")}}})
             << "{'v': [" + repeat("{}", 200000) + "]}" << TooLargeToList;
-        // 9000 properties against objects of one other member (J79).
+        // 9000 properties against objects of one other member.
         QJsonObject declared;
         for (int i = 0; i < 9000; ++i) {
             declared.insert(QStringLiteral("%1").arg(i, 6, 10, QLatin1Char('0')), QJsonObject());
@@ -285,14 +299,13 @@ private Q_SLOTS:
             << withV(
                    QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("properties"), declared}}}})
             << "{'v': [" + repeat("{'000000z': 0}", 500000) + "]}" << QString();
-        // unevaluatedItems beside an if whose items fail every other one
-        // (J81).
+        // unevaluatedItems beside an if whose items fail every other one.
         QTest::newRow("unevaluatedItems, 400000 items")
             << withV(parse("{'if': {'items': {'type': 'integer'}, 'unevaluatedItems': {'type': 'integer'}}, 'then': "
                            "true, 'unevaluatedItems': {'type': ['integer', 'string']}}"))
             << "{'v': [" + repeat("1, 'a'", 200000) + "]}" << QString();
-        // propertyNames of many members (J38), and a default, which the
-        // checker never copies (J39).
+        // propertyNames of many members, and a default, which the checker
+        // never copies.
         QTest::newRow("propertyNames, 500000 members")
             << withV(parse("{'propertyNames': {'anyOf': [{'maxLength': 1}, {'minLength': 2, 'maxLength': 8}]}}"))
             << "{'v': {" +
@@ -316,7 +329,7 @@ private Q_SLOTS:
                                                                    << "{'v': [" + repeat("{}", 500000) + "]}"
                                                                    << QString();
         // enum against many strings in an anyOf, and contains that no item
-        // matches (J40).
+        // matches.
         QTest::newRow("enum in an anyOf, 566000 strings")
             << withV(parse("{'items': {'anyOf': [{'enum': ['a', 'b']}, {'enum': ['c', 'd']}, {'enum': ['e']}, "
                            "{'enum': ['f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n']}]}}"))
@@ -324,7 +337,7 @@ private Q_SLOTS:
         QTest::newRow("contains, 2000000 integers")
             << withV(parse("{'contains': {'type': 'string'}}")) << "{'v': [" + repeat("1", 2000000) + "]}"
             << QStringLiteral("- arguments/v: must have an item that matches contains");
-        // Many small objects, which jsoncons' conversion made costly (J34).
+        // Many small objects, which jsoncons' conversion made costly.
         QTest::newRow("2000000 empty objects")
             << withV(parse("{'items': {'type': 'object'}}")) << "{'v': [" + repeat("{}", 2000000) + "]}" << QString();
     }
@@ -420,8 +433,9 @@ private Q_SLOTS:
 
     void longStringsAnswerFast_data()
     {
-        // Each string of the arguments is read once for each subschema that
-        // reads it, and a long enum of strings is a hash.
+        // Each string of the arguments is read in place, as Qt's parser
+        // keeps it, its length counted once for all the subschemas applied
+        // to it in place, and a long enum of strings is a table.
         QTest::addColumn<QJsonObject>("schema");
         QTest::addColumn<QJsonObject>("arguments");
         QTest::addColumn<QString>("expected");
@@ -437,7 +451,18 @@ private Q_SLOTS:
             << QJsonObject{{QLatin1StringView("v"), QString(5000000, cjk)}}
             << QStringLiteral("- arguments/v: must be one of the values of enum");
 
-        // 7.2 MB of UTF-8 counted for each of 35 maxLength.
+        // 6 MB of UTF-8, which Qt's parser keeps as it is, against 300
+        // subschemas that read its length: counted once for all of them.
+        QJsonArray counted;
+        for (int i = 0; i < 300; ++i) {
+            counted.append(QJsonObject{{QLatin1StringView("maxLength"), 3000000 + i}});
+        }
+        QTest::newRow("CJK string against allOf of 300 maxLength")
+            << withV(QJsonObject{{QLatin1StringView("allOf"), counted}})
+            << QJsonObject{{QLatin1StringView("v"), QString(2000000, cjk)}} << QString();
+
+        // 7.2 MB of UTF-8, each string counted once for the 35 maxLength of
+        // an anyOf.
         QJsonArray lengths;
         for (int i = 1; i <= 35; ++i) {
             lengths.append(QJsonObject{{QLatin1StringView("maxLength"), i}});
@@ -557,8 +582,8 @@ private Q_SLOTS:
                      + QStringLiteral(": is nested more than 256 subschemas deep, which the server does not check"));
 
         // A megabyte of schema 900 levels deep, which took the jsoncons
-        // checker ten seconds and two gigabytes (J80), is refused at once;
-        // one of 9000 subschemas 250 levels deep compiles fast.
+        // checker ten seconds and two gigabytes, is refused at once, and one
+        // of 9000 subschemas 250 levels deep compiles fast.
         const auto wide = [](int levels, int width) {
             QJsonObject level;
             for (int d = 0; d < levels; ++d) {
@@ -571,14 +596,13 @@ private Q_SLOTS:
             return QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
                                {QLatin1StringView("properties"), QJsonObject{{QLatin1StringView("x"), level}}}};
         };
-        QElapsedTimer timer;
-        timer.start();
+        const double start = threadSeconds();
         QVERIFY(!add(wide(900, 100)));
         QVERIFY(error.endsWith(
             QLatin1StringView("is nested more than 256 subschemas deep, which the server does not check")));
         QVERIFY2(server.addTool(McpTool(QStringLiteral("wide")).setInputSchema(wide(250, 35)), noop(), &error),
                  qPrintable(error));
-        QVERIFY2(timer.elapsed() < Bound, qPrintable(QString::number(timer.elapsed())));
+        QVERIFY2(threadSeconds() - start < BoundSeconds, qPrintable(QString::number(threadSeconds() - start)));
     }
 };
 

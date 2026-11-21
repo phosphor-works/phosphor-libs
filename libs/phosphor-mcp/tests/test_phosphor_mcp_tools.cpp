@@ -977,9 +977,10 @@ private Q_SLOTS:
         // accepts passes and one it refuses fails. The annotations, format
         // among them, never refuse. The rows marked "departure" are the
         // server's own verdicts, which the README gives: an integer past
-        // qint64 where the schema asks for an integer, and an unpaired
-        // surrogate, are refused. Python's jsonschema agrees with every
-        // other row.
+        // qint64 where the schema asks for an integer (one that Qt's parser
+        // rounds to 2^63 too), and an unpaired surrogate in a string or a
+        // name, are refused. Python's jsonschema disagrees with six of them,
+        // and agrees with every other row.
         QTest::addColumn<QByteArray>("property");
         QTest::addColumn<QByteArray>("value");
         QTest::addColumn<bool>("accepted");
@@ -1002,7 +1003,8 @@ private Q_SLOTS:
         // A number, which the handler reads with toDouble().
         row("integer or number 1e19", "{'type': ['integer', 'number']}", "1e19", true);
         // Qt's parser rounds these to a double, as the README says: the
-        // first arrives as qint64's minimum, the second as 2^63.
+        // first arrives as qint64's minimum, the second as 2^63. Departure:
+        // Python reads the second exactly, an integer.
         row("integer rounded to qint64 min", "{'type': 'integer'}", "-9223372036854775809", true);
         row("integer qint64 max with a fraction", "{'type': 'integer'}", "9223372036854775807.0", false);
         row("number", "{'type': 'number'}", "2.5", true);
@@ -1034,6 +1036,8 @@ private Q_SLOTS:
         row("exclusiveMaximum refuses", "{'exclusiveMaximum': 1}", "1", false);
         row("minLength", "{'type': 'string', 'minLength': 2}", "'a'", false);
         row("minLength accepts", "{'type': 'string', 'minLength': 2}", "'ab'", true);
+        // Departure: an unpaired surrogate, which Python counts as a
+        // character.
         row("minLength unpaired surrogate", "{'type': 'string', 'minLength': 1}", "'\\ud800'", false);
         row("minLength of a pair", "{'type': 'string', 'minLength': 2}", "'\\ud83d\\ude00'", false);
         row("maxLength of pairs", "{'type': 'string', 'maxLength': 2}", "'\\ud83d\\ude00\\ud83d\\ude00'", true);
@@ -1058,6 +1062,7 @@ private Q_SLOTS:
         row("minProperties accepts", "{'type': 'object', 'minProperties': 1}", "{'a': 1}", true);
         row("maxProperties", "{'type': 'object', 'maxProperties': 1}", "{'a': 1, 'b': 2}", false);
         row("maxProperties accepts", "{'type': 'object', 'maxProperties': 1}", "{'a': 1}", true);
+        // Departure: an unpaired surrogate in a name.
         row("member name unpaired surrogate", "{'type': 'object'}", "{'\\ud800': 1}", false);
         row("additionalProperties schema", "{'type': 'object', 'additionalProperties': {'type': 'boolean'}}",
             "{'a': 1}", false);
@@ -1214,6 +1219,9 @@ private Q_SLOTS:
         row("unevaluatedProperties failed branch",
             "{'anyOf': [{'properties': {'a': true}, 'required': ['z']}, true], 'unevaluatedProperties': false}",
             "{'a': 1}", false);
+        row("unevaluatedProperties failed oneOf branch",
+            "{'oneOf': [{'properties': {'a': true}, 'required': ['z']}, true], 'unevaluatedProperties': false}",
+            "{'a': 1}", false);
         row("unevaluatedProperties a schema",
             "{'properties': {'a': true}, 'unevaluatedProperties': {'type': 'integer'}}", "{'a': 'x', 'b': 1}", true);
         row("unevaluatedProperties a schema refuses",
@@ -1266,6 +1274,10 @@ private Q_SLOTS:
             "['a', 1]", false);
         row("unevaluatedItems beside not", "{'not': {'not': {'items': true}}, 'unevaluatedItems': false}", "[1]",
             false);
+        // An unevaluatedItems inside evaluates every item, for the one
+        // outside.
+        row("unevaluatedItems nested", "{'allOf': [{'unevaluatedItems': true}], 'unevaluatedItems': false}", "[1, 2]",
+            true);
         row("unevaluatedItems in a failed anyOf branch",
             "{'anyOf': [{'prefixItems': [true, true], 'minItems': 3}, {'prefixItems': [true]}], 'unevaluatedItems': "
             "false}",
@@ -1733,6 +1745,25 @@ private Q_SLOTS:
         QCOMPARE(errorLines(peer.readOne()),
                  QStringLiteral("- arguments/v: must be of type string\n"
                                 "- arguments/v: must match at least one schema of anyOf"));
+
+        // Two errors whose place and description run together the same are
+        // two errors: the name "abcd" fails propertyNames, and the value of
+        // "abcdthe property name " fails maxLength, "/abcd" and "the
+        // property name must be..." against "/abcdthe property name " and
+        // "must be...".
+        Peer other;
+        McpServer names;
+        QVERIFY(names.addTool(McpTool(QStringLiteral("u"))
+                                  .setInputSchema(parse("{'type': 'object', 'propertyNames': {'maxLength': 3}, "
+                                                        "'additionalProperties': {'maxLength': 3}}")),
+                              noop()));
+        QVERIFY(names.start(other.serverFd(), other.serverFd()));
+        QVERIFY(sendCall(other, 2, QStringLiteral("u"), "{'abcd': 'x', 'abcdthe property name ': 'wxyz'}"));
+        QCOMPARE(errorLines(other.readOne()),
+                 QStringLiteral("- arguments/abcd: the property name must be at most 3 characters long\n"
+                                "- arguments/abcdthe property name : the property name must be at most 3 characters "
+                                "long\n"
+                                "- arguments/abcdthe property name : must be at most 3 characters long"));
     }
 
     void requiredClientCapabilities()
