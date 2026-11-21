@@ -236,12 +236,12 @@ parse(mesh->bytes);
 ## Schema validation
 
 `SchemaValidator` checks a document against a JSON Schema 2020-12 schema.
-`SchemaValidator.h` is the full contract; in short:
+`SchemaValidator.h` is the full contract. In short:
 
 - A schema is read as Qt reads JSON (no comments, the last of two members
-  with one name kept) and must be 2020-12: `$schema` absent or
-  `https://json-schema.org/draft/2020-12/schema` (a trailing `#` allowed),
-  with no keyword of another draft (`definitions`, `dependencies`,
+  with one name kept) and must be 2020-12, with `$schema` absent or
+  `https://json-schema.org/draft/2020-12/schema` (a trailing `#` allowed)
+  and no keyword of another draft (`definitions`, `dependencies`,
   `additionalItems`, `$recursiveRef`, `$recursiveAnchor`, an array under
   `items`). It is checked against the 2020-12 meta-schema when it is
   constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there,
@@ -264,7 +264,7 @@ parse(mesh->bytes);
   `items` or another keyword that applies to a member or an item is
   allowed.
 - `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex,
-  json-pointer, uri and uri-reference, as jsoncons reads each: it takes the
+  json-pointer, uri and uri-reference, as jsoncons reads each. It takes the
   year 0000 and the ipv4 address 256.1.1.1, and refuses an empty
   uri-reference and the uri `a:`. A schema naming another format is refused,
   since jsoncons would ignore it, and so is `hostname`, whose jsoncons check
@@ -272,30 +272,31 @@ parse(mesh->bytes);
 - A string or member name holding U+0000 or an unpaired UTF-16 surrogate,
   and a number outside int64 (below -2^63, or 2^63 and above), are refused
   at their path before jsoncons sees them, wherever they sit in the
-  document, also where the schema accepts any value: jsoncons' integer
-  check is undefined behaviour on such a number, and may run at any node.
+  document, also where the schema accepts any value, since jsoncons' integer
+  check is undefined behaviour on such a number and may run at any node.
   Python's 2020-12, which CI runs, accepts such numbers, so a data file
   holding one passes CI and is refused at load.
 - Integers within int64 are exact, and so are `minimum`, `maximum` and
   their exclusive forms between them. `multipleOf` works in doubles with a
-  tolerance of one ulp: 0.07 is a multiple of 0.01 here, not in Python. Its
+  tolerance of one ulp, so 0.07 is a multiple of 0.01 here, not in Python. Its
   message prints the divisor with six decimals (`0.075 is not a multiple of
   0.010000`).
 - `pattern` is an ECMAScript `std::regex` matched against UTF-8 bytes, so a
   dot, a class or a quantifier applies to one byte of a character past
   U+007F (`^.$` does not match "é").
 - `validate()` returns at most 100 errors, then one entry with an empty path
-  that counts the rest. A path or message longer than 500 UTF-16 code units
-  keeps the first 500 and gains an ellipsis. The reasons an `anyOf`, `oneOf`
-  or `allOf` failed follow its error, prefixed with the branch
-  (`anyOf/1: ...`). So do the reasons a member failed an
-  `additionalProperties` subschema, which jsoncons does not give. The member
-  is checked against that subschema again, down to four such subschemas one
-  inside another, and each reason is prefixed `additionalProperties: `.
-  Each subschema is compiled for that as a copy of the whole schema, at most
-  100 times in one `validate()`. The validator keeps the first 16 it
-  compiles for later calls, from any thread. `validate()`'s documentation
-  gives the cost.
+  that counts the rest. A path or message longer than 500 UTF-16 code units,
+  escapes included, keeps the first 500 (a few fewer rather than split a
+  surrogate pair or an escape) and gains an ellipsis.
+- The reasons an `anyOf`, `oneOf` or `allOf` failed follow its error,
+  prefixed with the branch (`anyOf/1: ...`). So do the reasons a member
+  failed an `additionalProperties` subschema, which jsoncons does not give.
+  The member is checked against that subschema again, down to four such
+  subschemas one inside another, and each reason is prefixed
+  `additionalProperties: `. Each subschema is compiled for that as a copy of
+  the whole schema, at most 100 times in one `validate()`. The validator
+  keeps the first 16 it compiles for later calls, from any thread.
+  `validate()`'s documentation gives the cost.
 - A failed `dependentSchemas` subschema is reported below the member that
   triggered it (`/a/c` for member `c`, when `a` triggered it), as jsoncons
   reports it. A member that fails an `additionalProperties` subschema there

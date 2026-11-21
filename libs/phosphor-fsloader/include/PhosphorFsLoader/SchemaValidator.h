@@ -206,9 +206,11 @@ public:
      * @return @c std::nullopt when the document satisfies the schema;
      *         otherwise the non-empty list of violations, at most 100 of
      *         them: when there were more, one last entry with an empty path
-     *         says how many more ("and 250 more errors not listed"). Past the
-     *         100th, the reasons of a failed @c additionalProperties member
-     *         are not looked for, so the count holds what jsoncons reported.
+     *         says how many more ("and 250 more errors not listed"). Once
+     *         100 are kept, no recheck for the reasons of a failed
+     *         @c additionalProperties member begins, so the count holds what
+     *         jsoncons reported and the reasons found by a recheck already
+     *         under way.
      *         A validator whose schema was refused always returns a
      *         one-element list, whose message says why. For a schema the
      *         meta-schema refuses, that is its most specific reason, at the

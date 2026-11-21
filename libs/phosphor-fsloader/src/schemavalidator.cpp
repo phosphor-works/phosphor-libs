@@ -871,8 +871,9 @@ void addMessage(const Report& report, const jsonschema::validation_message& mess
             errors.add(path, text);
         } else if (report.which == Messages::All) {
             errors.add(path, text);
-            // Past the last error kept, nothing is rechecked: the count then
-            // holds only what jsoncons reported.
+            // Once the last error is kept, no recheck begins, so the count
+            // holds what jsoncons reported and the reasons a recheck already
+            // under way finds.
             if (errors.wantsMore()) {
                 recheckMember(report, message, *member, path, prefix + QStringLiteral("additionalProperties: "));
             }
