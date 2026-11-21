@@ -38,20 +38,6 @@ PHOSPHORSHADERS_EXPORT QString standardUserPresetRoot(const QString& subdirector
 PHOSPHORSHADERS_EXPORT QString userPresetDirectory(const QString& root, ShaderFamily family);
 
 /**
- * @brief Import pre-existing overlay preset files into the family layout.
- *
- * Before presets became assignable, the zone shader browser saved them through
- * a different path. This moves any it finds at @p root into
- * `<root>/overlay/<id>.json`, deriving each id from the old filename so two
- * processes racing the migration agree on the result rather than importing
- * twice. Idempotent: a file it has already moved is not seen again, and each
- * import clears the reference it applied.
- *
- * @return the number of files imported.
- */
-PHOSPHORSHADERS_EXPORT int migrateLegacyOverlayPresets(const QString& root);
-
-/**
  * @brief One per consumer, holding every shader preset for every family it names.
  *
  * One per consumer rather than one per process, and that is a convention, not an
@@ -125,11 +111,7 @@ public:
     ShaderPresetStore& operator=(const ShaderPresetStore&) = delete;
 
     /**
-     * @brief Import any legacy overlay presets, then scan the named families.
-     *
-     * Safe to call from every process that has one of these, and in any order:
-     * the migration derives its target ids from the old filenames, so two
-     * processes racing it agree on the result instead of importing twice.
+     * @brief Scan the named families.
      *
      * A family already publishing is left exactly as it is, so a second call
      * cannot produce two publishers for one family — and now cannot even be
