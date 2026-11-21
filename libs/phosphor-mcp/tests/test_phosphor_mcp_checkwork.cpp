@@ -159,6 +159,9 @@ private Q_SLOTS:
         // A string's text read for the keywords of strings (1, and 1 for
         // each 64 bytes, at most 4), and compared in its own encoding when
         // the sizes agree: two units for 32 bytes.
+        // type alone reads no text.
+        row("type of strings", "{'items': {'type': 'string'}}", repeat("'" + A32 + "'", 256), 10 + 256 * (3 + 2 + 1),
+            0);
         row("enum of strings", "{'items': {'enum': ['" + B32 + "', '" + A32 + "']}}", repeat("'" + A32 + "'", 256),
             10 + 256 * (3 + 2 + 1 + 1 + (1 + 2) + (1 + 2)), 0);
         row("const of a string", "{'items': {'const': '" + A32 + "'}}", repeat("'" + A32 + "'", 256),
@@ -310,6 +313,9 @@ private Q_SLOTS:
             members("1", 256),
             (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2) + (2 + 2) + 256 * 1 + 255 * (2 + 2 + 1),
             4 * WordBytes);
+        // Names of 71 bytes, a line more each time a member is visited.
+        row("unevaluatedProperties of long names", "{'unevaluatedProperties': {'type': 'integer'}}",
+            members("1", 256, 70), (3 + 2) + 256 * ((2 + 1) + 3) + (2 + 2 + 1) + 256 * (1 + (2 + 1) + 2 + 1), 0);
 
         // uniqueItems: a hash of each item (1), and a sort of integers (1,
         // and half the bits of the count, for each).
@@ -635,6 +641,20 @@ private Q_SLOTS:
 
     void errorsBuildTheirPointersOnce()
     {
+        // "~" and "/" escaped in the pointer that tells errors apart, so
+        // that "/a~1b" and "/a/b" are two places.
+        const QJsonObject strings =
+            parse("{'additionalProperties': {'type': 'string', 'additionalProperties': {'type': 'string'}}}")
+                .toObject();
+        QCOMPARE(
+            count(strings, parse("{'a/b': 1, 'a': {'b': 1}}")).lines,
+            (QStringList{QStringLiteral("/a: must be of type string"), QStringLiteral("/a/b: must be of type string"),
+                         QStringLiteral("/a~1b: must be of type string")}));
+        // A long name of UTF-8 shown cut, as its start decoded shows it.
+        const QByteArray cjk = QByteArray("\xE4\xB8\xAD").repeated(70);
+        QCOMPARE(count(strings, parse("{'" + cjk + "': 1}")).lines,
+                 QStringList{QString::fromUtf8("/" + cjk.left(3 * 61) + "...: must be of type string")});
+
         // A pointer longer than any that the report keeps is not built: one
         // line for the value, at once. Names of 400,000 code units, three
         // deep.
