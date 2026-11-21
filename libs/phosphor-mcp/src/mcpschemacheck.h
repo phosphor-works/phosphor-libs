@@ -17,27 +17,52 @@ namespace PhosphorMcp::Schema {
 
 // The bound of a check (see Budget).
 //
-// Work is counted in units, about 10 to 25 ns each of a release build,
+// Work is counted in units, at most about 18 ns each of a release build,
 // whatever the schema and the value: the checker charges each step it takes
 // (a value walked, a subschema applied to a value, a keyword checked, a
-// member or an item visited, a name looked up, sixteen characters of a
-// string read, compared or hashed, a word of an annotation set merged, an
-// error built), weighted by what it costs. The check stops the moment the
-// count passes MaxWork, about a second. The README has the measured times.
+// member or an item visited, a name looked up, sixteen code units of a
+// string or a name read, compared or hashed, a word of an annotation set
+// merged, an error built), weighted by what it costs. The check stops the
+// moment the count passes MaxWork, about a second. The README has the
+// measured times.
 constexpr qint64 MaxWork = 40'000'000;
-// The memory the check holds beyond the value and the schema: the sets of
-// the members and items that subschemas evaluated (for unevaluatedProperties
-// and unevaluatedItems), the keys that uniqueItems sorts, and the errors
-// kept to tell them apart.
+// The memory the check holds beyond the value and the schema, counted as it
+// goes: the sets of the members and items that subschemas evaluated (for
+// unevaluatedProperties and unevaluatedItems), the keys that uniqueItems
+// sorts, and the sorted names of the objects whose members are looked up.
+// The errors are not counted here, since MaxCountedErrors and
+// MaxErrorPointerLength bound them.
 constexpr qint64 MaxMemory = 64 * 1024 * 1024;
 // Subschemas applied inside each other, each a few frames of the checker's
-// recursion on the stack: about 300 bytes each in a release build, as
-// measured, and three times that in a debug build with sanitizers...
+// recursion on the stack: about a kilobyte each in a release build, as
+// measured, and more in a debug build with sanitizers...
 constexpr int MaxCheckDepth = 3000;
 // ...and the stack that the check itself takes, measured from the addresses
 // of its frames, whatever the build: half of the 8 MiB that a Linux thread
 // has by default.
 constexpr qint64 MaxCheckStackBytes = 4 * 1024 * 1024;
+
+// What each step of a check is charged, so that a unit is about the same
+// time whatever the schema and the value, as measured.
+//
+// A value walked before the check (its type read, its place kept).
+constexpr qint64 UnitsPerValueWalked = 3;
+// A subschema applied to a value.
+constexpr qint64 UnitsPerApply = 2;
+// More for an object or an array, walked or applied to: its members or
+// items are read through its own storage, away from the last.
+constexpr qint64 UnitsPerContainer = 2;
+// A keyword checked, or an item visited.
+constexpr qint64 UnitsPerStep = 1;
+// A member visited, or a name looked up or sorted.
+constexpr qint64 UnitsPerMember = 2;
+// An error built, beside its pointer's length.
+constexpr qint64 UnitsPerError = 16;
+// Each this many code units of a string or a name read, compared or hashed
+// (bytes of UTF-8, which cost more for each character than UTF-16 does).
+constexpr qint64 CharactersPerUnit = 16;
+// Words of an annotation set merged or cleared for each unit.
+constexpr qint64 WordsPerUnit = 4;
 
 // Values nested deeper than this are refused before any check. Qt's JSON
 // parser takes no more than 1024 levels in a whole message, so arguments
@@ -113,21 +138,24 @@ private:
 
 // Comparisons of JSON values as JSON Schema 2020-12 makes them (enum, const,
 // uniqueItems): numbers by their value, 1 and 1.0 alike, a boolean never
-// equal to a number, strings by their code units, arrays item by item and
-// objects member by member, whatever the order of their members. Each
-// charges the budget for its work.
+// equal to a number, strings by their characters, arrays item by item and
+// objects member by member, whatever the order in which Qt keeps their
+// members (an object built in C++ keeps them in the order of their UTF-16
+// code units, a parsed one in that of their code points). Each charges the
+// budget for its work, and returns early once the budget is spent.
 bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
-// The same, with the string of `b` read already (when `b` is a string).
-bool equalValues(const QJsonValue& a, const QJsonValue& b, const QString* bText, Budget& budget);
 // A total order of JSON values that is 0 exactly when equalValues() is true.
 int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
-// A hash that is the same for values that equalValues() finds equal.
-quint64 hashValue(const QJsonValue& value, Budget& budget);
+// A hash that is the same for values that equalValues() finds equal, keyed
+// by `key` so that a value cannot be chosen to collide with another without
+// it.
+quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget);
 
-// A place in a value: a member name, or an item's index.
+// A place in a value: a member name, read in place in the value (which
+// outlives the place), or an item's index.
 struct PathToken
 {
-    QString name;
+    QAnyStringView name;
     qsizetype index = -1;
 };
 using Path = std::vector<PathToken>;
@@ -143,6 +171,18 @@ QString shownName(const QString& name);
 class Report
 {
 public:
+    // What the line says when there are too many errors to list: that the
+    // value does not match the schema, or, for the walk before the check,
+    // only that it is refused.
+    enum class Kind : quint8 {
+        Check,
+        Precheck,
+    };
+    explicit Report(Kind kind)
+        : m_kind(kind)
+    {
+    }
+
     // "<pointer>: <description>" for the place `path` (and `last` below it,
     // when not null), unless it was added before. The test is on the whole
     // pointer, not on the line, which cuts names: two long names alike in
@@ -167,6 +207,7 @@ private:
     qsizetype m_pointerLength = 0;
     qsizetype m_more = 0;
     bool m_overflow = false;
+    Kind m_kind;
 };
 
 // What a check took, for measurements.

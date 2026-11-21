@@ -11,6 +11,7 @@
 #include <QLatin1StringView>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -246,6 +247,8 @@ private:
     QStringList m_path;
     QHash<QString, int> m_anchors;
     QString m_error;
+    // The contentSchema keywords that the place being built is inside.
+    int m_contentSchemas = 0;
 };
 
 int SchemaBuilder::build(const QJsonValue& schema, int parent, const QString& keyword, const QString* name, int depth)
@@ -259,14 +262,14 @@ int SchemaBuilder::build(const QJsonValue& schema, int parent, const QString& ke
     }
     if (depth > MaxNodeDepth) {
         return fail(QStringLiteral("%1: is nested more than %2 subschemas deep, which the server does not check")
-                        .arg(here())
-                        .arg(MaxNodeDepth));
+                        .arg(here(), QString::number(MaxNodeDepth)));
     }
     const int index = int(m_nodes.size());
     m_nodes.emplace_back();
     Node& node = m_nodes.back();
     node.parent = parent;
     node.keyword = keyword;
+    node.inContentSchema = m_contentSchemas > 0;
     if (name) {
         node.name = *name;
         node.hasName = true;
@@ -354,8 +357,7 @@ QString SchemaBuilder::checkLiteral(const QJsonValue& value, int depth)
 {
     if (depth > MaxNestingDepth) {
         return QStringLiteral("%1: is nested more than %2 levels deep, which the server does not check")
-            .arg(here())
-            .arg(MaxNestingDepth);
+            .arg(here(), QString::number(MaxNestingDepth));
     }
     if (value.isString() && !value.toString().isValidUtf16()) {
         return QStringLiteral("%1: a string with an unpaired UTF-16 surrogate is not supported").arg(here());
@@ -456,7 +458,10 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
     };
 
     // Refused, with the reason.
-    if (is("pattern") || (is("patternProperties") && !(value.isObject() && value.toObject().isEmpty()))) {
+    if (is("patternProperties") && !value.isObject()) {
+        return QStringLiteral("%1: must be an object of schemas").arg(here());
+    }
+    if (is("pattern") || (is("patternProperties") && !value.toObject().isEmpty())) {
         // A regular expression engine on text that the model chose is its
         // own risk (stack depth, backtracking time, UTF-16 or code points),
         // which the server does not take.
@@ -507,11 +512,17 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         return QString();
     }
     if (is("contentSchema")) {
-        // An annotation about the decoded content, never applied: only its
-        // form is checked.
-        return value.isObject() || value.isBool()
-            ? QString()
-            : QStringLiteral("%1: a schema must be an object or a boolean").arg(here());
+        // An annotation about the decoded content, never applied. It is
+        // checked as any subschema is, as a client that reads the
+        // meta-schema checks it, and no $ref may lead into it.
+        ++m_contentSchemas;
+        const int built = child(index, key, value, nullptr, depth);
+        --m_contentSchemas;
+        if (built < 0) {
+            return m_error;
+        }
+        node().contentSchema = built;
+        return QString();
     }
     if (is("$schema")) {
         if (m_path.size() != 1) {
@@ -575,12 +586,15 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         for (const QJsonValue& entry : value.toArray()) {
             if (entry.isString()) {
                 target.enumStrings.append(entry.toString());
+                target.enumUtf8.append(entry.toString().toUtf8());
             } else {
                 target.enumOthers.push_back(entry);
             }
         }
         if (target.enumStrings.size() > EnumHashThreshold) {
-            target.enumStringSet = QSet<QString>(target.enumStrings.cbegin(), target.enumStrings.cend());
+            for (const QString& entry : std::as_const(target.enumStrings)) {
+                target.enumTable.insert(entry, 0);
+            }
         }
         return QString();
     }
@@ -592,6 +606,7 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         node().hasConst = true;
         node().constValue = value;
         node().constString = value.toString();
+        node().constUtf8 = node().constString.toUtf8();
         return QString();
     }
     struct Bound
@@ -699,6 +714,9 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         if (!childObject(index, key, value, QStringLiteral("a property name"), children, depth)) {
             return m_error;
         }
+        for (const auto& [name, child] : children) {
+            node().dependentSchemaIndex.insert(name, child);
+        }
         node().dependentSchemas = std::move(children);
         return QString();
     }
@@ -788,17 +806,13 @@ int SchemaBuilder::resolvePointer(const QStringList& tokens) const
         const QString& token = tokens.at(i);
         const bool last = i + 1 == tokens.size();
         int next = -1;
-        if ((token == QLatin1StringView("properties") || token == QLatin1StringView("$defs")) && !last) {
-            const QHash<QString, int>& children =
-                token == QLatin1StringView("properties") ? node.properties : node.definitions;
-            next = children.value(tokens.at(i + 1), -1);
+        if (token == QLatin1StringView("properties") && !last) {
+            next = node.properties.value(tokens.at(i + 1));
             i += 2;
-        } else if (token == QLatin1StringView("dependentSchemas") && !last) {
-            for (const auto& [name, child] : node.dependentSchemas) {
-                if (name == tokens.at(i + 1)) {
-                    next = child;
-                }
-            }
+        } else if ((token == QLatin1StringView("$defs") || token == QLatin1StringView("dependentSchemas")) && !last) {
+            const QHash<QString, int>& children =
+                token == QLatin1StringView("$defs") ? node.definitions : node.dependentSchemaIndex;
+            next = children.value(tokens.at(i + 1), -1);
             i += 2;
         } else if ((token == QLatin1StringView("prefixItems") || token == QLatin1StringView("allOf")
                     || token == QLatin1StringView("anyOf") || token == QLatin1StringView("oneOf"))
@@ -822,6 +836,7 @@ int SchemaBuilder::resolvePointer(const QStringList& tokens) const
                 {QStringLiteral("else"), &Node::elseSchema},
                 {QStringLiteral("unevaluatedItems"), &Node::unevaluatedItems},
                 {QStringLiteral("unevaluatedProperties"), &Node::unevaluatedProperties},
+                {QStringLiteral("contentSchema"), &Node::contentSchema},
             };
             const auto slot = singles.constFind(token);
             next = slot == singles.cend() ? -1 : node.*(*slot);
@@ -861,7 +876,11 @@ QString SchemaBuilder::resolveReference(int index)
     if (fragment.isEmpty() || fragment.startsWith(QLatin1Char('/'))) {
         // A JSON pointer, percent-decoded (RFC 6901, section 6).
         const std::optional<QStringList> tokens = pointerTokens(*decoded);
-        target = tokens ? resolvePointer(*tokens) : -1;
+        if (!tokens) {
+            return QStringLiteral("%1: is not a valid JSON pointer, where \"~\" must be followed by \"0\" or \"1\"")
+                .arg(at);
+        }
+        target = resolvePointer(*tokens);
     } else {
         // A plain name, compared as it is written: RFC 3986 does not decode
         // a fragment, and "%66oo" names no anchor.
@@ -870,6 +889,12 @@ QString SchemaBuilder::resolveReference(int index)
     if (target < 0) {
         return QStringLiteral("%1: refers to no schema in the tool's schema").arg(at);
     }
+    if (m_nodes[std::size_t(target)].inContentSchema) {
+        return QStringLiteral(
+                   "%1: refers to a schema inside \"contentSchema\", which is an annotation that the server never "
+                   "applies")
+            .arg(at);
+    }
     m_nodes[std::size_t(index)].ref = target;
     return QString();
 }
@@ -877,8 +902,17 @@ QString SchemaBuilder::resolveReference(int index)
 // The checker follows each $ref while it checks a value, so a $ref that
 // leads back to its own schema through subschemas that apply to the same
 // value would recurse without end. Such a loop holds a $ref, since a schema
-// without one is a tree. The walk keeps its own stack: a long chain of
+// without one is a tree. A loop is refused wherever it is, in a subschema
+// that no value reaches too. The walk keeps its own stack: a long chain of
 // subschemas must not recurse on the machine's.
+//
+// Without a loop, $ref still lets a schema apply more subschemas to one
+// value than its nesting shows: a chain of $ref longer than the check goes
+// deep, or two $ref to the same schema at each of forty levels, 2^40 of
+// them. Each such schema would stop the check of a value that reaches it, so
+// it is refused too: a chain of more than MaxCheckDepth subschemas applied to
+// the same value, or more of them than the bound of the work lets the check
+// apply, counting every branch.
 QString SchemaBuilder::findCycle()
 {
     enum class Mark : quint8 {
@@ -894,6 +928,12 @@ QString SchemaBuilder::findCycle()
     };
     std::vector<Mark> marks(m_nodes.size(), Mark::New);
     std::vector<Frame> stack;
+    // For each node done: the longest chain of subschemas that it applies
+    // to its value, itself included, and how many it applies in all, up to
+    // the most that the work allows.
+    constexpr qint64 MostApplied = MaxWork / UnitsPerApply;
+    std::vector<int> chain(m_nodes.size(), 0);
+    std::vector<qint64> applied(m_nodes.size(), 0);
     const auto loopAt = [&](int to) -> int {
         // The loop is the stack from `to` on, and a node on it goes on by
         // its $ref.
@@ -918,7 +958,28 @@ QString SchemaBuilder::findCycle()
         while (!stack.empty()) {
             Frame& top = stack.back();
             if (top.position == top.next.size()) {
-                marks[std::size_t(top.node)] = Mark::Done;
+                const std::size_t done = std::size_t(top.node);
+                int longest = 0;
+                qint64 total = 1;
+                for (const int next : top.next) {
+                    longest = std::max(longest, chain[std::size_t(next)]);
+                    total = std::min(MostApplied + 1, total + applied[std::size_t(next)]);
+                }
+                chain[done] = longest + 1;
+                applied[done] = total;
+                if (chain[done] > MaxCheckDepth) {
+                    return QStringLiteral(
+                               "%1: applies a chain of more than %2 subschemas to the same value, which the server "
+                               "does not check")
+                        .arg(nodePointer(m_nodes, top.node), QString::number(MaxCheckDepth));
+                }
+                if (total > MostApplied) {
+                    return QStringLiteral(
+                               "%1: applies more than %2 subschemas to the same value, counting every branch, which "
+                               "the server does not check")
+                        .arg(nodePointer(m_nodes, top.node), QString::number(MostApplied));
+                }
+                marks[done] = Mark::Done;
                 stack.pop_back();
                 continue;
             }
@@ -943,8 +1004,19 @@ QString SchemaBuilder::findCycle()
 
 QString compileSchema(const QJsonObject& schema, bool objectRoot, CompiledSchema& compiled)
 {
-    if (objectRoot && schema.value(QLatin1StringView("type")) != QJsonValue(QStringLiteral("object"))) {
-        return QStringLiteral("/type: the root of a tool schema must have \"type\": \"object\"");
+    if (objectRoot) {
+        // The members read one by one: QJsonObject::value() misses a name in
+        // an object that the application built from a parsed one and then
+        // added to (see the Members of the check).
+        bool isObject = false;
+        for (auto it = schema.begin(); it != schema.end(); ++it) {
+            if (QAnyStringView::equal(it.keyView(), QLatin1StringView("type"))) {
+                isObject = it.value() == QJsonValue(QStringLiteral("object"));
+            }
+        }
+        if (!isObject) {
+            return QStringLiteral("/type: the root of a tool schema must have \"type\": \"object\"");
+        }
     }
     std::vector<Node> nodes;
     SchemaBuilder builder(nodes);

@@ -8,6 +8,7 @@
 
 #include "mcpschemacheck.h"
 
+#include <QHashSeed>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLatin1StringView>
@@ -15,32 +16,11 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <type_traits>
 
 namespace PhosphorMcp::Schema {
 
 namespace {
-
-// What each step of a check is charged (see MaxWork), so that a unit is
-// about the same time whatever the schema and the value, as measured.
-//
-// A value walked before the check (its type read, its place kept).
-constexpr qint64 UnitsPerValueWalked = 3;
-// A subschema applied to a value.
-constexpr qint64 UnitsPerApply = 2;
-// More for an object or an array, walked or applied to: its members or
-// items are read through its own storage, away from the last.
-constexpr qint64 UnitsPerContainer = 2;
-// A keyword checked, or an item visited.
-constexpr qint64 UnitsPerStep = 1;
-// A member visited: its name read.
-constexpr qint64 UnitsPerMember = 2;
-// An error built, beside its pointer's length.
-constexpr qint64 UnitsPerError = 16;
-// Each this many UTF-16 code units of a string or a name read, compared or
-// hashed.
-constexpr qint64 CharactersPerUnit = 16;
-// Words of an annotation set merged or cleared for each unit.
-constexpr qint64 WordsPerUnit = 4;
 
 const QString TooLargeToCheck = QStringLiteral(": is too large for the server to check against the schema");
 
@@ -142,6 +122,130 @@ private:
     std::vector<quint64> m_bits;
 };
 
+// What the subschemas applied to the same value in place read once and
+// share: the length of a string, and an index of an object's member names
+// to look names up in. QJsonObject::contains() searches the members in the
+// order that Qt keeps them in, and an object that a handler built from a
+// parsed one and then added to is in no single order, so it misses names.
+// The index holds the names sorted by a hash keyed as uniqueItems' is (a
+// name is found among those with its hash), is built the first time a
+// subschema looks a name up, and its memory is counted.
+class Shared
+{
+public:
+    Shared(Budget& budget, quint64 key)
+        : m_budget(budget)
+        , m_key(key)
+    {
+    }
+    ~Shared()
+    {
+        m_budget.release(m_bytes);
+    }
+    Shared(const Shared&) = delete;
+    Shared& operator=(const Shared&) = delete;
+
+    // The length of `text` in code points, counted once.
+    qsizetype length(QAnyStringView text)
+    {
+        if (m_length < 0) {
+            m_budget.charge(1 + text.size() / CharactersPerUnit);
+            m_length = codePoints(text);
+        }
+        return m_length;
+    }
+
+    // Whether `object` has a member `name`. False, too, once the budget is
+    // spent.
+    bool contains(const QJsonObject& object, const QString& name)
+    {
+        const qsizetype size = object.size();
+        if (size == 0) {
+            m_budget.charge(1);
+            return false;
+        }
+        if (!m_indexed && !index(object)) {
+            return false;
+        }
+        // The name hashed, a binary search, and the names of its hash
+        // compared with it.
+        m_budget.charge(1 + std::bit_width(quint64(size)) + 2 * (name.size() / CharactersPerUnit));
+        const quint64 hash = hashText(name, m_key);
+        auto it = std::lower_bound(m_names.begin(), m_names.end(), hash, [](const Name& a, quint64 b) {
+            return a.hash < b;
+        });
+        for (; it != m_names.end() && it->hash == hash; ++it) {
+            m_budget.charge(UnitsPerStep + (it->name.size() + name.size()) / CharactersPerUnit);
+            if (QAnyStringView::equal(it->name, name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    struct Name
+    {
+        quint64 hash;
+        QAnyStringView name;
+    };
+
+    bool index(const QJsonObject& object)
+    {
+        const qsizetype size = object.size();
+        m_bytes = qint64(size) * qint64(sizeof(Name));
+        if (!m_budget.allocate(m_bytes)) {
+            return false;
+        }
+        // Each name hashed, and a sort of plain integers.
+        qint64 units = qint64(size) * (UnitsPerMember + std::bit_width(quint64(size)) / 4);
+        m_names.reserve(std::size_t(size));
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            const QAnyStringView name = it.keyView();
+            units += 2 * (name.size() / CharactersPerUnit);
+            m_names.push_back(Name{hashText(name, m_key), name});
+        }
+        if (!m_budget.charge(units)) {
+            return false;
+        }
+        std::sort(m_names.begin(), m_names.end(), [](const Name& a, const Name& b) {
+            return a.hash < b.hash;
+        });
+        m_indexed = true;
+        return true;
+    }
+
+    Budget& m_budget;
+    quint64 m_key;
+    std::vector<Name> m_names;
+    qint64 m_bytes = 0;
+    qsizetype m_length = -1;
+    bool m_indexed = false;
+};
+
+// Whether a string of a value is `text`, which the schema keeps in UTF-16
+// and in UTF-8: compared in the string's own encoding, never decoded, and
+// only when the sizes agree.
+bool sameText(QAnyStringView value, const QString& text, const QByteArray& utf8, Budget& budget)
+{
+    return value.visit([&](auto view) {
+        using View = decltype(view);
+        constexpr bool isUtf8 = !std::is_same_v<View, QStringView> && !std::is_same_v<View, QLatin1StringView>;
+        const qsizetype size = isUtf8 ? utf8.size() : text.size();
+        if (view.size() != size) {
+            return false;
+        }
+        budget.charge(size / CharactersPerUnit);
+        if constexpr (std::is_same_v<View, QStringView>) {
+            return view == QStringView(text);
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            return view == text;
+        } else {
+            return QByteArrayView(reinterpret_cast<const char*>(view.data()), view.size()) == utf8;
+        }
+    });
+}
+
 // The walk over a value before the check. It refuses what a handler would
 // misread or the reply could not carry (an unpaired surrogate, a number that
 // is not finite), and a value nested too deeply for the walks after it.
@@ -166,9 +270,13 @@ public:
         }
         switch (value.type()) {
         case QJsonValue::String: {
-            const QString text = value.toString();
-            m_budget.charge(text.size() / CharactersPerUnit);
-            if (!text.isValidUtf16()) {
+            // Read in place: only UTF-16 can hold an unpaired surrogate,
+            // and only it is read through.
+            const QAnyStringView text = value.toStringView();
+            if (isUtf16(text)) {
+                m_budget.charge(text.size() / CharactersPerUnit);
+            }
+            if (!isValidText(text)) {
                 problem(QStringLiteral("contains an unpaired UTF-16 surrogate"));
             }
             break;
@@ -192,9 +300,10 @@ public:
             m_budget.charge(UnitsPerContainer);
             const QJsonObject object = value.toObject();
             for (auto it = object.begin(); it != object.end() && !m_report.isDone(); ++it) {
-                m_path.push_back(PathToken{it.key(), -1});
-                m_budget.charge(UnitsPerMember + m_path.back().name.size() / CharactersPerUnit);
-                if (!m_path.back().name.isValidUtf16()) {
+                m_path.push_back(PathToken{it.keyView(), -1});
+                const QAnyStringView name = m_path.back().name;
+                m_budget.charge(UnitsPerMember + (isUtf16(name) ? name.size() / CharactersPerUnit : 0));
+                if (!isValidText(name)) {
                     problem(QStringLiteral("the property name contains an unpaired UTF-16 surrogate"));
                 }
                 walk(it.value());
@@ -229,6 +338,8 @@ public:
         : m_nodes(nodes)
         , m_report(report)
         , m_budget(budget)
+        // Read once: the seed may change while the process runs.
+        , m_key(QHashSeed::globalSeed())
     {
     }
 
@@ -247,12 +358,6 @@ private:
     {
         return m_budget.charge(units);
     }
-    // Looking `name` up in an object of `size` members: a binary search.
-    void chargeLookup(qsizetype size, const QString& name)
-    {
-        charge(1 + std::bit_width(quint64(size)) + name.size() / CharactersPerUnit);
-    }
-
     // An error at the current place, or at `last` below it. Kept out of
     // the frames of the recursion, as each check below that does not
     // recurse is: their locals would grow every frame of a deep walk.
@@ -262,20 +367,22 @@ private:
         charge(UnitsPerError + qint64(m_path.size()) + m_report.add(m_path, last, text) / CharactersPerUnit);
     }
 
-    bool apply(int index, const QJsonValue& value, Mode mode, Evaluated* out);
-    bool applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out);
-    Q_NEVER_INLINE bool checkAssertions(const Node& node, const QJsonValue& value, Mode mode);
+    bool apply(int index, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared = nullptr);
+    bool applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared);
+    Q_NEVER_INLINE bool checkAssertions(const Node& node, const QJsonValue& value, Mode mode, Shared& shared);
     Q_NEVER_INLINE bool checkType(const Node& node, const QJsonValue& value, Mode mode);
-    Q_NEVER_INLINE bool checkLiterals(const Node& node, const QJsonValue& value, const QString* text, Mode mode);
+    Q_NEVER_INLINE bool checkLiterals(const Node& node, const QJsonValue& value, const QAnyStringView* text, Mode mode);
     Q_NEVER_INLINE bool checkNumber(const Node& node, const QJsonValue& value, Mode mode);
-    Q_NEVER_INLINE bool checkString(const Node& node, const QString& text, Mode mode);
+    Q_NEVER_INLINE bool checkString(const Node& node, QAnyStringView text, Mode mode, Shared& shared);
     bool checkArray(const Node& node, const QJsonArray& array, Mode mode, Evaluated* evaluated);
     Q_NEVER_INLINE bool checkUnique(const QJsonArray& array, Mode mode);
     bool checkContains(const Node& node, const QJsonArray& array, Mode mode, Evaluated* evaluated);
     bool checkObject(const Node& node, const QJsonValue& value, const QJsonObject& object, Mode mode,
-                     Evaluated* evaluated);
-    bool checkName(int target, const QString& name, Mode mode);
-    bool checkInPlace(const Node& node, const QJsonValue& value, qsizetype size, Mode mode, Evaluated* evaluated);
+                     Evaluated* evaluated, Shared& shared);
+    Q_NEVER_INLINE bool checkRequired(const Node& node, const QJsonObject& object, Mode mode, Shared& shared);
+    bool checkName(int target, QAnyStringView name, Mode mode);
+    bool checkInPlace(const Node& node, const QJsonValue& value, qsizetype size, Mode mode, Evaluated* evaluated,
+                      Shared& shared);
     bool checkUnevaluatedItems(const Node& node, const QJsonArray& array, Mode mode, Evaluated& evaluated);
     bool checkUnevaluatedProperties(const Node& node, const QJsonObject& object, Mode mode, Evaluated& evaluated);
 
@@ -290,11 +397,15 @@ private:
     // The frame of check(). The stack grows down on every Linux the library
     // builds for.
     quintptr m_stackBase = 0;
+    // The key of the hashes (see checkUnique()).
+    quint64 m_key;
 };
 
 // Applies the node `index` to `value`. When `out` is not null, the members
-// or items of `value` that the node evaluated are added to it.
-bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* out)
+// or items of `value` that the node evaluated are added to it. `shared`:
+// what the subschemas applied to `value` in place read once, when this one
+// is applied in place too.
+bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared)
 {
     if (stopped()) {
         return false;
@@ -308,7 +419,7 @@ bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* ou
     const Node& node = m_nodes[std::size_t(index)];
     bool valid = node.booleanValue;
     if (!node.isBoolean) {
-        valid = applyNode(node, value, mode, out);
+        valid = applyNode(node, value, mode, out, shared);
     } else if (!valid && mode == Mode::Errors) {
         error(QStringLiteral("does not match the schema"));
     }
@@ -316,7 +427,7 @@ bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* ou
     return valid && !stopped();
 }
 
-bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out)
+bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Evaluated* out, Shared* shared)
 {
     bool valid = true;
     // A keyword failed: true when the walk of this node ends there.
@@ -337,6 +448,8 @@ bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Ev
     // unevaluatedProperties or unevaluatedItems.
     Evaluated local(m_budget, size);
     Evaluated* evaluated = nullptr;
+    Shared own(m_budget, m_key);
+    Shared& reads = shared ? *shared : own;
     if (isObject || isArray) {
         if (out) {
             evaluated = out;
@@ -347,16 +460,16 @@ bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Ev
 
     if ((node.types != 0 || node.hasConst || node.hasEnum || node.numberKeywords != 0 || node.minLength >= 0
          || node.maxLength >= 0)
-        && !checkAssertions(node, value, mode) && fail()) {
+        && !checkAssertions(node, value, mode, reads) && fail()) {
         return false;
     }
     if (isArray && !checkArray(node, array, mode, evaluated) && fail()) {
         return false;
     }
-    if (isObject && !checkObject(node, value, object, mode, evaluated) && fail()) {
+    if (isObject && !checkObject(node, value, object, mode, evaluated, reads) && fail()) {
         return false;
     }
-    if (!checkInPlace(node, value, size, mode, evaluated) && fail()) {
+    if (!checkInPlace(node, value, size, mode, evaluated, reads) && fail()) {
         return false;
     }
     if (isArray && node.unevaluatedItems >= 0 && !checkUnevaluatedItems(node, array, mode, *evaluated) && fail()) {
@@ -371,7 +484,7 @@ bool Checker::applyNode(const Node& node, const QJsonValue& value, Mode mode, Ev
 
 // The keywords that do not apply subschemas: type, const, enum, and those
 // of numbers and strings.
-bool Checker::checkAssertions(const Node& node, const QJsonValue& value, Mode mode)
+bool Checker::checkAssertions(const Node& node, const QJsonValue& value, Mode mode, Shared& shared)
 {
     bool valid = true;
     const auto fail = [&]() {
@@ -381,20 +494,16 @@ bool Checker::checkAssertions(const Node& node, const QJsonValue& value, Mode mo
     if (node.types != 0 && !checkType(node, value, mode) && fail()) {
         return false;
     }
-    QString text;
+    // Read in place, never decoded: each keyword charges what it reads.
     const bool isString = value.isString();
-    if (isString && (node.hasConst || node.hasEnum || node.minLength >= 0 || node.maxLength >= 0)) {
-        // Read once, for every keyword that reads it.
-        text = value.toString();
-        charge(text.size() / CharactersPerUnit);
-    }
+    const QAnyStringView text = isString ? value.toStringView() : QAnyStringView();
     if ((node.hasConst || node.hasEnum) && !checkLiterals(node, value, isString ? &text : nullptr, mode) && fail()) {
         return false;
     }
     if (value.isDouble() && node.numberKeywords != 0 && !checkNumber(node, value, mode) && fail()) {
         return false;
     }
-    if (isString && (node.minLength >= 0 || node.maxLength >= 0) && !checkString(node, text, mode) && fail()) {
+    if (isString && (node.minLength >= 0 || node.maxLength >= 0) && !checkString(node, text, mode, shared) && fail()) {
         return false;
     }
     return valid;
@@ -451,15 +560,14 @@ bool Checker::checkType(const Node& node, const QJsonValue& value, Mode mode)
     return false;
 }
 
-bool Checker::checkLiterals(const Node& node, const QJsonValue& value, const QString* text, Mode mode)
+bool Checker::checkLiterals(const Node& node, const QJsonValue& value, const QAnyStringView* text, Mode mode)
 {
     bool valid = true;
     if (node.hasConst) {
         charge(UnitsPerStep);
         const bool equal = text && node.constValue.isString()
-            ? (charge(text->size() == node.constString.size() ? text->size() / CharactersPerUnit : 0),
-               *text == node.constString)
-            : equalValues(node.constValue, value, text, m_budget);
+            ? sameText(*text, node.constString, node.constUtf8, m_budget)
+            : equalValues(node.constValue, value, m_budget);
         if (!equal) {
             valid = false;
             if (mode == Mode::Verdict) {
@@ -472,22 +580,19 @@ bool Checker::checkLiterals(const Node& node, const QJsonValue& value, const QSt
         charge(UnitsPerStep);
         bool found = false;
         if (text) {
-            if (!node.enumStringSet.isEmpty()) {
+            if (!node.enumTable.isEmpty()) {
                 // A hash of the string, and a comparison with the entry.
                 charge(1 + 2 * (text->size() / CharactersPerUnit));
-                found = node.enumStringSet.contains(*text);
+                found = node.enumTable.value(*text) >= 0;
             } else {
-                for (const QString& entry : node.enumStrings) {
-                    charge(UnitsPerStep + (entry.size() == text->size() ? text->size() / CharactersPerUnit : 0));
-                    if (entry == *text) {
-                        found = true;
-                        break;
-                    }
+                for (qsizetype i = 0; i < node.enumStrings.size() && !found; ++i) {
+                    charge(UnitsPerStep);
+                    found = sameText(*text, node.enumStrings.at(i), node.enumUtf8.at(i), m_budget);
                 }
             }
         } else {
             for (std::size_t i = 0; i < node.enumOthers.size() && !found && !stopped(); ++i) {
-                found = equalValues(node.enumOthers[i], value, nullptr, m_budget);
+                found = equalValues(node.enumOthers[i], value, m_budget);
             }
         }
         if (!found) {
@@ -560,21 +665,25 @@ bool Checker::checkNumber(const Node& node, const QJsonValue& value, Mode mode)
 }
 
 // Lengths in code points, as 2020-12 counts them: a surrogate pair is one
-// (an unpaired surrogate was refused before). Between half the code units
-// and all of them, so a string is counted only when that decides.
-bool Checker::checkString(const Node& node, const QString& text, Mode mode)
+// (an unpaired surrogate was refused before). At most one for each code
+// unit, and at least one for every two of UTF-16 and for every four bytes
+// of UTF-8 (each for one of Latin-1), so a string is counted only when that
+// decides, once for all the subschemas applied to it in place.
+bool Checker::checkString(const Node& node, QAnyStringView text, Mode mode, Shared& shared)
 {
     const qsizetype units = text.size();
-    qsizetype length = -1;
-    const auto count = [&]() {
-        if (length < 0) {
-            charge(1 + units / CharactersPerUnit);
-            length = 0;
-            for (const QChar c : text) {
-                length += c.isLowSurrogate() ? 0 : 1;
-            }
+    const qsizetype least = text.visit([](auto view) -> qsizetype {
+        using View = decltype(view);
+        if constexpr (std::is_same_v<View, QStringView>) {
+            return (view.size() + 1) / 2;
+        } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
+            return view.size();
+        } else {
+            return (view.size() + 3) / 4;
         }
-        return length;
+    });
+    const auto count = [&]() {
+        return shared.length(text);
     };
     bool valid = true;
     charge(UnitsPerStep);
@@ -586,7 +695,7 @@ bool Checker::checkString(const Node& node, const QString& text, Mode mode)
         error(node.maxLength == 1 ? QStringLiteral("must be at most 1 character long")
                                   : QStringLiteral("must be at most %1 characters long").arg(node.maxLength));
     }
-    if (node.minLength >= 0 && (units + 1) / 2 < node.minLength && count() < node.minLength) {
+    if (node.minLength >= 0 && least < node.minLength && count() < node.minLength) {
         valid = false;
         if (mode == Mode::Errors) {
             error(node.minLength == 1 ? QStringLiteral("must be at least 1 character long")
@@ -725,7 +834,9 @@ bool Checker::checkContains(const Node& node, const QJsonArray& array, Mode mode
 // Items compared as 2020-12 compares them (1 and 1.0 alike, members in any
 // order), in O(n log n): the items are sorted by a hash of their value, and
 // only those with the same hash are compared, sorted by their value. The
-// line names the first item that repeats an earlier one.
+// hash is keyed by Qt's global seed, random in each process, so that a
+// model cannot choose items whose hashes collide. The line names the first
+// item that repeats an earlier one, whatever the hashes.
 bool Checker::checkUnique(const QJsonArray& array, Mode mode)
 {
     const qsizetype size = array.size();
@@ -745,7 +856,7 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
     std::vector<Key> keys;
     keys.reserve(std::size_t(size));
     for (qsizetype i = 0; i < size && !stopped(); ++i) {
-        keys.push_back(Key{hashValue(array.at(i), m_budget), i});
+        keys.push_back(Key{hashValue(array.at(i), m_key, m_budget), i});
     }
     // A sort of plain integers, whose comparisons are counted here: about
     // two nanoseconds each.
@@ -778,7 +889,11 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
                 repeated = keys[start].index;
             }
         } else if (end - start > 2) {
+            // Each comparison reads two items far apart in the array, and
+            // their own storage when they are arrays or objects: misses of
+            // the cache, at random.
             const auto less = [&](const Key& a, const Key& b) {
+                m_budget.charge(3 * UnitsPerContainer);
                 return compareValues(array.at(a.index), array.at(b.index), m_budget) < 0;
             };
             scratch.resize(end - start);
@@ -817,13 +932,14 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
         return firstRepeat < 0 && !stopped();
     }
     if (mode == Mode::Errors) {
-        error(QStringLiteral("must have unique items, and items %1 and %2 are equal").arg(repeated).arg(firstRepeat));
+        error(QStringLiteral("must have unique items, and items %1 and %2 are equal")
+                  .arg(QString::number(repeated), QString::number(firstRepeat)));
     }
     return false;
 }
 
 bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJsonObject& object, Mode mode,
-                          Evaluated* evaluated)
+                          Evaluated* evaluated, Shared& shared)
 {
     bool valid = true;
     const auto fail = [&]() {
@@ -852,7 +968,8 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
     }
 
     // Each member once: its name against propertyNames, then its value
-    // against its schema in properties, or additionalProperties.
+    // against its schema in properties, or additionalProperties. The names
+    // are read in place.
     if (!node.properties.isEmpty() || node.additionalProperties >= 0 || node.propertyNames >= 0) {
         const bool closed = node.additionalProperties >= 0 && m_nodes[std::size_t(node.additionalProperties)].isBoolean
             && !m_nodes[std::size_t(node.additionalProperties)].booleanValue;
@@ -861,16 +978,16 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
             if (stopped()) {
                 return false;
             }
-            m_path.push_back(PathToken{it.key(), -1});
-            const QString& name = m_path.back().name;
-            charge(UnitsPerMember + name.size() / CharactersPerUnit);
+            m_path.push_back(PathToken{it.keyView(), -1});
+            const QAnyStringView name = m_path.back().name;
+            charge(UnitsPerMember);
             bool ok = node.propertyNames < 0 || checkName(node.propertyNames, name, mode);
             if (ok || mode == Mode::Errors) {
                 int child = -1;
                 if (!node.properties.isEmpty()) {
-                    // A hash of the name.
-                    charge(1 + name.size() / CharactersPerUnit);
-                    child = node.properties.value(name, -1);
+                    // A hash of the name, and a comparison with the entry.
+                    charge(1 + 2 * (name.size() / CharactersPerUnit));
+                    child = node.properties.value(name);
                 }
                 if (child >= 0) {
                     if (evaluated) {
@@ -896,9 +1013,48 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
         }
     }
 
+    if ((!node.required.isEmpty() || !node.dependentRequired.empty()) && !checkRequired(node, object, mode, shared)
+        && fail()) {
+        return false;
+    }
+    for (const auto& [trigger, schema] : node.dependentSchemas) {
+        if (stopped()) {
+            return false;
+        }
+        if (!shared.contains(object, trigger)) {
+            continue;
+        }
+        Evaluated sub(m_budget, size);
+        const bool ok = apply(schema, value, mode, evaluated ? &sub : nullptr, &shared);
+        // The annotations of a subschema that failed are kept as well. With
+        // Errors the value fails anyway, and they keep its members from
+        // being named unknown too. With Verdict this node fails with it, and
+        // whoever applied the node drops what it evaluated.
+        if (evaluated) {
+            evaluated->merge(sub);
+        }
+        if (!ok && fail()) {
+            return false;
+        }
+    }
+    return valid;
+}
+
+// required and dependentRequired: names looked up in the object's own
+// sorted names (see Shared).
+bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mode, Shared& shared)
+{
+    bool valid = true;
+    const auto fail = [&]() {
+        valid = false;
+        return mode == Mode::Verdict || stopped();
+    };
+    const qsizetype size = object.size();
     for (const QString& name : node.required) {
-        chargeLookup(size, name);
-        if (!object.contains(name)) {
+        if (!shared.contains(object, name)) {
+            if (stopped()) {
+                return false;
+            }
             if (mode == Mode::Errors) {
                 error(QStringLiteral("is required"), &name);
             }
@@ -913,16 +1069,16 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
     if (!node.dependentRequired.empty()) {
         if (qsizetype(node.dependentRequired.size()) <= size) {
             for (std::size_t i = 0; i < node.dependentRequired.size(); ++i) {
-                chargeLookup(size, node.dependentRequired[i].first);
-                if (object.contains(node.dependentRequired[i].first)) {
+                if (shared.contains(object, node.dependentRequired[i].first)) {
                     triggered.push_back(int(i));
                 }
             }
         } else {
             for (auto it = object.begin(); it != object.end(); ++it) {
-                const QString name = it.key();
+                const QAnyStringView name = it.keyView();
+                // A hash of the name, and a comparison with the entry.
                 charge(UnitsPerMember + 2 * (name.size() / CharactersPerUnit));
-                const int i = node.dependentRequiredIndex.value(name, -1);
+                const int i = node.dependentRequiredIndex.value(name);
                 if (i >= 0) {
                     triggered.push_back(i);
                 }
@@ -934,8 +1090,10 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
     for (const int i : triggered) {
         const auto& [trigger, names] = node.dependentRequired[std::size_t(i)];
         for (const QString& name : names) {
-            chargeLookup(size, name);
-            if (!object.contains(name)) {
+            if (!shared.contains(object, name)) {
+                if (stopped()) {
+                    return false;
+                }
                 if (mode == Mode::Errors) {
                     error(QStringLiteral("is required when \"%1\" is present").arg(shownName(trigger)), &name);
                 }
@@ -945,27 +1103,10 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
             }
         }
     }
-    for (const auto& [trigger, schema] : node.dependentSchemas) {
-        chargeLookup(size, trigger);
-        if (!object.contains(trigger)) {
-            continue;
-        }
-        Evaluated sub(m_budget, size);
-        const bool ok = apply(schema, value, mode, evaluated ? &sub : nullptr);
-        // The annotations of a subschema that failed are dropped. With
-        // Errors the value fails anyway, and they keep its members from
-        // being named unknown too.
-        if (evaluated && (ok || mode == Mode::Errors)) {
-            evaluated->merge(sub);
-        }
-        if (!ok && fail()) {
-            return false;
-        }
-    }
     return valid;
 }
 
-bool Checker::checkName(int target, const QString& name, Mode mode)
+bool Checker::checkName(int target, QAnyStringView name, Mode mode)
 {
     const Node& node = m_nodes[std::size_t(target)];
     if (node.isBoolean) {
@@ -974,10 +1115,11 @@ bool Checker::checkName(int target, const QString& name, Mode mode)
         }
         return node.booleanValue;
     }
-    charge(UnitsPerStep);
+    // The name as a string value, decoded once for the subschema.
+    charge(UnitsPerStep + name.size() / CharactersPerUnit);
     const bool saved = m_propertyName;
     m_propertyName = true;
-    const bool ok = apply(target, QJsonValue(name), mode, nullptr);
+    const bool ok = apply(target, QJsonValue(name.toString()), mode, nullptr);
     m_propertyName = saved;
     return ok;
 }
@@ -987,7 +1129,8 @@ bool Checker::checkName(int target, const QString& name, Mode mode)
 // with Errors also when they fail, since the value fails then anyway. A
 // branch of anyOf or oneOf adds them only when it passes, and not and the
 // condition of if that failed never do.
-bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype size, Mode mode, Evaluated* evaluated)
+bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype size, Mode mode, Evaluated* evaluated,
+                           Shared& shared)
 {
     bool valid = true;
     const auto fail = [&]() {
@@ -996,10 +1139,10 @@ bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype 
     };
     const auto required = [&](int child) {
         if (!evaluated) {
-            return apply(child, value, mode, nullptr);
+            return apply(child, value, mode, nullptr, &shared);
         }
         Evaluated sub(m_budget, size);
-        const bool ok = apply(child, value, mode, &sub);
+        const bool ok = apply(child, value, mode, &sub, &shared);
         if (ok || mode == Mode::Errors) {
             evaluated->merge(sub);
         }
@@ -1020,7 +1163,7 @@ bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype 
         int passed = 0;
         for (const int branch : node.anyOf) {
             Evaluated sub(m_budget, size);
-            if (apply(branch, value, Mode::Verdict, evaluated ? &sub : nullptr)) {
+            if (apply(branch, value, Mode::Verdict, evaluated ? &sub : nullptr, &shared)) {
                 ++passed;
                 if (!evaluated) {
                     break;
@@ -1049,7 +1192,7 @@ bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype 
         int passed = 0;
         for (const int branch : node.oneOf) {
             Evaluated sub(m_budget, size);
-            if (apply(branch, value, Mode::Verdict, evaluated ? &sub : nullptr)) {
+            if (apply(branch, value, Mode::Verdict, evaluated ? &sub : nullptr, &shared)) {
                 ++passed;
                 if (evaluated) {
                     evaluated->merge(sub);
@@ -1080,7 +1223,7 @@ bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype 
     }
     if (node.notSchema >= 0) {
         // Whatever not's subschema evaluated, it failed, or not fails.
-        if (apply(node.notSchema, value, Mode::Verdict, nullptr)) {
+        if (apply(node.notSchema, value, Mode::Verdict, nullptr, &shared)) {
             if (mode == Mode::Errors) {
                 error(QStringLiteral("must not match the schema of not"));
             }
@@ -1096,7 +1239,7 @@ bool Checker::checkInPlace(const Node& node, const QJsonValue& value, qsizetype 
     // annotations count.
     if (node.ifSchema >= 0 && (evaluated || node.thenSchema >= 0 || node.elseSchema >= 0)) {
         Evaluated condition(m_budget, size);
-        const bool holds = apply(node.ifSchema, value, Mode::Verdict, evaluated ? &condition : nullptr);
+        const bool holds = apply(node.ifSchema, value, Mode::Verdict, evaluated ? &condition : nullptr, &shared);
         if (stopped()) {
             return false;
         }
@@ -1166,8 +1309,8 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
             if (evaluated.has(i)) {
                 continue;
             }
-            m_path.push_back(PathToken{it.key(), -1});
-            charge(UnitsPerMember + m_path.back().name.size() / CharactersPerUnit);
+            m_path.push_back(PathToken{it.keyView(), -1});
+            charge(UnitsPerMember);
             bool ok = true;
             if (closed) {
                 if (mode == Mode::Errors) {
@@ -1195,15 +1338,16 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
 QStringList checkValue(const CompiledSchema& schema, const QJsonValue& value, CheckStats* stats)
 {
     Budget budget;
-    Report report;
+    Report refused(Report::Kind::Precheck);
+    Report report(Report::Kind::Check);
     QStringList lines;
-    Precheck(report, budget).walk(value);
-    if (report.isDone()) {
-        lines = report.take();
+    Precheck(refused, budget).walk(value);
+    if (refused.isDone()) {
+        lines = refused.take();
     } else if (budget.exceeded()) {
         lines = {TooLargeToCheck};
-    } else if (!report.isEmpty()) {
-        lines = report.take();
+    } else if (!refused.isEmpty()) {
+        lines = refused.take();
     } else {
         Checker checker(schema.nodes, report, budget);
         const bool valid = checker.check(value);

@@ -1428,7 +1428,9 @@ private Q_SLOTS:
             errorOf(reply).value(QLatin1StringView("data")).toObject().value(QLatin1StringView("errors")).toArray();
         QVERIFY2(errors.first().toString().startsWith(QLatin1StringView("structuredContent/count: ")),
                  qPrintable(errors.first().toString()));
-        QVERIFY(errors.first().toString().contains(QLatin1StringView("not finite")));
+        // The same words as without a schema, below.
+        QCOMPARE(errors.first().toString(),
+                 QStringLiteral("structuredContent/count: is a number that is not finite, which JSON cannot carry"));
         f.jobs.erase(QStringLiteral("count"));
 
         // Without a schema it goes out, as null, with a warning.
@@ -1436,7 +1438,11 @@ private Q_SLOTS:
         QVERIFY(spinUntil([&] {
             return f.jobs.count(QStringLiteral("free")) == 1;
         }));
-        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("not finite, which go out as null")));
+        QTest::ignoreMessage(
+            QtWarningMsg,
+            QRegularExpression(QStringLiteral(
+                "not finite, which go out as null: .*\"/a~0~1b/0: is a number that is not finite, which JSON cannot "
+                "carry\"")));
         QVERIFY(f.jobs.at(QStringLiteral("free"))
                     .finish(McpResult::structured(QJsonObject{{QLatin1StringView("a~/b"), QJsonArray{std::nan("")}}})));
         reply = f.peer.readOne();
