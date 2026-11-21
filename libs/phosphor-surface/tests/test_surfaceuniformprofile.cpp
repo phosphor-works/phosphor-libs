@@ -81,7 +81,6 @@ SurfaceUniforms makeReference(const PhosphorShaders::UboFrameState& s)
     for (std::size_t i = 0; i < std::size(u.uBackdropRect); ++i) {
         u.uBackdropRect[i] = s.backdropRect[i];
     }
-    u.uSurfaceOpacity = 1.0f;
     for (int i = 0; i < 8; ++i) {
         for (int c = 0; c < 4; ++c) {
             u.customParams[i][c] = s.customParams[i][c];
@@ -213,7 +212,7 @@ private Q_SLOTS:
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, uSurfaceFrameTopLeft)), 88);
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, uSurfaceFrameSize)), 96);
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, uHasBackdrop)), 104);
-        QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, uSurfaceOpacity)), 108);
+        QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, uSurfacePad0)), 108);
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, customParams)), 112);
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, customColors)), 240);
         QCOMPARE(static_cast<int>(offsetof(SurfaceUniforms, iChannelResolution)), 496);
