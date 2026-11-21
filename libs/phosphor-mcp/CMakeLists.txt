@@ -66,68 +66,6 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # look for the headers through one cache variable, VALIJSON_INCLUDE_DIR.
 set(_phosphormcp_system_valijson_doc
     "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins: ON, OFF, or AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON")
-# A build directory from before AUTO holds the BOOL that an option() wrote,
-# known by its help text. The first option()'s default was OFF, and the
-# second's was phosphor-fsloader's value at the directory's first configure.
-# The cache records neither whether the value is that default or a choice,
-# nor what phosphor-fsloader's value was then. So a value equal to the
-# default as it reads now (OFF, or phosphor-fsloader's value at this
-# configure) becomes AUTO, and the directory follows phosphor-fsloader from
-# now on. Another value stays, with a message that says how to follow
-# phosphor-fsloader instead. A -D...:BOOL given to this revision or a later
-# one has another help text, and stays as given. In an old directory the
-# option() gave every entry its own help text, so a choice there that equals
-# the default becomes AUTO.
-set(_phosphormcp_old_help
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins")
-get_property(_phosphormcp_system_valijson_type CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY TYPE)
-get_property(_phosphormcp_system_valijson_help CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY HELPSTRING)
-set(_phosphormcp_old_default "")
-if(_phosphormcp_system_valijson_type STREQUAL "BOOL")
-    if(_phosphormcp_system_valijson_help STREQUAL _phosphormcp_old_help)
-        set(_phosphormcp_old_default OFF)
-    elseif(_phosphormcp_system_valijson_help STREQUAL
-           "${_phosphormcp_old_help} (default: PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)")
-        if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-            set(_phosphormcp_old_default ON)
-        else()
-            set(_phosphormcp_old_default OFF)
-        endif()
-    endif()
-endif()
-if(NOT _phosphormcp_old_default STREQUAL "")
-    if(PHOSPHORMCP_USE_SYSTEM_VALIJSON)
-        set(_phosphormcp_old_value ON)
-    else()
-        set(_phosphormcp_old_value OFF)
-    endif()
-    if(_phosphormcp_old_value STREQUAL _phosphormcp_old_default)
-        set(_phosphormcp_old_value AUTO)
-    else()
-        message(STATUS
-            "PHOSPHORMCP_USE_SYSTEM_VALIJSON keeps ${_phosphormcp_old_value} from an older build directory. "
-            "Set it to AUTO to follow PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON.")
-    endif()
-    set(PHOSPHORMCP_USE_SYSTEM_VALIJSON ${_phosphormcp_old_value} CACHE STRING "${_phosphormcp_system_valijson_doc}" FORCE)
-endif()
-# The first option() looked for the system's headers through a cache variable
-# of its own. Its answer moves to the one that both libraries read, unless
-# that one names a directory already, which then serves both, with a message.
-# In the tree, phosphor-fsloader looks first: a configure that also switches
-# it to the system's headers stops there before this runs, and one configure
-# without that switch, or VALIJSON_INCLUDE_DIR set, gets past it.
-if(DEFINED CACHE{PHOSPHORMCP_VALIJSON_INCLUDE_DIR})
-    if(PHOSPHORMCP_VALIJSON_INCLUDE_DIR AND NOT VALIJSON_INCLUDE_DIR)
-        set(VALIJSON_INCLUDE_DIR "${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}"
-            CACHE PATH "Directory containing valijson/validator.hpp" FORCE)
-    elseif(PHOSPHORMCP_VALIJSON_INCLUDE_DIR
-           AND NOT PHOSPHORMCP_VALIJSON_INCLUDE_DIR STREQUAL VALIJSON_INCLUDE_DIR)
-        message(STATUS
-            "PHOSPHORMCP_VALIJSON_INCLUDE_DIR (${PHOSPHORMCP_VALIJSON_INCLUDE_DIR}) is gone. phosphor-mcp now "
-            "takes valijson's headers from VALIJSON_INCLUDE_DIR (${VALIJSON_INCLUDE_DIR}), as phosphor-fsloader does.")
-    endif()
-    unset(PHOSPHORMCP_VALIJSON_INCLUDE_DIR CACHE)
-endif()
 set(PHOSPHORMCP_USE_SYSTEM_VALIJSON AUTO CACHE STRING "${_phosphormcp_system_valijson_doc}")
 set_property(CACHE PHOSPHORMCP_USE_SYSTEM_VALIJSON PROPERTY STRINGS AUTO ON OFF)
 string(TOUPPER "${PHOSPHORMCP_USE_SYSTEM_VALIJSON}" _phosphormcp_system_valijson_mode)

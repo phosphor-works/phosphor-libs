@@ -21,9 +21,9 @@
  *   qCCritical(lcCore) << "Critical message";
  *
  * Runtime filtering via environment variable:
- *   QT_LOGGING_RULES="plasmazones.*=true"                    # Enable all
- *   QT_LOGGING_RULES="plasmazones.*.debug=false"             # Disable debug only
- *   QT_LOGGING_RULES="phosphor.engineruntime.dbus.*=true"               # Enable D-Bus only
+ *   QT_LOGGING_RULES="phosphor.engineruntime.*=true"         # Enable all
+ *   QT_LOGGING_RULES="phosphor.engineruntime.*.debug=false"  # Disable debug only
+ *   QT_LOGGING_RULES="phosphor.engineruntime.dbus.*=true"    # Enable D-Bus only
  *
  * Severity Guidelines:
  *   qCDebug    - Development tracing, disabled in release builds

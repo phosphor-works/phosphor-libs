@@ -729,9 +729,7 @@ void EngineRuntime::connectDesktopActivity()
     // old-to-new map for every number-keyed store. A change commits its list,
     // this map and the count together, this map ahead of desktopCountChanged;
     // only the desktop manager's fallback, when KWin's desktop signals did not
-    // add up to a list, sends the count first. The only one of the desktop
-    // manager's two renumber signals connected (desktopRemovedAt is its
-    // single-removal subset). desktop_renumber.cpp.
+    // add up to a list, sends the count first. desktop_renumber.cpp.
     connect(m_virtualDesktopManager.get(), &PhosphorWorkspaces::VirtualDesktopManager::desktopsRenumbered, this,
             &EngineRuntime::onDesktopsRenumbered);
     // The records pushed before the change are the ones the renumber moves; a

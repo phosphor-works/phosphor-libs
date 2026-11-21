@@ -103,12 +103,8 @@ public:
      */
     void setWindowRegistry(PhosphorEngine::WindowRegistry* registry);
 
-    /// The injectable SnapState-resolver seam. Defined in its own header so
-    /// consumers can name the type without pulling in the whole service. The
-    /// alias keeps the historical `WindowTrackingService::SnapStateResolver`
-    /// spelling valid for existing call sites.
-    using SnapStateResolver = PhosphorPlacement::SnapStateResolver;
-
+    /// The injectable SnapState-resolver seam. The type is defined in its own
+    /// header so consumers can name it without pulling in the whole service.
     void setSnapStateResolver(SnapStateResolver resolver);
 
     /// Convenience wiring for a SINGLE snap store (unit tests). Every store arm routes to @p state; forgetWindow is a
