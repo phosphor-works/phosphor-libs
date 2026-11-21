@@ -72,30 +72,20 @@ find_package(Qt6 ${PHOSPHORFSLOADER_QT_MIN} REQUIRED COMPONENTS Core)
 option(PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS
     "Use system-provided jsoncons headers (1.7.0 or later) instead of the archive cmake/PhosphorDependencies.cmake pins" OFF)
 
-# phosphor-fsloader and phosphor-mcp both used valijson once. A build directory
-# from then keeps their cache entries, which nothing reads any more: each is
-# removed from the cache, as phosphor-mcp removes its own old jsoncons switch,
-# with a warning when it held something other than its default (an option
-# turned on, a directory found or set), so that a packager does not believe it
-# still chooses anything. phosphor-mcp's entries are handled here because its
-# own CMakeLists no longer names them: it checks tool schemas itself, with no
-# third-party validator.
-foreach(_phosphorfsloader_old PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON VALIJSON_INCLUDE_DIR
-        PHOSPHORMCP_USE_SYSTEM_VALIJSON PHOSPHORMCP_VALIJSON_INCLUDE_DIR)
+# phosphor-fsloader used valijson once. A build directory from then keeps its
+# two cache entries, which nothing reads any more. Each is removed from the
+# cache, with a warning when it held something other than its default (the
+# option turned on, a directory found or set), so that a packager does not
+# believe it still chooses anything. phosphor-mcp removes its own old entries
+# in its own CMakeLists.
+foreach(_phosphorfsloader_old PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON VALIJSON_INCLUDE_DIR)
     if(DEFINED CACHE{${_phosphorfsloader_old}})
         if(${_phosphorfsloader_old})
-            if(_phosphorfsloader_old MATCHES "^PHOSPHORMCP_")
-                string(CONCAT _phosphorfsloader_now
-                    "phosphor-mcp no longer uses valijson, and checks tool schemas itself with no third-party "
-                    "validator")
-            else()
-                string(CONCAT _phosphorfsloader_now
-                    "phosphor-fsloader no longer uses valijson. Its schema validator is jsoncons, and "
-                    "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS and JSONCONS_INCLUDE_DIR choose its headers")
-            endif()
             message(WARNING
                 "${_phosphorfsloader_old} is set in this build directory's cache, but nothing reads it, "
-                "because ${_phosphorfsloader_now}. It is removed from the cache.")
+                "because phosphor-fsloader no longer uses valijson. Its schema validator is jsoncons, and "
+                "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS and JSONCONS_INCLUDE_DIR choose its headers. It is "
+                "removed from the cache.")
         endif()
         unset(${_phosphorfsloader_old} CACHE)
     endif()
