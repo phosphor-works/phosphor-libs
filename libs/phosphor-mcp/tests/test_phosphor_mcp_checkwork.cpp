@@ -277,11 +277,28 @@ private Q_SLOTS:
         // found.
         row("errors repeated", "{'items': {'allOf': [{'type': 'string'}, {'type': 'string'}]}}", repeat("1", 256),
             10 + 256 * (3 + 2 + 2 * (2 + 1 + 24) + 2) + 10 * 16, 0, QStringLiteral("/0: must be of type string"));
-        // Names of 33 bytes of Latin-1, decoded for a pointer (2 + 2), which
-        // is 34 code units long (2).
+        // Names of 33 bytes of Latin-1, decoded for a pointer (2 + 2) and
+        // scanned for "~" and "/" (2), which is 34 code units long (2). The
+        // start of each name in a line is decoded and scanned too (2).
         row("errors under long names", "{'additionalProperties': {'type': 'string'}}", members("1", 256, 32),
-            (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2 + 1 + 24 + (2 + 2) + 2) + 10 * 16, 0,
+            (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2 + 1 + 24 + (2 + 2 + 2) + 2) + 10 * (16 + 2), 0,
             QStringLiteral("/k00000000000000000000000000000000: must be of type string"));
+        // Names of 35 characters, 32 of them "~" and "/": decoded (2 + 2),
+        // and scanned and written again with their escapes (67 / 16), for
+        // a pointer 68 code units long (4). The line shows the start of the
+        // escaped name.
+        row(
+            "errors under names to escape", "{'additionalProperties': {'type': 'string'}}",
+            []() -> QByteArray {
+                QByteArray object = "{";
+                for (int i = 0; i < 256; ++i) {
+                    object += (i ? ",'" : "'") + QByteArray("~/").repeated(16)
+                        + QByteArray::number(i).rightJustified(3, '0') + "':1";
+                }
+                return object + "}";
+            }(),
+            (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2 + 1 + 24 + (2 + 2 + 4) + 4) + 10 * (16 + 4), 0,
+            QStringLiteral("/") + QStringLiteral("~0~1").repeated(15) + QStringLiteral("...: must be of type string"));
         // Names of 37 bytes of UTF-8, decoded at 4 units for each 16 bytes
         // (2 + 8), for a pointer 16 code units long (1).
         row(
@@ -298,6 +315,11 @@ private Q_SLOTS:
         // An unpaired surrogate, refused before the check.
         row("unpaired surrogates", "{}", repeat("'\\ud800'", 256), (3 + 2) + 256 * (3 + 24 + 2) + 10 * 16, 0,
             QStringLiteral("/0: contains an unpaired UTF-16 surrogate"));
+        // A name with one, shown with U+FFFD in its stead: its member (2),
+        // the error (24), its token (2) and that of the line (16).
+        row("unpaired surrogate in a name", "{}", "{'x\\udc00': 1}", (3 + 2) + 2 + 24 + 2 + 16 + 3, 0,
+            QStringLiteral("/x") + QChar(QChar::ReplacementCharacter)
+                + QStringLiteral(": the property name contains an unpaired UTF-16 surrogate"));
 
         // Annotations: the items that no keyword evaluated, a step each...
         row("unevaluatedItems", "{'prefixItems': [{}], 'unevaluatedItems': {'type': 'integer'}}", repeat("1", 256),
@@ -671,11 +693,12 @@ private Q_SLOTS:
         // member and 4 for the lines of its name). The root applied to each
         // object (4, type 1, 1 for the keywords of objects, and the member
         // 2 + 4), and the $ref to the two inner ones (4 + 1), and both to
-        // the number (2, and 2 + 1). The error: two names decoded (2 + 25000
-        // each), and a third token begun (2) that would not fit.
+        // the number (2, and 2 + 1). The error: two names decoded and
+        // scanned for "~" and "/" (2 + 25000 + 25000 each), and a third
+        // token begun (2) that would not fit.
         QCOMPARE(counts.work,
                  qint64(3 * (3 + 2 + 2 + 4) + 3 + 3 * (4 + 1 + 1 + 6) + 2 * (4 + 1) + 2 + (2 + 1) + 24
-                        + 2 * (2 + 400000 / 16) + 2));
+                        + 2 * (2 + 400000 / 16 + 400000 / 16) + 2));
     }
 };
 

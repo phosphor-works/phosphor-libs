@@ -190,6 +190,9 @@ using Path = std::vector<PathToken>;
 
 // RFC 6901: "~" and "/" in a member name are escaped.
 QString pointerToken(const QString& name);
+// The same in place, for the text of `text` from `start`, in one pass and
+// a second from the back when there is an escape. Returns the escapes.
+qsizetype escapeToken(QString& text, qsizetype start);
 // A name as an error shows it: an unpaired surrogate replaced so that the
 // reply stays valid UTF-8, and cut short.
 QString shownName(const QString& name);

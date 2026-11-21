@@ -40,16 +40,30 @@ qsizetype leastUtf16(QAnyStringView text)
 // The code points of a name that shownName() reads at most.
 constexpr qsizetype ShownPoints = MaxShownTokenLength + 1;
 
-// The start of a name, decoded: all of it, or enough code points (more than
-// MaxShownTokenLength) that shownName() cuts it where it cuts the whole name.
-QString headOf(QAnyStringView name)
+// Adds `text` to `out`, decoded.
+void appendDecoded(QString& out, QAnyStringView text)
 {
-    return name.visit([](auto view) -> QString {
+    text.visit([&out](auto view) {
+        if constexpr (std::is_same_v<decltype(view), QStringView>
+                      || std::is_same_v<decltype(view), QLatin1StringView>) {
+            out += view;
+        } else {
+            out += QUtf8StringView(view.data(), view.size());
+        }
+    });
+}
+
+// The start of a name: all of it, or enough code points (more than
+// MaxShownTokenLength) that appendShown() cuts it where it cuts the whole
+// name.
+QAnyStringView headOf(QAnyStringView name)
+{
+    return name.visit([](auto view) -> QAnyStringView {
         using View = decltype(view);
         if constexpr (std::is_same_v<View, QStringView>) {
-            return view.first(std::min(view.size(), 2 * ShownPoints)).toString();
+            return view.first(std::min(view.size(), 2 * ShownPoints));
         } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
-            return QString(view.first(std::min(view.size(), ShownPoints)));
+            return view.first(std::min(view.size(), ShownPoints));
         } else {
             // Up to four bytes a code point, cut at the start of one.
             const auto* bytes = reinterpret_cast<const uchar*>(view.data());
@@ -57,46 +71,78 @@ QString headOf(QAnyStringView name)
             while (size < view.size() && (bytes[size] & 0xC0) == 0x80) {
                 --size;
             }
-            return view.first(size).toString();
+            return view.first(size);
         }
     });
 }
 
-} // namespace
-
-// A name without "~" or "/" is returned as it is, since QString::replace()
-// costs even when it finds nothing.
-QString pointerToken(const QString& name)
-{
-    if (!name.contains(QLatin1Char('~')) && !name.contains(QLatin1Char('/'))) {
-        return name;
-    }
-    QString token = name;
-    token.replace(QLatin1Char('~'), QLatin1StringView("~0"));
-    token.replace(QLatin1Char('/'), QLatin1StringView("~1"));
-    return token;
-}
-
-QString shownName(const QString& name)
+// Adds `name` to `out` as an error shows it (see shownName()).
+void appendShown(QString& out, QStringView name)
 {
     // Only the start of a long name is shown, so only that much is copied.
-    QString token = name.left(MaxShownTokenLength + 1);
-    for (qsizetype i = 0; i < token.size(); ++i) {
-        const QChar c = token.at(i);
-        if (c.isHighSurrogate() && i + 1 < token.size() && token.at(i + 1).isLowSurrogate()) {
+    const qsizetype start = out.size();
+    out += name.first(std::min(name.size(), MaxShownTokenLength + 1));
+    QChar* token = out.data() + start;
+    const qsizetype size = out.size() - start;
+    for (qsizetype i = 0; i < size; ++i) {
+        const QChar c = token[i];
+        if (c.isHighSurrogate() && i + 1 < size && token[i + 1].isLowSurrogate()) {
             ++i;
         } else if (c.isSurrogate()) {
             token[i] = QChar(QChar::ReplacementCharacter);
         }
     }
     if (name.size() > MaxShownTokenLength) {
-        token.truncate(MaxShownTokenLength - 3);
+        out.truncate(start + MaxShownTokenLength - 3);
         // Neither half of a surrogate pair nor of an escape is left alone.
-        if (token.back().isHighSurrogate() || token.back() == QLatin1Char('~')) {
-            token.chop(1);
+        if (out.back().isHighSurrogate() || out.back() == QLatin1Char('~')) {
+            out.chop(1);
         }
-        token += QLatin1StringView("...");
+        out += QLatin1StringView("...");
     }
+}
+
+} // namespace
+
+qsizetype escapeToken(QString& text, qsizetype start)
+{
+    qsizetype escapes = 0;
+    const QChar* chars = text.constData();
+    for (qsizetype i = start; i < text.size(); ++i) {
+        escapes += chars[i] == QLatin1Char('~') || chars[i] == QLatin1Char('/') ? 1 : 0;
+    }
+    if (escapes == 0) {
+        return 0;
+    }
+    // Each character moved to its place from the back, until those before
+    // the first escape, which stay.
+    qsizetype from = text.size();
+    text.resize(from + escapes);
+    QChar* out = text.data();
+    qsizetype to = text.size();
+    while (to > from) {
+        const QChar c = out[--from];
+        if (c == QLatin1Char('~') || c == QLatin1Char('/')) {
+            out[--to] = c == QLatin1Char('~') ? QLatin1Char('0') : QLatin1Char('1');
+            out[--to] = QLatin1Char('~');
+        } else {
+            out[--to] = c;
+        }
+    }
+    return escapes;
+}
+
+QString pointerToken(const QString& name)
+{
+    QString token = name;
+    escapeToken(token, 0);
+    return token;
+}
+
+QString shownName(const QString& name)
+{
+    QString token;
+    appendShown(token, name);
     return token;
 }
 
@@ -125,23 +171,13 @@ const QString* Place::pointer(qint64& units)
             if (m_pointer.size() + 1 + leastUtf16(token.name) > MaxErrorPointerLength) {
                 return nullptr;
             }
-            units += decodeUnits(token.name);
             m_pointer += QLatin1Char('/');
             const qsizetype start = m_pointer.size();
-            token.name.visit([this](auto view) {
-                if constexpr (std::is_same_v<decltype(view), QStringView>
-                              || std::is_same_v<decltype(view), QLatin1StringView>) {
-                    m_pointer += view;
-                } else {
-                    m_pointer += QUtf8StringView(view.data(), view.size());
-                }
-            });
-            const QStringView added = QStringView(m_pointer).sliced(start);
-            if (added.contains(u'~') || added.contains(u'/')) {
-                const QString escaped = pointerToken(added.toString());
-                m_pointer.truncate(start);
-                m_pointer += escaped;
-            }
+            appendDecoded(m_pointer, token.name);
+            // Decoded, scanned for "~" and "/", and written again from the
+            // first escape.
+            const qsizetype added = m_pointer.size() - start;
+            units += decodeUnits(token.name) + (added + escapeToken(m_pointer, start)) / CharactersPerUnit;
         }
         m_ends.push_back(m_pointer.size());
     }
@@ -174,10 +210,23 @@ qint64 Report::add(Place& place, const QString& description)
     m_pointerLength += pointer->size();
     if (m_lines.size() < MaxListedErrors) {
         QString shown;
+        // The start of each name decoded and escaped, then cut, in a
+        // buffer of its own.
+        QString head;
         for (const PathToken& token : place.tokens()) {
             units += UnitsPerShownToken;
-            shown += QLatin1Char('/')
-                + (token.index >= 0 ? QString::number(token.index) : shownName(pointerToken(headOf(token.name))));
+            shown += QLatin1Char('/');
+            if (token.index >= 0) {
+                char digits[24];
+                const char* end = std::to_chars(std::begin(digits), std::end(digits), token.index).ptr;
+                shown += QLatin1StringView(std::begin(digits), end);
+            } else {
+                head.truncate(0);
+                appendDecoded(head, headOf(token.name));
+                const qsizetype added = head.size();
+                units += (added + escapeToken(head, 0)) / CharactersPerUnit;
+                appendShown(shown, head);
+            }
         }
         m_lines.append(shown + QLatin1StringView(": ") + description);
     } else {
