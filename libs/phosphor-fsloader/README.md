@@ -244,27 +244,51 @@ parse(mesh->bytes);
   with no keyword of another draft (`definitions`, `dependencies`,
   `additionalItems`, `$recursiveRef`, `$recursiveAnchor`, an array under
   `items`). It is checked against the 2020-12 meta-schema when it is
-  constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there.
+  constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there,
+  with the meta-schema's most specific reason.
   A refused schema refuses every document, with the reason.
+- References stay within the schema: a `$ref` is `#`, `#/<JSON pointer>` or
+  `#<anchor>`, not percent-encoded, and names one of its subschemas; an
+  `$anchor` is defined once; `$id` appears at the root only; `$dynamicRef`
+  and `$dynamicAnchor` are refused. A `$ref` that leads back to its own
+  schema without descending into the document (through `allOf`, `anyOf`,
+  `oneOf`, `not`, `if`, `then`, `else`, `dependentSchemas` and `$ref` only,
+  as `{"$ref": "#"}` does) is refused, even in a `$defs` entry nothing uses:
+  jsoncons would recurse on it until the stack overflowed. A `$ref` back
+  through `properties`, `items` or another keyword that applies to a member
+  or an item is allowed.
 - `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex,
-  json-pointer, uri and uri-reference, as jsoncons reads each (it takes the
-  year 0000). A schema naming another format is refused, since jsoncons
-  would ignore it, and so is `hostname`, whose jsoncons check refuses the
-  digit 9 and reads past the end of an empty string.
+  json-pointer, uri and uri-reference, as jsoncons reads each: it takes the
+  year 0000 and the ipv4 address 256.1.1.1, and refuses an empty
+  uri-reference and the uri `a:`. A schema naming another format is refused,
+  since jsoncons would ignore it, and so is `hostname`, whose jsoncons check
+  refuses the digit 9 and reads past the end of an empty string.
 - A string or member name holding U+0000 or an unpaired UTF-16 surrogate,
-  and a number of magnitude 2^63 or more, are refused at their path before
-  jsoncons sees them. Python's 2020-12, which CI runs, accepts such numbers
-  under `number`.
+  and a number outside int64 (below -2^63, or 2^63 and above), are refused
+  at their path before jsoncons sees them, wherever they sit in the
+  document, also where the schema accepts any value: jsoncons' integer
+  check is undefined behaviour on such a number, and may run at any node.
+  Python's 2020-12, which CI runs, accepts such numbers, so a data file
+  holding one passes CI and is refused at load.
 - Integers within int64 are exact, and so are `minimum`, `maximum` and
   their exclusive forms between them. `multipleOf` works in doubles with a
-  tolerance of one ulp: 0.07 is a multiple of 0.01 here, not in Python.
+  tolerance of one ulp: 0.07 is a multiple of 0.01 here, not in Python. Its
+  message prints the divisor with six decimals (`0.075 is not a multiple of
+  0.010000`).
 - `pattern` is an ECMAScript `std::regex` matched against UTF-8 bytes, so a
   dot, a class or a quantifier applies to one byte of a character past
   U+007F (`^.$` does not match "é").
 - `validate()` returns at most 100 errors, then one entry with an empty path
-  that counts the rest. Each path and message is cut to 500 characters. The
-  reasons an `anyOf`, `oneOf` or `allOf` failed follow its error, prefixed
-  with the branch (`anyOf/1: ...`).
+  that counts the rest. A path or message longer than 500 UTF-16 code units
+  keeps the first 500 and gains an ellipsis. The reasons an `anyOf`, `oneOf`
+  or `allOf` failed follow its error, prefixed with the branch
+  (`anyOf/1: ...`). So do the reasons a member failed an
+  `additionalProperties` subschema, which jsoncons does not give: the member
+  is checked against that subschema again, down to four such subschemas one
+  inside another, and each reason is prefixed `additionalProperties: `. A failed `dependentSchemas` subschema is reported
+  below the member that triggered it (`/a/c` for member `c`, when `a`
+  triggered it), as jsoncons reports it.
+- `logSchemaErrors()` logs each error as `  <path>: <message>`, unquoted.
 
 ## See also
 
