@@ -585,15 +585,17 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         target.hasEnum = true;
         for (const QJsonValue& entry : value.toArray()) {
             if (entry.isString()) {
-                target.enumStrings.append(entry.toString());
-                target.enumUtf8.append(entry.toString().toUtf8());
+                const QString text = entry.toString();
+                target.enumStrings.append(text);
+                target.enumUtf8.append(text.toUtf8());
             } else {
                 target.enumOthers.push_back(entry);
             }
         }
         if (target.enumStrings.size() > EnumHashThreshold) {
-            for (const QString& entry : std::as_const(target.enumStrings)) {
-                target.enumTable.insert(entry, 0);
+            target.enumTable.reserve(target.enumStrings.size());
+            for (qsizetype i = 0; i < target.enumStrings.size(); ++i) {
+                target.enumTable.insert(target.enumStrings.at(i), target.enumUtf8.at(i), 0);
             }
         }
         return QString();

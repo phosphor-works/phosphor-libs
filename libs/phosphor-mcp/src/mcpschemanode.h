@@ -93,8 +93,18 @@ public:
     // A name inserted twice keeps the last value.
     void insert(const QString& name, int value)
     {
+        insert(name, name.toUtf8(), value);
+    }
+    // The same, with the name's UTF-8 at hand.
+    void insert(const QString& name, const QByteArray& utf8, int value)
+    {
         m_utf16.insert(name, value);
-        m_utf8.insert(name.toUtf8(), value);
+        m_utf8.insert(utf8, value);
+    }
+    void reserve(qsizetype size)
+    {
+        m_utf16.reserve(size);
+        m_utf8.reserve(size);
     }
     // The value of `name`, or -1.
     [[nodiscard]] int value(QAnyStringView name) const;
