@@ -5,10 +5,12 @@
 
 #include <QtCore/QCborValue>
 #include <QtCore/QFile>
+#include <QtCore/QHash>
 #include <QtCore/QIODevice>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QLocale>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QString>
 
@@ -21,9 +23,12 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -39,7 +44,13 @@ namespace jsonschema = jsoncons::jsonschema;
 
 /// The most errors validate() lists; the rest are counted in one more entry.
 constexpr qsizetype kMaxErrors = 100;
-/// The most characters of a path or a message an error keeps.
+/// How many additionalProperties subschemas, one inside another, validate()
+/// rechecks a failed member against for its reasons. Each level rechecks
+/// members that do not overlap, so validate() costs at most this many times
+/// more than without the rechecks.
+constexpr int kMaxRecheckDepth = 4;
+/// The most UTF-16 code units of a path or a message an error keeps, before
+/// the ellipsis that says it was cut.
 constexpr qsizetype kMaxTextLength = 500;
 
 QString fromUtf8(std::string_view text)
@@ -47,8 +58,9 @@ QString fromUtf8(std::string_view text)
     return QString::fromUtf8(text.data(), qsizetype(text.size()));
 }
 
-/// @p text cut to kMaxTextLength characters, never between the two halves of a
-/// surrogate pair, with an ellipsis where it was cut.
+/// @p text cut to kMaxTextLength code units, or one fewer rather than between
+/// the two halves of a surrogate pair, with an ellipsis appended where it was
+/// cut: kMaxTextLength + 1 at most.
 QString clipped(QString text)
 {
     if (text.size() <= kMaxTextLength) {
@@ -119,6 +131,12 @@ public:
         return m_total == 0;
     }
 
+    /// Every error added or counted so far.
+    qsizetype total() const
+    {
+        return m_total;
+    }
+
     /// The kept errors, then, when some were only counted, one entry with an
     /// empty path that says how many.
     QList<SchemaValidator::Error> take()
@@ -171,6 +189,12 @@ public:
         m_tokens.pop_back();
     }
 
+    /// How many tokens deep the walk is: 1 at a keyword of the root.
+    std::size_t depth() const
+    {
+        return m_tokens.size();
+    }
+
     QString toString() const
     {
         QString path;
@@ -194,14 +218,17 @@ private:
 // what jsoncons would read differently from the text: a string or member name
 // with U+0000 (jsoncons matches `pattern` and looks names up through a C
 // string, which ends there), one with an unpaired surrogate (UTF-8 has no
-// encoding for it, so names would collapse into one), and a number of
-// magnitude 2^63 or more (jsoncons' integer check converts it to int64, which
-// is undefined behaviour). Each refusal is an error at the node's path.
+// encoding for it, so names would collapse into one), and a number outside
+// int64, below -2^63 or from 2^63 on (jsoncons' integer check converts a
+// double to int64, which is undefined behaviour there). Each refusal is an
+// error at the node's path, wherever the node is: jsoncons may run its
+// integer check at any node a subschema reaches.
 //
 // A number that Qt holds as an integer stays one. Qt holds every integral
-// number within int64 as one, 3.0 and 3e0 included, which is what 2020-12
-// means by an integer. Any other number is a double: a fraction, or a
-// magnitude past int64, refused here.
+// number within int64 as one, 3.0, 3e0 and -2^63 included, which is what
+// 2020-12 means by an integer. Any other number is a double: a fraction, whose
+// magnitude is below 2^52 and so converts, or a number outside int64, refused
+// here.
 class Converter
 {
 public:
@@ -222,7 +249,8 @@ public:
             }
             const double real = value.toDouble();
             if (!(std::fabs(real) < 0x1p63)) {
-                refuse(QStringLiteral("number %1 is out of range: magnitudes of 2^63 and more are refused").arg(real));
+                refuse(QStringLiteral("number %1 is outside the int64 range (-2^63 to 2^63 - 1), which is refused")
+                           .arg(real, 0, 'e', QLocale::FloatingPointShortest));
                 return Json::null();
             }
             return Json(real);
@@ -326,16 +354,34 @@ bool isAssertedFormat(const QString& format)
 QString otherDraftKeyword(const QString& keyword)
 {
     if (keyword == QLatin1StringView("definitions")) {
-        return QStringLiteral("is Draft 7's; 2020-12 names it $defs");
+        return QStringLiteral("is a Draft 7 keyword, which 2020-12 names $defs");
     }
     if (keyword == QLatin1StringView("dependencies")) {
-        return QStringLiteral("is Draft 7's; 2020-12 splits it into dependentRequired and dependentSchemas");
+        return QStringLiteral("is a Draft 7 keyword, which 2020-12 splits into dependentRequired and dependentSchemas");
     }
     if (keyword == QLatin1StringView("additionalItems")) {
-        return QStringLiteral("is Draft 7's; 2020-12 uses items beside prefixItems");
+        return QStringLiteral("is a Draft 7 and 2019-09 keyword, which 2020-12 replaces with items beside prefixItems");
     }
     if (keyword == QLatin1StringView("$recursiveRef") || keyword == QLatin1StringView("$recursiveAnchor")) {
-        return QStringLiteral("is Draft 2019-09's; 2020-12 uses $dynamicRef and $dynamicAnchor");
+        return QStringLiteral(
+            "is a Draft 2019-09 keyword, which 2020-12 replaces with $dynamicRef and "
+            "$dynamicAnchor (and this validator supports neither)");
+    }
+    return QString();
+}
+
+// Keywords of 2020-12 itself that this validator refuses, with why. A
+// $dynamicRef resolves by the path that validation took, which the check
+// for references that never end (checkReferences) cannot follow, and an $id
+// below the root starts another resource, against which that check would
+// resolve the references inside it wrongly.
+QString unsupportedKeyword(const QString& keyword, const PointerPath& path)
+{
+    if (keyword == QLatin1StringView("$dynamicRef") || keyword == QLatin1StringView("$dynamicAnchor")) {
+        return QStringLiteral("is not supported: this validator resolves only $ref and $anchor");
+    }
+    if (keyword == QLatin1StringView("$id") && path.depth() > 1) {
+        return QStringLiteral("below the root is not supported: this validator resolves $ref within one resource");
     }
     return QString();
 }
@@ -380,10 +426,23 @@ bool isSubschemaArrayKeyword(const QString& keyword)
     return keywords.contains(keyword);
 }
 
+// The keywords above whose subschemas apply to the same value as the schema
+// that holds them, and not to a member or an item of it.
+bool isInPlaceKeyword(const QString& keyword)
+{
+    static const QStringList keywords{
+        QStringLiteral("allOf"), QStringLiteral("anyOf"), QStringLiteral("dependentSchemas"),
+        QStringLiteral("else"),  QStringLiteral("if"),    QStringLiteral("not"),
+        QStringLiteral("oneOf"), QStringLiteral("then"),
+    };
+    return keywords.contains(keyword);
+}
+
 // What the meta-schema allows but this validator refuses, found by walking
 // every subschema: $schema naming another dialect, other drafts' keywords,
-// the array form of items, and a format jsoncons does not check. Values the
-// meta-schema refuses (a subschema that is not one) are left to it.
+// the array form of items, a format jsoncons does not check, $dynamicRef,
+// $dynamicAnchor, and $id below the root. Values the meta-schema refuses (a
+// subschema that is not one) are left to it.
 void checkDialect(const QJsonValue& schema, PointerPath& path, ErrorList& errors)
 {
     if (!schema.isObject()) {
@@ -402,13 +461,17 @@ void checkDialect(const QJsonValue& schema, PointerPath& path, ErrorList& errors
             }
         } else if (const QString why = otherDraftKeyword(keyword); !why.isEmpty()) {
             errors.add(path.toString(), keyword + QLatin1Char(' ') + why);
+        } else if (const QString unsupported = unsupportedKeyword(keyword, path); !unsupported.isEmpty()) {
+            errors.add(path.toString(), keyword + QLatin1Char(' ') + unsupported);
         } else if (keyword == QLatin1StringView("format")) {
             if (value.isString() && !isAssertedFormat(value.toString())) {
                 errors.add(path.toString(),
                            QStringLiteral("format \"%1\" is not one this validator checks").arg(value.toString()));
             }
         } else if (keyword == QLatin1StringView("items") && value.isArray()) {
-            errors.add(path.toString(), QStringLiteral("an array under items is Draft 7's; 2020-12 uses prefixItems"));
+            errors.add(path.toString(),
+                       QStringLiteral("an array under items is the Draft 7 and 2019-09 form, which 2020-12 writes as "
+                                      "prefixItems"));
         } else if (isSubschemaKeyword(keyword)) {
             checkDialect(value, path, errors);
         } else if (isSubschemaMapKeyword(keyword) && value.isObject()) {
@@ -429,6 +492,204 @@ void checkDialect(const QJsonValue& schema, PointerPath& path, ErrorList& errors
         path.pop();
     }
 }
+
+// jsoncons follows a $ref each time it validates through it, with no guard: a
+// $ref that leads back to its own schema through subschemas that apply to the
+// same value ({"$ref": "#"}, or two $defs that name each other) recursed
+// until the stack overflowed, at every validate(). Such a loop is refused
+// when the schema is constructed. A $ref that comes back only through a
+// member or an item (properties, items, ...) descends into the document,
+// which is finite, and is allowed.
+//
+// The references followed are those jsoncons resolves within the schema: "#",
+// "#/<JSON pointer>" and "#<$anchor>". Anything else is refused, so that no
+// reference jsoncons follows is missed here: one to another document (which
+// it would not load anyway), one that is percent-encoded (it compares
+// fragments as written, which a decoded comparison here could misread), and
+// one that names no subschema. $dynamicRef and $id below the root are refused
+// before this runs, by checkDialect, and so are U+0000 and unpaired surrogates,
+// by the Converter, which pointerToken would otherwise write as \uXXXX.
+class ReferenceCheck
+{
+public:
+    // Adds to `errors` each $ref that cannot be followed, each $anchor
+    // defined twice, and else the first $ref found to lead back to its own
+    // schema without descending.
+    void run(const QJsonObject& root, ErrorList& errors)
+    {
+        add(root, QString(), errors);
+        if (!errors.isEmpty()) {
+            return;
+        }
+        for (Node& node : m_nodes) {
+            resolve(node, errors);
+        }
+        if (errors.isEmpty()) {
+            findLoop(errors);
+        }
+    }
+
+private:
+    struct Node
+    {
+        QJsonObject object; // empty for a boolean schema
+        QString pointer; // from the root, as jsoncons writes it
+        std::vector<int> inPlace; // the subschemas that apply to the same value
+        int reference = -1; // the subschema its $ref names
+    };
+
+    // Adds the schema at `pointer` and every subschema below it, as
+    // checkDialect walks them. Returns its index, or -1 for a value that is
+    // not a schema (which the meta-schema has refused already).
+    int add(const QJsonValue& schema, const QString& pointer, ErrorList& errors)
+    {
+        if (!schema.isObject() && !schema.isBool()) {
+            return -1;
+        }
+        const int index = int(m_nodes.size());
+        m_nodes.push_back(Node{schema.toObject(), pointer, {}, -1});
+        m_byPointer.insert(pointer, index);
+        const QJsonObject object = schema.toObject();
+        if (const QJsonValue anchor = object.value(QLatin1StringView("$anchor")); anchor.isString()) {
+            if (const auto first = m_anchors.constFind(anchor.toString()); first != m_anchors.constEnd()) {
+                const QString& other = m_nodes[std::size_t(*first)].pointer;
+                errors.add(pointer + QStringLiteral("/$anchor"),
+                           QStringLiteral("$anchor \"%1\" is defined at %2 too")
+                               .arg(anchor.toString(), other.isEmpty() ? QStringLiteral("the root") : other));
+            } else {
+                m_anchors.insert(anchor.toString(), index);
+            }
+        }
+        for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+            const QString keyword = it.key();
+            const QString at = pointer + QChar(u'/') + pointerToken(keyword);
+            const bool inPlace = isInPlaceKeyword(keyword);
+            const auto child = [&](const QJsonValue& value, const QString& childPointer) {
+                const int added = add(value, childPointer, errors);
+                if (inPlace && added >= 0) {
+                    m_nodes[std::size_t(index)].inPlace.push_back(added);
+                }
+            };
+            if (isSubschemaKeyword(keyword)) {
+                child(it.value(), at);
+            } else if (isSubschemaMapKeyword(keyword) && it.value().isObject()) {
+                const QJsonObject members = it.value().toObject();
+                for (auto member = members.constBegin(); member != members.constEnd(); ++member) {
+                    child(member.value(), at + QChar(u'/') + pointerToken(member.key()));
+                }
+            } else if (isSubschemaArrayKeyword(keyword) && it.value().isArray()) {
+                const QJsonArray items = it.value().toArray();
+                for (qsizetype i = 0; i < items.size(); ++i) {
+                    child(items.at(i), at + QChar(u'/') + QString::number(i));
+                }
+            }
+        }
+        return index;
+    }
+
+    void resolve(Node& node, ErrorList& errors) const
+    {
+        const QJsonValue value = node.object.value(QLatin1StringView("$ref"));
+        if (!value.isString()) {
+            return;
+        }
+        const QString reference = value.toString();
+        const QString at = node.pointer + QStringLiteral("/$ref");
+        if (!reference.startsWith(QChar(u'#'))) {
+            errors.add(at,
+                       QStringLiteral("$ref \"%1\" names another document, and this validator resolves only "
+                                      "\"#\", \"#/<JSON pointer>\" and \"#<$anchor>\" within the schema")
+                           .arg(reference));
+            return;
+        }
+        if (reference.contains(QChar(u'%'))) {
+            errors.add(
+                at,
+                QStringLiteral("$ref \"%1\" is percent-encoded, which this validator does not resolve").arg(reference));
+            return;
+        }
+        const QString fragment = reference.mid(1);
+        const bool isPointer = fragment.isEmpty() || fragment.startsWith(QChar(u'/'));
+        const QHash<QString, int>& names = isPointer ? m_byPointer : m_anchors;
+        const auto found = names.constFind(fragment);
+        if (found == names.constEnd()) {
+            errors.add(at, QStringLiteral("$ref \"%1\" names no subschema of this schema").arg(reference));
+            return;
+        }
+        node.reference = *found;
+        node.inPlace.push_back(*found);
+    }
+
+    // A depth-first search over the in-place edges, with a stack of its own:
+    // a chain of $defs that name each other must not recurse on the
+    // machine's. A loop holds a $ref, since without one the edges form a
+    // tree, and the $ref reported is the first on the loop.
+    void findLoop(ErrorList& errors) const
+    {
+        enum class Mark : quint8 {
+            New,
+            Open,
+            Done,
+        };
+        struct Frame
+        {
+            int node;
+            std::size_t next;
+        };
+        std::vector<Mark> marks(m_nodes.size(), Mark::New);
+        std::vector<Frame> stack;
+        for (std::size_t start = 0; start < m_nodes.size(); ++start) {
+            if (marks[start] != Mark::New) {
+                continue;
+            }
+            marks[start] = Mark::Open;
+            stack.push_back(Frame{int(start), 0});
+            while (!stack.empty()) {
+                Frame& top = stack.back();
+                const Node& node = m_nodes[std::size_t(top.node)];
+                if (top.next == node.inPlace.size()) {
+                    marks[std::size_t(top.node)] = Mark::Done;
+                    stack.pop_back();
+                    continue;
+                }
+                const int next = node.inPlace[top.next++];
+                if (marks[std::size_t(next)] == Mark::Open) {
+                    errors.add(loopReference(stack, next) + QStringLiteral("/$ref"),
+                               QStringLiteral("$ref leads back to the same schema without descending into the "
+                                              "document, so validating would never end"));
+                    return;
+                }
+                if (marks[std::size_t(next)] == Mark::New) {
+                    marks[std::size_t(next)] = Mark::Open;
+                    stack.push_back(Frame{next, 0});
+                }
+            }
+        }
+    }
+
+    // The pointer of the schema on the loop that closes at `to` whose $ref
+    // is one of its steps.
+    template<typename Stack>
+    QString loopReference(const Stack& stack, int to) const
+    {
+        std::size_t first = 0;
+        while (stack[first].node != to) {
+            ++first;
+        }
+        for (std::size_t k = first; k < stack.size(); ++k) {
+            const int successor = k + 1 < stack.size() ? stack[k + 1].node : to;
+            const Node& node = m_nodes[std::size_t(stack[k].node)];
+            if (node.reference == successor) {
+                return node.pointer;
+            }
+        }
+        return m_nodes[std::size_t(stack.back().node)].pointer;
+    }
+
+    std::vector<Node> m_nodes;
+    QHash<QString, int> m_byPointer;
+    QHash<QString, int> m_anchors;
+};
 
 jsonschema::evaluation_options evaluationOptions()
 {
@@ -457,30 +718,95 @@ enum class Messages {
     Leaves
 };
 
+// Validates `member` again, the value of a member that failed an
+// additionalProperties subschema, against that subschema, and adds why it
+// failed at `memberPath`, each prefixed with `prefix`. jsoncons keeps those
+// reasons to itself and reports only that the member was invalid. `depth` is
+// 1 for a member jsoncons reported, and one more for each recheck it is in.
+using Recheck = std::function<void(const Json& member, const QString& memberPath,
+                                   const jsonschema::validation_message& message, const QString& prefix, int depth)>;
+
+// Where addMessage() puts what it reads, and what it needs to find a member.
+struct Report
+{
+    ErrorList& errors;
+    Messages which;
+    // The value validated, and its path in the document ("" at its root).
+    const Json& instance;
+    QString instancePath;
+    // Null: a failed additionalProperties member keeps only jsoncons' line.
+    const Recheck* recheck;
+    // How many rechecks this report is in.
+    int depth;
+};
+
+// The member a failed additionalProperties subschema names: jsoncons
+// reports it at the object, with the name in its message.
+std::optional<std::string> invalidAdditionalProperty(const jsonschema::validation_message& message)
+{
+    constexpr std::string_view head = "Additional property '";
+    constexpr std::string_view tail = "' found but was invalid.";
+    const std::string& text = message.message();
+    if (message.keyword() != "additionalProperties" || text.size() < head.size() + tail.size()
+        || text.compare(0, head.size(), head) != 0 || text.compare(text.size() - tail.size(), tail.size(), tail) != 0) {
+        return std::nullopt;
+    }
+    return text.substr(head.size(), text.size() - head.size() - tail.size());
+}
+
+// Finds the member `name` of the object at `message`'s instance location and
+// rechecks it. Adds nothing when there is no such member.
+void recheckMember(const Report& report, const jsonschema::validation_message& message, const std::string& name,
+                   const QString& memberPath, const QString& prefix)
+{
+    std::error_code ec;
+    const Json& object = jsoncons::jsonpointer::get(report.instance, message.instance_location(), ec);
+    if (ec || !object.is_object()) {
+        return;
+    }
+    const auto member = object.find(name);
+    if (member == object.object_range().end()) {
+        return;
+    }
+    (*report.recheck)((*member).value(), memberPath, message, prefix, report.depth + 1);
+}
+
 // Adds one jsoncons message, then the reasons it carries: why each branch of
 // an anyOf, oneOf or allOf failed, each at its own node and prefixed with the
-// branch.
-void addMessage(ErrorList& errors, const jsonschema::validation_message& message, const QString& prefix, Messages which)
+// branch, and why the member a failed additionalProperties subschema names
+// failed it, prefixed "additionalProperties: ".
+void addMessage(const Report& report, const jsonschema::validation_message& message, const QString& prefix)
 {
-    if (which == Messages::Leaves && !message.details().empty()) {
+    ErrorList& errors = report.errors;
+    if (report.which == Messages::Leaves && !message.details().empty()) {
         // Only its reasons, below.
     } else if (!errors.wantsMore()) {
         errors.countOne();
     } else {
-        QString path = fromUtf8(message.instance_location().to_string());
-        const std::string& text = message.message();
-        // An additionalProperties subschema that fails is reported at the
-        // object and names the member; the error belongs at the member.
-        constexpr std::string_view head = "Additional property '";
-        constexpr std::string_view tail = "' found but was invalid.";
-        if (message.keyword() == "additionalProperties" && text.size() >= head.size() + tail.size()
-            && text.compare(0, head.size(), head) == 0
-            && text.compare(text.size() - tail.size(), tail.size(), tail) == 0) {
-            path += QChar(u'/')
-                + pointerToken(
-                        fromUtf8(std::string_view(text).substr(head.size(), text.size() - head.size() - tail.size())));
+        QString path = report.instancePath + fromUtf8(message.instance_location().to_string());
+        const QString text = prefix + fromUtf8(message.message());
+        // The error belongs at the member, not at the object jsoncons names.
+        const std::optional<std::string> member = invalidAdditionalProperty(message);
+        if (member) {
+            path += QChar(u'/') + pointerToken(fromUtf8(*member));
         }
-        errors.add(path, prefix + fromUtf8(text));
+        if (!member || !report.recheck) {
+            errors.add(path, text);
+        } else if (report.which == Messages::All) {
+            errors.add(path, text);
+            // Past the last error kept, nothing is rechecked: the count then
+            // holds only what jsoncons reported.
+            if (errors.wantsMore()) {
+                recheckMember(report, message, *member, path, prefix + QStringLiteral("additionalProperties: "));
+            }
+        } else {
+            // A leaf only when nothing more specific is found.
+            const qsizetype before = errors.total();
+            recheckMember(report, message, *member, path, prefix);
+            if (errors.total() == before) {
+                errors.add(path, text);
+            }
+        }
     }
     if (message.details().empty()) {
         return;
@@ -500,9 +826,14 @@ void addMessage(ErrorList& errors, const jsonschema::validation_message& message
             }
         }
         // The branches of the meta-schema mean nothing to a schema's author.
-        addMessage(errors, detail, which == Messages::All ? prefix + branch + QStringLiteral(": ") : prefix, which);
+        addMessage(report, detail, report.which == Messages::All ? prefix + branch + QStringLiteral(": ") : prefix);
     }
 }
+
+// The $id the copy of the schema that rechecks additionalProperties members
+// takes, which names it for the $ref to one of its subschemas. Every $ref
+// inside it is a fragment (ReferenceCheck), which resolves against it.
+constexpr std::string_view kRecheckId = "urn:phosphor-fsloader:schema";
 
 } // namespace
 
@@ -515,6 +846,11 @@ struct SchemaValidator::Private
 
     // Why the schema was refused, reported by every validate().
     QString compileError;
+
+    // {"$defs": {"schema": <the schema, its $id kRecheckId>}}, from which
+    // validate() compiles a schema that is one failed additionalProperties
+    // subschema, to say why a member failed it.
+    Json recheckBase;
 };
 
 SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
@@ -559,8 +895,31 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
         // a keyword with a value of the wrong kind ({"enum": "x"}, a negative
         // maxItems) would compile and then fail, or check nothing, at every
         // validate(). The meta-schema refuses it here.
-        metaSchema().validate(schema, [&problems](const jsonschema::validation_message& message) {
-            addMessage(problems, message, QString(), Messages::Leaves);
+        //
+        // A member of $defs, properties, patternProperties or dependentSchemas
+        // is checked against the whole meta-schema ({"$dynamicRef": "#meta"}),
+        // through additionalProperties, which says only that the member was
+        // invalid: the member is checked again, for the reason. The other
+        // maps the meta-schema closes that way ($vocabulary,
+        // dependentRequired) keep jsoncons' line.
+        Recheck metaRecheck;
+        metaRecheck = [&problems, &metaRecheck](const Json& member, const QString& memberPath,
+                                                const jsonschema::validation_message& message, const QString& prefix,
+                                                int depth) {
+            const jsoncons::jsonpointer::json_pointer& map = message.instance_location();
+            if (map.empty() || !isSubschemaMapKeyword(fromUtf8(*map.rbegin()))) {
+                return;
+            }
+            // A schema is small and checked once: no depth is too deep.
+            const Report inner{problems, Messages::Leaves, member, memberPath, &metaRecheck, depth};
+            metaSchema().validate(member, [&inner, &prefix](const jsonschema::validation_message& reason) {
+                addMessage(inner, reason, prefix);
+                return jsonschema::walk_state::advance;
+            });
+        };
+        const Report report{problems, Messages::Leaves, schema, QString(), &metaRecheck, 0};
+        metaSchema().validate(schema, [&report](const jsonschema::validation_message& message) {
+            addMessage(report, message, QString());
             return jsonschema::walk_state::advance;
         });
         if (!problems.isEmpty()) {
@@ -568,7 +927,20 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
                 QStringLiteral("schema does not conform to the 2020-12 meta-schema at %1").arg(problems.summary());
             return;
         }
+        ReferenceCheck().run(root, problems);
+        if (!problems.isEmpty()) {
+            d->compileError = QStringLiteral("schema refused at %1").arg(problems.summary());
+            return;
+        }
+        Json recheck = schema;
+        recheck.erase("$schema");
+        recheck.insert_or_assign("$id", std::string(kRecheckId));
+        Json defs(jsoncons::json_object_arg);
+        defs.insert_or_assign("schema", std::move(recheck));
+        Json recheckBase(jsoncons::json_object_arg);
+        recheckBase.insert_or_assign("$defs", std::move(defs));
         d->schema.emplace(jsonschema::make_json_schema(std::move(schema), evaluationOptions()));
+        d->recheckBase = std::move(recheckBase);
     } catch (const std::exception& e) {
         d->compileError = QStringLiteral("schema failed to compile: %1").arg(QString::fromUtf8(e.what()));
     } catch (...) {
@@ -608,16 +980,55 @@ std::optional<QList<SchemaValidator::Error>> SchemaValidator::validate(const QJs
         return QList<Error>{Error{QString(), d->compileError}};
     }
 
-    // Validation with a reporter does not throw by design, but std::regex can
-    // (a match too complex for it). This translation unit is built with
-    // exceptions and every caller is not, so nothing may leave it: fail closed
-    // instead, as the constructor does.
+    // A guard, which no input known reaches: validation with a reporter does
+    // not throw by design, and the std::regex matches it runs are not known to
+    // throw either (libstdc++ recurses instead). But this translation unit is
+    // built with exceptions and every caller is not, so nothing may leave it,
+    // whatever jsoncons or the standard library do: fail closed instead, as
+    // the constructor does.
     try {
         ErrorList errors;
         const Json instance = Converter(errors).convert(document);
+        // Each failed additionalProperties subschema is compiled once per
+        // validate(), the first time a member fails it: a copy of the whole
+        // schema whose root is a $ref to it. At most kMaxErrors are, since a
+        // recheck follows an error kept. Empty: it did not compile (it
+        // should).
+        std::map<std::string, std::optional<jsonschema::json_schema<Json>>> subschemas;
+        Recheck recheck;
+        recheck = [this, &errors, &subschemas, &recheck](const Json& member, const QString& memberPath,
+                                                         const jsonschema::validation_message& message,
+                                                         const QString& prefix, int depth) {
+            if (depth > kMaxRecheckDepth) {
+                return;
+            }
+            const jsoncons::string_view fragment = message.schema_location().encoded_fragment();
+            const std::string key(fragment.data(), fragment.size());
+            auto compiled = subschemas.find(key);
+            if (compiled == subschemas.end()) {
+                std::optional<jsonschema::json_schema<Json>> subschema;
+                try {
+                    Json wrapper = d->recheckBase;
+                    wrapper.insert_or_assign("$ref", std::string(kRecheckId) + '#' + key);
+                    subschema.emplace(jsonschema::make_json_schema(std::move(wrapper), evaluationOptions()));
+                } catch (...) {
+                    // The member keeps jsoncons' line only.
+                }
+                compiled = subschemas.emplace(key, std::move(subschema)).first;
+            }
+            if (!compiled->second) {
+                return;
+            }
+            const Report inner{errors, Messages::All, member, memberPath, &recheck, depth};
+            compiled->second->validate(member, [&inner, &prefix](const jsonschema::validation_message& reason) {
+                addMessage(inner, reason, prefix);
+                return jsonschema::walk_state::advance;
+            });
+        };
         if (errors.isEmpty()) {
-            d->schema->validate(instance, [&errors](const jsonschema::validation_message& message) {
-                addMessage(errors, message, QString(), Messages::All);
+            const Report report{errors, Messages::All, instance, QString(), &recheck, 0};
+            d->schema->validate(instance, [&report](const jsonschema::validation_message& message) {
+                addMessage(report, message, QString());
                 return jsonschema::walk_state::advance;
             });
         }
@@ -640,11 +1051,11 @@ void logSchemaErrors(const QLoggingCategory& category, const QList<SchemaValidat
         // The entry past the last kept error, which validate() adds when it
         // only counted the rest, is a count and has no node.
         if (i == kMaxErrors && error.path.isEmpty()) {
-            qCWarning(category).nospace() << "  " << error.message;
+            qCWarning(category).noquote().nospace() << "  " << error.message;
             continue;
         }
-        qCWarning(category).nospace() << "  " << (error.path.isEmpty() ? QStringLiteral("(root)") : error.path) << ": "
-                                      << error.message;
+        qCWarning(category).noquote().nospace()
+            << "  " << (error.path.isEmpty() ? QStringLiteral("(root)") : error.path) << ": " << error.message;
     }
 }
 

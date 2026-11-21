@@ -247,18 +247,33 @@ private Q_SLOTS:
     void numbersPastInt64AreRefused()
     {
         // jsoncons' integer check converts a double to int64, undefined past
-        // its range, so a number of magnitude 2^63 or more is refused at its
-        // path before jsoncons sees it, whatever the schema says. CI's Python
-        // accepts it under "number": the one place the load is stricter.
+        // its range, so a number outside int64 is refused at its path before
+        // jsoncons sees it, wherever it is and whatever the schema says there
+        // (here nothing). CI's Python accepts it under "number": the one
+        // place the load is stricter. -2^63 is within int64 and is an integer.
         const SchemaValidator validator(QByteArrayLiteral(R"({"type": "object"})"));
         QVERIFY(validator.isValid());
         QVERIFY(!validator.validate(parse(R"({"n": 9223372036854775807, "m": -9.2e18})")).has_value());
-        for (const char* json : {R"({"n": 9223372036854775808})", R"({"n": -1e19})", R"({"n": 1e300})"}) {
-            const auto errors = validator.validate(parse(json));
-            QVERIFY2(errors.has_value(), json);
+        const SchemaValidator integers(QByteArrayLiteral(R"({"items": {"type": "integer"}})"));
+        QVERIFY(!integers.validate(QJsonDocument::fromJson("[-9223372036854775808]").array()).has_value());
+        const struct
+        {
+            const char* json;
+            const char* shown;
+        } rows[] = {
+            {R"({"n": 9223372036854775808})", "9.223372036854776e+18"},
+            {R"({"n": -9223372036854777856})", "-9.223372036854778e+18"},
+            {R"({"n": -1e19})", "-1e+19"},
+            {R"({"n": 1e300})", "1e+300"},
+        };
+        for (const auto& row : rows) {
+            const auto errors = validator.validate(parse(row.json));
+            QVERIFY2(errors.has_value(), row.json);
             QCOMPARE(errors->size(), 1);
             QCOMPARE(errors->first().path, QStringLiteral("/n"));
-            QVERIFY(errors->first().message.contains(QStringLiteral("out of range")));
+            QCOMPARE(errors->first().message,
+                     QStringLiteral("number %1 is outside the int64 range (-2^63 to 2^63 - 1), which is refused")
+                         .arg(QLatin1StringView(row.shown)));
         }
         // In the schema too.
         QVERIFY(!SchemaValidator(QByteArrayLiteral(R"({"maximum": 1e19})")).isValid());
@@ -340,26 +355,316 @@ private Q_SLOTS:
             const char* where;
             const char* instead;
         } rows[] = {
-            {R"({"definitions": {"a": {}}})", "/definitions", "names it $defs"},
+            {R"({"definitions": {"a": {}}})", "/definitions",
+             "definitions is a Draft 7 keyword, which 2020-12 names $defs"},
             {R"({"properties": {"a": {"dependencies": {"b": ["c"]}}}})", "/properties/a/dependencies",
-             "dependentRequired"},
-            {R"({"anyOf": [{}, {"additionalItems": false}]})", "/anyOf/1/additionalItems", "items beside prefixItems"},
-            {R"({"items": [{"type": "string"}]})", "/items", "uses prefixItems"},
-            {"{\"$defs\": {\"x\": {\"$recursiveRef\": \"#\"}}}", "/$defs/x/$recursiveRef", "$dynamicRef"},
+             "dependencies is a Draft 7 keyword, which 2020-12 splits into dependentRequired and dependentSchemas"},
+            {R"({"anyOf": [{}, {"additionalItems": false}]})", "/anyOf/1/additionalItems",
+             "additionalItems is a Draft 7 and 2019-09 keyword, which 2020-12 replaces with items beside prefixItems"},
+            {R"({"items": [{"type": "string"}]})", "/items",
+             "an array under items is the Draft 7 and 2019-09 form, which 2020-12 writes as prefixItems"},
+            {"{\"$defs\": {\"x\": {\"$recursiveRef\": \"#\"}}}", "/$defs/x/$recursiveRef",
+             "$recursiveRef is a Draft 2019-09 keyword, which 2020-12 replaces with $dynamicRef and $dynamicAnchor "
+             "(and this validator supports neither)"},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
             QVERIFY2(!validator.isValid(), row.schema);
             const QString message = validator.validate(QJsonValue()).value().first().message;
-            QVERIFY2(message.startsWith(QStringLiteral("schema refused at ") + QLatin1StringView(row.where)
-                                        + QStringLiteral(": ")),
-                     qPrintable(message));
-            QVERIFY2(message.contains(QLatin1StringView(row.instead)), qPrintable(message));
+            QCOMPARE(message,
+                     QStringLiteral("schema refused at ") + QLatin1StringView(row.where) + QStringLiteral(": ")
+                         + QLatin1StringView(row.instead));
         }
         // A property may still be called "definitions": a name, not a keyword.
         const SchemaValidator named(QByteArrayLiteral(R"({"properties": {"definitions": {"type": "string"}}})"));
         QVERIFY(named.isValid());
         QVERIFY(named.validate(parse(R"({"definitions": 1})")).has_value());
+    }
+
+    void refLoopsAreRefused()
+    {
+        // jsoncons follows a $ref each time it validates through it: one that
+        // leads back to its own schema through subschemas that apply to the
+        // same value recursed until the stack overflowed, at every validate().
+        // Refused at construction, at a $ref on the loop. (Plain strings: a
+        // '#' inside a raw string can hide this class from moc.)
+        const struct
+        {
+            const char* schema;
+            const char* where;
+        } rows[] = {
+            {"{\"$ref\": \"#\"}", "/$ref"},
+            {"{\"$defs\": {\"a\": {\"$ref\": \"#/$defs/a\"}}}", "/$defs/a/$ref"},
+            {"{\"$defs\": {\"a\": {\"$ref\": \"#/$defs/b\"}, \"b\": {\"$ref\": \"#/$defs/a\"}}}", "/$defs/a/$ref"},
+            {"{\"anyOf\": [{\"type\": \"string\"}, {\"$ref\": \"#\"}]}", "/anyOf/1/$ref"},
+            {"{\"$defs\": {\"a\": {\"$anchor\": \"x\", \"not\": {\"$ref\": \"#x\"}}}}", "/$defs/a/not/$ref"},
+            {"{\"$defs\": {\"a\": {\"allOf\": [{\"$ref\": \"#/$defs/b\"}]}, \"b\": {\"oneOf\": [{\"$ref\": "
+             "\"#/$defs/a\"}]}}}",
+             "/$defs/a/allOf/0/$ref"},
+        };
+        for (const auto& row : rows) {
+            const SchemaValidator validator{QByteArray(row.schema)};
+            QVERIFY2(!validator.isValid(), row.schema);
+            QCOMPARE(validator.validate(QJsonValue(1)).value().first().message,
+                     QStringLiteral("schema refused at ") + QLatin1StringView(row.where)
+                         + QStringLiteral(": $ref leads back to the same schema without descending into the "
+                                          "document, so validating would never end"));
+        }
+
+        // The search keeps a stack of its own: a loop of 20000 $defs does not
+        // recurse on the machine's.
+        QJsonObject defs;
+        for (int i = 0; i < 20000; ++i) {
+            defs.insert(QStringLiteral("d%1").arg(i),
+                        QJsonObject{{QStringLiteral("$ref"), QStringLiteral("#/$defs/d%1").arg((i + 1) % 20000)}});
+        }
+        const SchemaValidator chain(QJsonDocument(QJsonObject{{QStringLiteral("$defs"), defs}}).toJson());
+        QVERIFY(!chain.isValid());
+        QVERIFY(chain.validate(QJsonValue(1)).value().first().message.contains(QStringLiteral("never end")));
+    }
+
+    void descendingRefsAreAllowed()
+    {
+        // A $ref back to its own schema through a member or an item descends
+        // into the document, which is finite: allowed, and checked to the
+        // document's depth. So is a $ref that nothing applies in place.
+        const struct
+        {
+            const char* schema;
+            const char* document;
+            const char* firstError; // null: the document passes
+        } rows[] = {
+            {"{\"type\": \"object\", \"properties\": {\"next\": {\"$ref\": \"#\"}}}",
+             R"({"next": {"next": {"next": 5}}})", "/next/next/next"},
+            {"{\"type\": \"array\", \"items\": {\"$ref\": \"#\"}}", R"([[[["x"]]]])", "/0/0/0/0"},
+            {"{\"type\": \"array\", \"prefixItems\": [{\"$ref\": \"#\"}]}", R"([[[]]])", nullptr},
+            {"{\"type\": \"array\", \"prefixItems\": [{\"$ref\": \"#\"}]}", R"([[[1]]])", "/0/0/0"},
+            {"{\"type\": \"object\", \"patternProperties\": {\"^a\": {\"$ref\": \"#\"}}}", R"({"a": {"ab": 1}})",
+             "/a/ab"},
+            {"{\"$defs\": {\"a\": {\"$ref\": \"#\"}}, \"type\": \"integer\"}", R"(1)", nullptr},
+        };
+        for (const auto& row : rows) {
+            const SchemaValidator validator{QByteArray(row.schema)};
+            QVERIFY2(validator.isValid(), row.schema);
+            const auto errors =
+                validator.validate(QJsonDocument::fromJson(QByteArray("[") + row.document + "]").array().at(0));
+            if (!row.firstError) {
+                QVERIFY2(!errors.has_value(), row.document);
+                continue;
+            }
+            QVERIFY2(errors.has_value(), row.document);
+            QCOMPARE(errors->first().path, QLatin1StringView(row.firstError));
+        }
+    }
+
+    void refsThatCannotBeFollowedAreRefused()
+    {
+        // Every $ref jsoncons follows is followed here too, to find a loop, so
+        // one this validator cannot follow is refused, and so is what would
+        // change how a $ref resolves: $dynamicRef, $dynamicAnchor, an $id
+        // below the root, an $anchor defined twice.
+        const struct
+        {
+            const char* schema;
+            const char* refusal;
+        } rows[] = {
+            {"{\"$ref\": \"other.json\"}",
+             "/$ref: $ref \"other.json\" names another document, and this validator resolves only \"#\", "
+             "\"#/<JSON pointer>\" and \"#<$anchor>\" within the schema"},
+            {"{\"$defs\": {\"a b\": {}}, \"$ref\": \"#/$defs/a%20b\"}",
+             "/$ref: $ref \"#/$defs/a%20b\" is percent-encoded, which this validator does not resolve"},
+            {"{\"properties\": {\"a\": {\"$ref\": \"#/$defs/b\"}}}",
+             "/properties/a/$ref: $ref \"#/$defs/b\" names no subschema of this schema"},
+            {"{\"$ref\": \"#nowhere\"}", "/$ref: $ref \"#nowhere\" names no subschema of this schema"},
+            {"{\"$defs\": {\"a\": {\"$anchor\": \"x\"}, \"b\": {\"$anchor\": \"x\"}}}",
+             "/$defs/b/$anchor: $anchor \"x\" is defined at /$defs/a too"},
+            {"{\"$dynamicRef\": \"#meta\"}",
+             "/$dynamicRef: $dynamicRef is not supported: this validator resolves only $ref and $anchor"},
+            {"{\"$defs\": {\"a\": {\"$dynamicAnchor\": \"meta\"}}}",
+             "/$defs/a/$dynamicAnchor: $dynamicAnchor is not supported: this validator resolves only $ref and "
+             "$anchor"},
+            {"{\"properties\": {\"a\": {\"$id\": \"urn:other\"}}}",
+             "/properties/a/$id: $id below the root is not supported: this validator resolves $ref within one "
+             "resource"},
+        };
+        for (const auto& row : rows) {
+            const SchemaValidator validator{QByteArray(row.schema)};
+            QVERIFY2(!validator.isValid(), row.schema);
+            QCOMPARE(validator.validate(QJsonValue(1)).value().first().message,
+                     QStringLiteral("schema refused at ") + QString::fromUtf8(row.refusal));
+        }
+
+        // An $id at the root is allowed, and a $ref by pointer or by anchor
+        // resolves within the schema.
+        const SchemaValidator validator(QByteArrayLiteral(
+            "{\"$id\": \"urn:example:schema\", \"properties\": {\"a\": {\"$ref\": \"#/$defs/unit\"}, \"b\": "
+            "{\"$ref\": \"#small\"}}, \"$defs\": {\"unit\": {\"maximum\": 1}, \"small\": {\"$anchor\": \"small\", "
+            "\"maximum\": 2}}}"));
+        QVERIFY(validator.isValid());
+        QVERIFY(!validator.validate(parse(R"({"a": 1, "b": 2})")).has_value());
+        const auto errors = validator.validate(parse(R"({"a": 2, "b": 3})"));
+        QVERIFY(errors.has_value());
+        QCOMPARE(errors->size(), 2);
+        QCOMPARE(errors->at(0).path, QStringLiteral("/a"));
+        QCOMPARE(errors->at(1).path, QStringLiteral("/b"));
+    }
+
+    void everySubschemaKeywordIsWalked()
+    {
+        // The walks over the schema reach every place a subschema sits: a
+        // Draft 7 keyword is refused below each, and a {"$ref": "#"} there is
+        // a loop exactly where the subschema applies to the value itself.
+        enum class Shape {
+            Single,
+            Map,
+            Array
+        };
+        const struct
+        {
+            const char* keyword;
+            Shape shape;
+            bool inPlace;
+        } rows[] = {
+            {"additionalProperties", Shape::Single, false},
+            {"contains", Shape::Single, false},
+            {"contentSchema", Shape::Single, false},
+            {"else", Shape::Single, true},
+            {"if", Shape::Single, true},
+            {"items", Shape::Single, false},
+            {"not", Shape::Single, true},
+            {"propertyNames", Shape::Single, false},
+            {"then", Shape::Single, true},
+            {"unevaluatedItems", Shape::Single, false},
+            {"unevaluatedProperties", Shape::Single, false},
+            {"$defs", Shape::Map, false},
+            {"dependentSchemas", Shape::Map, true},
+            {"patternProperties", Shape::Map, false},
+            {"properties", Shape::Map, false},
+            {"allOf", Shape::Array, true},
+            {"anyOf", Shape::Array, true},
+            {"oneOf", Shape::Array, true},
+            {"prefixItems", Shape::Array, false},
+        };
+        const auto schemaWith = [](const QString& keyword, Shape shape, const QJsonObject& subschema) {
+            QJsonValue value = subschema;
+            if (shape == Shape::Map) {
+                value = QJsonObject{{QStringLiteral("k"), subschema}};
+            } else if (shape == Shape::Array) {
+                value = QJsonArray{subschema};
+            }
+            return QJsonDocument(QJsonObject{{keyword, value}}).toJson();
+        };
+        for (const auto& row : rows) {
+            const QString keyword = QString::fromUtf8(row.keyword);
+            const QString at = QStringLiteral("/") + keyword
+                + (row.shape == Shape::Map         ? QStringLiteral("/k")
+                       : row.shape == Shape::Array ? QStringLiteral("/0")
+                                                   : QString());
+
+            const SchemaValidator draft7(
+                schemaWith(keyword, row.shape, QJsonObject{{QStringLiteral("definitions"), QJsonObject()}}));
+            QVERIFY2(!draft7.isValid(), row.keyword);
+            QVERIFY2(
+                draft7.validate(QJsonValue(1))
+                    .value()
+                    .first()
+                    .message.startsWith(QStringLiteral("schema refused at ") + at + QStringLiteral("/definitions: ")),
+                row.keyword);
+
+            const SchemaValidator loop(
+                schemaWith(keyword, row.shape, QJsonObject{{QStringLiteral("$ref"), QStringLiteral("#")}}));
+            QVERIFY2(loop.isValid() != row.inPlace, row.keyword);
+            if (row.inPlace) {
+                QCOMPARE(loop.validate(QJsonValue(1)).value().first().message.left(at.size() + 24),
+                         QStringLiteral("schema refused at ") + at + QStringLiteral("/$ref:"));
+            }
+        }
+    }
+
+    void additionalPropertiesSaysWhy()
+    {
+        // jsoncons reports only that a member failed an additionalProperties
+        // subschema. The member is checked again against that subschema, so
+        // the reasons follow, at their own nodes and prefixed with the
+        // keyword, as the presets maps of the shipped schemas need.
+        const SchemaValidator validator(QByteArrayLiteral(R"({
+            "properties": {
+                "presets": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "maxProperties": 2,
+                        "additionalProperties": { "type": ["number", "string"] }
+                    }
+                }
+            }
+        })"));
+        QVERIFY(validator.isValid());
+        const auto errors = validator.validate(parse(R"({"presets": {"a": {"x": true, "y": 1, "z": 2}, "b/c": 5}})"));
+        QVERIFY(errors.has_value());
+        const QList<SchemaValidator::Error> expected{
+            {QStringLiteral("/presets/a"), QStringLiteral("Additional property 'a' found but was invalid.")},
+            {QStringLiteral("/presets/a/x"),
+             QStringLiteral("additionalProperties: Additional property 'x' found but was invalid.")},
+            {QStringLiteral("/presets/a/x"),
+             QStringLiteral("additionalProperties: additionalProperties: Expected number, or string, found boolean")},
+            {QStringLiteral("/presets/a"),
+             QStringLiteral("additionalProperties: Maximum number of properties is 2 but found 3")},
+            {QStringLiteral("/presets/b~1c"), QStringLiteral("Additional property 'b/c' found but was invalid.")},
+            {QStringLiteral("/presets/b~1c"), QStringLiteral("additionalProperties: Expected object, found integer")},
+        };
+        QCOMPARE(errors->size(), expected.size());
+        for (qsizetype i = 0; i < expected.size(); ++i) {
+            QCOMPARE(errors->at(i).path, expected.at(i).path);
+            QCOMPARE(errors->at(i).message, expected.at(i).message);
+        }
+
+        // Reached through a $ref, with an $id at the root, and with a branch.
+        const SchemaValidator referred(QByteArrayLiteral(
+            "{\"$id\": \"urn:example:presets\", \"properties\": {\"p\": {\"$ref\": \"#/$defs/map\"}}, \"$defs\": "
+            "{\"map\": {\"additionalProperties\": {\"anyOf\": [{\"type\": \"string\"}, {\"minimum\": 3}]}}}}"));
+        QVERIFY(referred.isValid());
+        const auto branches = referred.validate(parse(R"({"p": {"k": 1}})"));
+        QVERIFY(branches.has_value());
+        QCOMPARE(branches->size(), 4);
+        QCOMPARE(branches->at(3).path, QStringLiteral("/p/k"));
+        QCOMPARE(branches->at(3).message,
+                 QStringLiteral("additionalProperties: anyOf/1: Minimum value is 3 but found 1"));
+
+        // Still at most 100 errors listed. One error for "_", then 150
+        // failing members, each with its reason: the 100th error kept is
+        // m049's own line, its reason is not looked for, and the rest of
+        // what jsoncons reported is counted, m050 to m149.
+        QJsonObject many{{QStringLiteral("_"), 1}};
+        for (int i = 0; i < 150; ++i) {
+            many.insert(QStringLiteral("m%1").arg(i, 3, 10, QChar(u'0')), i);
+        }
+        const SchemaValidator strings(QByteArrayLiteral(
+            R"({"properties": {"_": {"type": "string"}}, "additionalProperties": {"type": "string"}})"));
+        const auto bounded = strings.validate(many);
+        QVERIFY(bounded.has_value());
+        QCOMPARE(bounded->size(), 101);
+        QCOMPARE(bounded->at(0).path, QStringLiteral("/_"));
+        QCOMPARE(bounded->at(98).path, QStringLiteral("/m048"));
+        QCOMPARE(bounded->at(98).message, QStringLiteral("additionalProperties: Expected string, found integer"));
+        QCOMPARE(bounded->at(99).path, QStringLiteral("/m049"));
+        QCOMPARE(bounded->at(99).message, QStringLiteral("Additional property 'm049' found but was invalid."));
+        QCOMPARE(bounded->last().message, QStringLiteral("and 100 more errors not listed"));
+
+        // Rechecks go four additionalProperties deep, and no deeper: each
+        // level rechecks the members below the last, so a document nested
+        // without end cannot multiply the work without end.
+        const SchemaValidator nested(
+            QByteArrayLiteral("{\"type\": \"object\", \"additionalProperties\": {\"$ref\": \"#\"}}"));
+        QVERIFY(nested.isValid());
+        const auto deep = nested.validate(parse(R"({"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}})"));
+        QVERIFY(deep.has_value());
+        QCOMPARE(deep->size(), 5);
+        QCOMPARE(deep->last().path, QStringLiteral("/a/b/c/d/e"));
+        QCOMPARE(deep->last().message,
+                 QStringLiteral("additionalProperties: additionalProperties: additionalProperties: "
+                                "additionalProperties: Additional property 'e' found but was "
+                                "invalid."));
     }
 
     void unknownKeywordsAreIgnored()
@@ -376,21 +681,37 @@ private Q_SLOTS:
     {
         // jsoncons compiles a keyword with a value of the wrong kind: {"enum":
         // "x"} compiled, and then every validate() went down its catch path.
-        // The 2020-12 meta-schema now refuses each at construction.
-        const char* rows[] = {
-            R"({"enum": "x"})",
-            R"({"maxItems": -1})",
-            R"({"type": "strin"})",
-            R"({"properties": {"a": {"required": "b"}}})",
+        // The 2020-12 meta-schema now refuses each at construction, with the
+        // most specific reason it gives. Below properties and $defs that is
+        // the reason the member failed, not only that it was invalid; below
+        // dependentRequired it is only that.
+        const struct
+        {
+            const char* schema;
+            const char* reason;
+        } rows[] = {
+            {R"({"enum": "x"})", "/enum: Expected array, found string"},
+            {R"({"maxItems": -1})", "/maxItems: Minimum value is 0 but found -1"},
+            {R"({"type": "strin"})", "/type: 'strin' is not a valid enum value. (and 1 more)"},
+            {R"({"properties": {"a": {"required": "b"}}})", "/properties/a/required: Expected array, found string"},
+            {R"({"$defs": {"a": {"properties": {"b": {"minLength": "1"}}}}})",
+             "/$defs/a/properties/b/minLength: Expected integer, found string"},
+            {R"({"patternProperties": {"^a": {"type": 1}}})",
+             "/patternProperties/^a/type: '1' is not a valid enum value. (and 1 more)"},
+            {R"({"dependentSchemas": {"a": {"not": 1}}})",
+             "/dependentSchemas/a/not: Expected object, or boolean, found integer (and 7 more)"},
+            {R"({"dependentRequired": {"a": "b"}})",
+             "/dependentRequired/a: Additional property 'a' found but was invalid."},
         };
-        for (const char* schema : rows) {
-            const SchemaValidator validator{QByteArray(schema)};
-            QVERIFY2(!validator.isValid(), schema);
+        for (const auto& row : rows) {
+            const SchemaValidator validator{QByteArray(row.schema)};
+            QVERIFY2(!validator.isValid(), row.schema);
             const auto errors = validator.validate(QJsonValue(QStringLiteral("x")));
             QVERIFY(errors.has_value());
             QCOMPARE(errors->size(), 1);
-            QVERIFY2(errors->first().message.contains(QStringLiteral("meta-schema")),
-                     qPrintable(errors->first().message));
+            QCOMPARE(errors->first().message,
+                     QStringLiteral("schema does not conform to the 2020-12 meta-schema at ")
+                         + QString::fromUtf8(row.reason));
         }
     }
 
@@ -445,9 +766,10 @@ private Q_SLOTS:
 
     void manyMembersAreLinear()
     {
-        // 88000 members, about 1.3 MB. jsoncons' insertion-ordered object
-        // searched them linearly on every insertion: 18 s. The sorted one
-        // takes tens of milliseconds; the bound only catches a return to the
+        // 88000 members, 2.36 MB as compact JSON. jsoncons' insertion-ordered
+        // object searched them linearly on every insertion: 18 s in Release.
+        // The sorted one takes about 70 ms there, and 5 to 10 s under ASan on
+        // a loaded machine, so the bound only catches a return to the
         // quadratic build.
         QJsonObject presets;
         for (int i = 0; i < 88000; ++i) {
@@ -459,7 +781,7 @@ private Q_SLOTS:
         QElapsedTimer timer;
         timer.start();
         QVERIFY(!validator.validate(presets).has_value());
-        QVERIFY2(timer.elapsed() < 5000, qPrintable(QString::number(timer.elapsed())));
+        QVERIFY2(timer.elapsed() < 15000, qPrintable(QString::number(timer.elapsed())));
     }
 
     void nulIsRefused()
@@ -512,21 +834,25 @@ private Q_SLOTS:
         QVERIFY(validator.isValid());
         const auto errors = validator.validate(parse(R"({"a": 1, "b/c": 2})"));
         QVERIFY(errors.has_value());
-        QCOMPARE(errors->size(), 4);
+        QCOMPARE(errors->size(), 5);
         QCOMPARE(errors->at(0).path, QStringLiteral("/a"));
         QCOMPARE(errors->at(1).path, QStringLiteral("/a"));
         QVERIFY(errors->at(1).message.startsWith(QStringLiteral("anyOf/0: ")));
         QVERIFY(errors->at(2).message.startsWith(QStringLiteral("anyOf/1: ")));
         // jsoncons reports a failed additionalProperties subschema at the
-        // object; the error is moved to the member it names.
+        // object; the error is moved to the member it names, and its reason
+        // follows.
         QCOMPARE(errors->at(3).path, QStringLiteral("/b~1c"));
+        QCOMPARE(errors->at(4).path, QStringLiteral("/b~1c"));
+        QCOMPARE(errors->at(4).message, QStringLiteral("additionalProperties: Expected string, found integer"));
     }
 
     void errorsAreBounded()
     {
         // 150 failing items: the first 100 errors are listed, and one more
-        // entry, with no path, counts the rest. Each message is cut to 500
-        // characters, so a long string quoted back does not flood the log.
+        // entry, with no path, counts the rest. A long message keeps its first
+        // 500 UTF-16 code units and gains an ellipsis, 501 in all, so a long
+        // string quoted back does not flood the log.
         const SchemaValidator validator(QByteArrayLiteral(R"({"items": {"type": "string", "maxLength": 1}})"));
         QVERIFY(validator.isValid());
         QJsonArray items;
@@ -562,18 +888,19 @@ private Q_SLOTS:
 
     void logSchemaErrorsPrintsTheCountWithoutAPath()
     {
-        // One line per error, "(root)" for the document itself, and the count
-        // validate() appends past its 100th error printed as it is.
+        // One line per error, "  <path>: <message>" unquoted, "(root)" for the
+        // document itself, and the count validate() appends past its 100th
+        // error printed as it is.
         QList<SchemaValidator::Error> errors{SchemaValidator::Error{QString(), QStringLiteral("root")}};
         for (int i = 1; i < 100; ++i) {
             errors.append(SchemaValidator::Error{QStringLiteral("/x"), QStringLiteral("m")});
         }
         errors.append(SchemaValidator::Error{QString(), QStringLiteral("and 2 more errors not listed")});
-        QTest::ignoreMessage(QtWarningMsg, "  \"(root)\": \"root\"");
+        QTest::ignoreMessage(QtWarningMsg, "  (root): root");
         for (int i = 1; i < 100; ++i) {
-            QTest::ignoreMessage(QtWarningMsg, "  \"/x\": \"m\"");
+            QTest::ignoreMessage(QtWarningMsg, "  /x: m");
         }
-        QTest::ignoreMessage(QtWarningMsg, "  \"and 2 more errors not listed\"");
+        QTest::ignoreMessage(QtWarningMsg, "  and 2 more errors not listed");
         const QLoggingCategory category("test.schemavalidator.log");
         logSchemaErrors(category, errors);
     }

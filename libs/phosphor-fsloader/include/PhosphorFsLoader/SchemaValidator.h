@@ -28,7 +28,7 @@ namespace PhosphorFsLoader {
  * (typically a schema embedded as a Qt resource), compile it once, and reuse
  * it across every file of that type: compiling is the expensive step.
  * @c validate() costs what the document's size suggests: 70 ms for one of
- * 88000 members (1.5 MB) in a Release build.
+ * 88000 members (2.4 MB as compact JSON) in a Release build.
  *
  * Failure model is fail-closed. If the schema is refused, @c isValid()
  * returns false and every @c validate() call reports a single error saying
@@ -48,22 +48,40 @@ namespace PhosphorFsLoader {
  * - Valid against the 2020-12 meta-schema, checked at construction, so a
  *   keyword with a value of the wrong kind (@c {"enum": "x"}, a negative
  *   @c maxItems, a @c pattern that is not an ECMAScript regex) is refused.
- * - A @c $ref within the schema: nothing is fetched.
+ * - References within one schema, which nothing is fetched for. A @c $ref is
+ *   @c "#", @c "#/<JSON pointer>" or @c "#<anchor>", not percent-encoded,
+ *   and names one of the schema's subschemas. An @c $anchor is defined once.
+ *   @c $id is allowed at the root only, and @c $dynamicRef and
+ *   @c $dynamicAnchor are refused.
+ * - No @c $ref that leads back to its own schema without descending into the
+ *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
+ *   @c then, @c else, @c dependentSchemas and other @c $ref s only, as
+ *   @c {"$ref": "#"} does. jsoncons would recurse on it until the stack
+ *   overflowed. It is refused even in a @c $defs entry nothing uses. A
+ *   @c $ref back through @c properties, @c items or another keyword that
+ *   applies to a member or an item is allowed: the document is finite.
  *
  * @c format is asserted, not only annotated, for the formats jsoncons
  * checks: date-time, date, time, email, ipv4, ipv6, regex, json-pointer, uri
- * and uri-reference, by jsoncons' reading of each (it takes the year 0000 in
- * a date, which Python refuses). A schema naming any other format is refused,
- * since jsoncons would ignore it, and so is "hostname", whose jsoncons check
- * refuses the digit 9 and reads past the end of an empty string.
+ * and uri-reference, by jsoncons' reading of each, which is not always the
+ * RFCs' nor Python's: a date may have the year 0000, an ipv4 address may have
+ * an octet past 255 (256.1.1.1 passes), a uri-reference may not be empty, and
+ * a uri may not end at its scheme (@c a: fails). A schema naming any other
+ * format is refused, since jsoncons would ignore it, and so is "hostname",
+ * whose jsoncons check refuses the digit 9 and reads past the end of an
+ * empty string.
  *
  * What a document may hold: a string or member name with U+0000 or an
- * unpaired UTF-16 surrogate, or a number of magnitude 2^63 or more, is
- * refused at its path before jsoncons sees it (the same holds in the schema).
- * jsoncons reads strings as UTF-8 and names through C strings, so U+0000
- * would cut them short and two names with different unpaired surrogates
- * would become one; and its integer check is undefined past int64. CI's
- * Python accepts such numbers under "number", so there the load is stricter.
+ * unpaired UTF-16 surrogate, or a number outside int64 (below -2^63, or 2^63
+ * and above, -2^63 itself being allowed), is refused at its path before
+ * jsoncons sees it (the same holds in the schema). That holds wherever the
+ * value sits, also where the schema accepts any value or says nothing: the
+ * check runs over the whole document first. jsoncons reads strings as UTF-8
+ * and names through C strings, so U+0000 would cut them short and two names
+ * with different unpaired surrogates would become one. Its integer check
+ * converts a double to int64, which is undefined outside int64, and it may
+ * run at any node. CI's Python accepts such a number under "number", or under
+ * no constraint at all, so there the load is stricter than CI.
  *
  * How the keywords read, where jsoncons differs from Python's 2020-12:
  * - Numbers: an integer within int64 is exact, 3.0 included (2020-12 calls
@@ -72,7 +90,9 @@ namespace PhosphorFsLoader {
  *   int64 is rounded by Qt first: -9223372036854775809 is read as the int64
  *   minimum. @c multipleOf works in doubles and passes a value within one ulp
  *   of a multiple, so 0.07 is a multiple of 0.01 here and not in Python, and
- *   an odd integer past 2^53 can pass @c {"multipleOf": 2}.
+ *   an odd integer past 2^53 can pass @c {"multipleOf": 2}. Its message
+ *   prints the divisor with six decimals ("0.075 is not a multiple of
+ *   0.010000"), so a divisor of 0.0000001 reads as 0.000000.
  * - @c pattern is an ECMAScript regex (std::regex) matched against UTF-8
  *   bytes, not characters: a dot, a class or a quantifier applies to one byte
  *   of a character past U+007F, so @c ^.$ does not match "é" and @c \\s does
@@ -89,13 +109,25 @@ public:
         /// failure. A failed @c additionalProperties subschema is placed at
         /// the member it names. A failed @c propertyNames, @c contains or
         /// @c unevaluatedProperties subschema is reported at the object or
-        /// array, as jsoncons reports it.
+        /// array, as jsoncons reports it. A failed @c dependentSchemas
+        /// subschema is reported below the member that triggered it, also
+        /// jsoncons' way: with @c {"dependentSchemas": {"a": {"properties":
+        /// {"c": {"type": "string"}}}}}, the document @c {"a": 1, "c": 2}
+        /// fails at "/a/c", not "/c".
         QString path;
 
         /// Human-readable description of why the node failed. The reasons
         /// an @c anyOf, @c oneOf or @c allOf failed follow it as errors of
-        /// their own, each prefixed with its branch ("anyOf/1: ...").
-        /// Path and message are each cut to 500 characters.
+        /// their own, each prefixed with its branch ("anyOf/1: ..."). So do
+        /// the reasons a member failed an @c additionalProperties subschema,
+        /// which jsoncons keeps to itself: the member is checked against the
+        /// subschema again, and each reason is prefixed
+        /// "additionalProperties: ". That goes four such subschemas deep (a
+        /// member of a member of ...), which bounds what it costs: at most
+        /// four more passes over the document.
+        /// A path or a message longer than 500 UTF-16 code units keeps its
+        /// first 500 (499 where the 500th would split a surrogate pair), and
+        /// an ellipsis (U+2026) is appended: 501 code units at most.
         QString message;
     };
 
@@ -139,9 +171,13 @@ public:
      * @return @c std::nullopt when the document satisfies the schema;
      *         otherwise the non-empty list of violations, at most 100 of
      *         them: when there were more, one last entry with an empty path
-     *         says how many more ("and 250 more errors not listed"). A
-     *         validator whose schema was refused always returns a
-     *         one-element list.
+     *         says how many more ("and 250 more errors not listed"). Past the
+     *         100th, the reasons of a failed @c additionalProperties member
+     *         are not looked for, so the count holds what jsoncons reported.
+     *         A validator whose schema was refused always returns a
+     *         one-element list, whose message says why (for a schema the
+     *         meta-schema refuses, its most specific reason, at the node of
+     *         the schema it names).
      */
     [[nodiscard]] std::optional<QList<Error>> validate(const QJsonValue& document) const;
 
@@ -153,10 +189,11 @@ private:
 /**
  * @brief Log each schema violation at @p category, one per line.
  *
- * Each error is logged as "  <json-pointer>: <message>" (or "(root)" for a
- * document-root failure), and the count @c validate() appends past its 100th
- * error as "  <message>". Centralizes the per-error diagnostic format every
- * loader shares; callers emit their own "skipping X" headline first.
+ * Each error is logged as "  <json-pointer>: <message>", unquoted, with
+ * "(root)" for a document-root failure, and the count @c validate() appends
+ * past its 100th error as "  <message>". Centralizes the per-error diagnostic
+ * format every loader shares; callers emit their own "skipping X" headline
+ * first.
  */
 PHOSPHORFSLOADER_EXPORT void logSchemaErrors(const QLoggingCategory& category,
                                              const QList<SchemaValidator::Error>& errors);
