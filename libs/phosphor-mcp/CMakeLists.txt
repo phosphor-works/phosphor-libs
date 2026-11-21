@@ -127,6 +127,9 @@ set_target_properties(PhosphorMcpSchemaChecker PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
     # The anonymous namespaces of the checker's files must stay apart.
     UNITY_BUILD OFF
+    # No QObject in the checker, so no empty mocs_compilation.cpp in the
+    # library and in test_phosphor_mcp_checkwork.
+    AUTOMOC OFF
 )
 
 add_library(PhosphorMcp SHARED
