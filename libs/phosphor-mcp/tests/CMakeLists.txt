@@ -43,6 +43,11 @@ phosphormcp_add_test(test_phosphor_mcp_protocol)
 phosphormcp_add_test(test_phosphor_mcp_tools)
 phosphormcp_add_test(test_phosphor_mcp_calls)
 phosphormcp_add_test(test_phosphor_mcp_signals)
+# The bound of the argument check: each row that passes it spends the whole
+# bound, half a second of a release build and several seconds of a debug
+# build with sanitizers.
+phosphormcp_add_test(test_phosphor_mcp_bounds)
+set_tests_properties(test_phosphor_mcp_bounds PROPERTIES TIMEOUT 900)
 
 # The example server, driven as a client would drive it. The example is built
 # whenever the tests are, unless BUILD_PHOSPHOR_MCP_EXAMPLES was turned off.

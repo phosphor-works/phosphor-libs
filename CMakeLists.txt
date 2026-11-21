@@ -203,7 +203,7 @@ add_subdirectory(libs/phosphor-layer)       # wlr-layer-shell surface lifecycle 
 add_subdirectory(libs/phosphor-shell-patterns) # UI-pattern recipes (axis 2) built on PhosphorLayer::Role
 add_subdirectory(libs/phosphor-shortcuts)   # global shortcut backends + domain-free Registry
 add_subdirectory(libs/phosphor-ipc)         # JSON-over-Unix-socket IpcRouter + IpcTarget QML type
-add_subdirectory(libs/phosphor-mcp)         # Model Context Protocol server over stdio (tools, argument checks with jsoncons) - Core-only
+add_subdirectory(libs/phosphor-mcp)         # Model Context Protocol server over stdio (tools, its own JSON Schema 2020-12 argument checks) - Core-only
 # The org.phosphor.animation QML module is built with the rest of this tree,
 # and its plugin's QtQuickClockManager constructs QtQuickClock directly.
 # QtQuickClock is gated behind PHOSPHOR_ANIMATION_QUICK in phosphor-animation's
