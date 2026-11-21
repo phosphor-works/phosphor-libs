@@ -104,7 +104,9 @@ endif()
 
 install(TARGETS PhosphorIdentity
     EXPORT PhosphorIdentityTargets
-    FILE_SET HEADERS DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIdentity
+    # The set's base is include/, so each header keeps its PhosphorIdentity/
+    # directory under the destination.
+    FILE_SET HEADERS DESTINATION ${KDE_INSTALL_INCLUDEDIR}
 )
 
 install(EXPORT PhosphorIdentityTargets

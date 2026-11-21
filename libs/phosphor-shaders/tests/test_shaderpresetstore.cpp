@@ -530,6 +530,13 @@ void TestShaderPresetStore::anIdThatIsNotAPathComponentIsRefused()
     QVERIFY(!ShaderPreset::isUsableId(QStringLiteral("a/b")));
     QVERIFY(!ShaderPreset::isUsableId(QStringLiteral("a\\b")));
     QVERIFY(ShaderPreset::isUsableId(QStringLiteral("6f2b8d51-4c3a-4e7f-9b10-2d8e4a5c7b63")));
+    // Invisible characters are refused as whole code points, also past U+FFFF:
+    // a right-to-left override, and a language tag that UTF-16 carries as two
+    // surrogate halves. A visible character past U+FFFF is fine.
+    QVERIFY(!ShaderPreset::isUsableId(QStringLiteral("a") + QChar(0x202E) + QStringLiteral("b")));
+    QVERIFY(!ShaderPreset::isUsableId(QStringLiteral("a") + QString::fromUcs4(U"\U000E0001", 1)));
+    QVERIFY(!ShaderPreset::isUsableId(QString::fromUcs4(U"\U000E0041x", 2)));
+    QVERIFY(ShaderPreset::isUsableId(QStringLiteral("Calm ") + QString::fromUcs4(U"\U0001F600", 1)));
 
     // And the parse path falls back to the filename stem rather than carrying
     // the escaping id through.

@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "urn:plasmazones:schema:layout",
     "title": "PlasmaZones Layout",
-    "description": "A tiling layout with identity metadata and a list of zones with relative geometry. Structural invariants are enforced here. The optional appearance, gap, geometry-mode, and visibility keys are allowed through so editor-produced and future layouts are not rejected.",
+    "description": "A tiling layout with identity metadata and a list of zones with relative geometry. Structural invariants are enforced here. The optional appearance, gap, geometry-mode, and visibility keys are allowed through so editor-produced and future layouts are not rejected. Anywhere in the file, including under a key the schema leaves open, a number outside the int64 range is refused by the runtime validator.",
     "type": "object",
     "required": ["id", "name", "zones"],
     "properties": {
@@ -18,7 +18,7 @@
         },
         "description": { "type": "string" },
         "type": {
-            "description": "Legacy layout-type key. The loader ignores it, so the schema puts no constraint on it. Like any number in the file, a number outside the int64 range is still refused by the runtime validator."
+            "description": "Legacy layout-type key. The loader ignores it, so the schema puts no constraint on it."
         },
         "isSystem": {
             "description": "Legacy key. The loader ignores it and decides from the directory a layout was loaded from, so the schema puts no constraint on it."
