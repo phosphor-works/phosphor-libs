@@ -176,23 +176,45 @@ int arrayIndex(const QString& token, std::size_t size)
     return std::size_t(index) < size ? index : -1;
 }
 
+// The subschemas that apply to the same value as `node`, in order: `each`
+// gets each, but then and else, which `either` gets together (-1 for one
+// that is not there), since a value takes one of the two.
+template<typename Each, typename Either>
+void forEachInPlace(const Node& node, Each each, Either either)
+{
+    for (const auto* branches : {&node.allOf, &node.anyOf, &node.oneOf}) {
+        for (const int branch : *branches) {
+            each(branch);
+        }
+    }
+    for (const int single : {node.notSchema, node.ifSchema}) {
+        if (single >= 0) {
+            each(single);
+        }
+    }
+    either(node.thenSchema, node.elseSchema);
+    for (const auto& dependent : node.dependentSchemas) {
+        each(dependent.second);
+    }
+    if (node.ref >= 0) {
+        each(node.ref);
+    }
+}
+
 // The subschemas that apply to the same value as `node`.
 std::vector<int> inPlace(const Node& node)
 {
-    std::vector<int> next = node.allOf;
-    next.insert(next.end(), node.anyOf.begin(), node.anyOf.end());
-    next.insert(next.end(), node.oneOf.begin(), node.oneOf.end());
-    for (const int single : {node.notSchema, node.ifSchema, node.thenSchema, node.elseSchema}) {
-        if (single >= 0) {
-            next.push_back(single);
+    std::vector<int> next;
+    const auto add = [&next](int child) {
+        next.push_back(child);
+    };
+    forEachInPlace(node, add, [&add](int then, int otherwise) {
+        for (const int child : {then, otherwise}) {
+            if (child >= 0) {
+                add(child);
+            }
         }
-    }
-    for (const auto& dependent : node.dependentSchemas) {
-        next.push_back(dependent.second);
-    }
-    if (node.ref >= 0) {
-        next.push_back(node.ref);
-    }
+    });
     return next;
 }
 
@@ -975,19 +997,15 @@ QString SchemaBuilder::findCycle()
                 const auto count = [&](int child) -> qint64 {
                     return child >= 0 ? applied[std::size_t(child)] : 0;
                 };
-                for (const auto* branches : {&node.allOf, &node.anyOf, &node.oneOf}) {
-                    for (const int branch : *branches) {
-                        add(count(branch));
-                    }
-                }
-                for (const auto& dependent : node.dependentSchemas) {
-                    add(count(dependent.second));
-                }
-                add(count(node.notSchema));
-                add(count(node.ifSchema));
-                add(std::max(count(node.thenSchema), count(node.elseSchema)));
-                add(count(node.ref));
-                // The subschemas of inPlace(), but for then and else.
+                // Those of inPlace(), but only the larger of then and else.
+                forEachInPlace(
+                    node,
+                    [&](int child) {
+                        add(count(child));
+                    },
+                    [&](int then, int otherwise) {
+                        add(std::max(count(then), count(otherwise)));
+                    });
                 chain[done] = longest + 1;
                 applied[done] = total;
                 if (chain[done] > MaxCheckDepth) {
