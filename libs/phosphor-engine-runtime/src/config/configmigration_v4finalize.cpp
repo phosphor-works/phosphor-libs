@@ -523,6 +523,14 @@ bool ConfigMigration::finalizeV4Conversion(const QString& jsonPath)
         // nothing reads it), so a delete-failure can never loop forever.
         retireLegacyAssignmentsFile(assignmentsPath);
 
+        // Drop the managed appearance baseline rules older builds wrote.
+        // Idempotent, keyed on fixed ids, and a fix to rows this code seeded
+        // into the sidecar. It runs FIRST of the rules.json fix-ups because
+        // it reads the raw `managed` key, which Rule no longer carries: any
+        // fix-up that rewrites the store before it would drop the key and
+        // leave the baselines unrecognisable.
+        ok = stripManagedAppearanceBaselineRules(jsonPath) && ok;
+
         // Prune the retired provider-default catch-all rule from rules.json.
         // Idempotent: once gone (or on a config that never had one) it is a
         // no-op. Folded here rather than into a schema bump because the gated
@@ -541,11 +549,6 @@ bool ConfigMigration::finalizeV4Conversion(const QString& jsonPath)
         // a rule left naming `snapIn` or `maximize` would silently never match
         // again. Idempotent like its two siblings.
         ok = renameRetiredAnimationEventPaths(jsonPath) && ok;
-
-        // Drop the managed appearance baseline rules older builds wrote.
-        // Same reasoning again: idempotent, keyed on fixed ids, and a fix to
-        // rows this code seeded into the sidecar.
-        ok = stripManagedAppearanceBaselineRules(jsonPath) && ok;
 
         return ok;
     }
@@ -1092,6 +1095,46 @@ bool ConfigMigration::repairSeededSteamRule(const QString& jsonPath)
     return ok && !failed;
 }
 
+namespace {
+
+/// The ids among @p baselineIds whose stored rule in @p rulesPath carries
+/// `"managed": true`. Read from the raw JSON because Rule no longer has the
+/// flag: it exists only in rules.json files older builds wrote. Mirrors
+/// RuleSet::fromJson's choice of entry for an id (the first one Rule::fromJson
+/// accepts, later duplicates dropped), so the flag read is the one on the rule
+/// the loaded set actually holds.
+QSet<QUuid> managedBaselineIdsOnDisk(const QString& rulesPath, const QSet<QUuid>& baselineIds)
+{
+    QSet<QUuid> managed;
+    QFile file(rulesPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return managed;
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject()) {
+        return managed;
+    }
+    QSet<QUuid> seen;
+    const QJsonArray rules = doc.object().value(QLatin1String("rules")).toArray();
+    for (const QJsonValue& value : rules) {
+        if (!value.isObject()) {
+            continue;
+        }
+        const QJsonObject ruleJson = value.toObject();
+        const QUuid id = QUuid::fromString(ruleJson.value(QLatin1String("id")).toString());
+        if (!baselineIds.contains(id) || seen.contains(id) || !PhosphorRules::Rule::fromJson(ruleJson)) {
+            continue;
+        }
+        seen.insert(id);
+        if (ruleJson.value(QLatin1String("managed")).toBool(false)) {
+            managed.insert(id);
+        }
+    }
+    return managed;
+}
+
+} // namespace
+
 bool ConfigMigration::stripManagedAppearanceBaselineRules(const QString& jsonPath)
 {
     // Frozen ids of the three managed baseline rules (border, title bar, gap)
@@ -1106,13 +1149,12 @@ bool ConfigMigration::stripManagedAppearanceBaselineRules(const QString& jsonPat
     };
 
     return withRuleSet(jsonPath, "stripManagedAppearanceBaselineRules", [](PhosphorRules::RuleSet& ruleSet) {
-        // Iterate a COPY: removeRule edits the live list.
-        const QList<PhosphorRules::Rule> rules = ruleSet.rules();
+        // Only a rule rules.json marks managed. A user rule that happens to
+        // carry one of these ids (a hand edit, or an import) is the user's.
+        const QSet<QUuid> managed = managedBaselineIdsOnDisk(ConfigDefaults::rulesFilePath(), kBaselineIds);
         bool changed = false;
-        for (const PhosphorRules::Rule& rule : rules) {
-            // Only the managed rule. A user rule that happens to carry one of
-            // these ids (a hand edit, or an import) is the user's.
-            if (rule.managed && kBaselineIds.contains(rule.id) && ruleSet.removeRule(rule.id)) {
+        for (const QUuid& id : managed) {
+            if (ruleSet.removeRule(id)) {
                 changed = true;
             }
         }

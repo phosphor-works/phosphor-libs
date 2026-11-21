@@ -244,24 +244,4 @@ void RuleService::reloadRules()
     m_store->load();
 }
 
-void RuleService::resetManagedDefaults()
-{
-    if (!m_store) {
-        return;
-    }
-    // Reloading from disk is all this does. The global Restore Defaults calls
-    // Settings::reset() (which writes rules.json from the settings process to
-    // drop the per-mode DisableEngine rules) just before this; the daemon's
-    // borrowed rule store is NOT refreshed by the reloadSettings() that
-    // follows (only an owned store reloads there), so its in-memory set is
-    // stale. Without this reload, the daemon's next write of the store (any
-    // rule edit) would write those dropped disable rules back. load() is
-    // idempotent (emits only on a real change). No managed rule is restored
-    // here: window appearance (border / title bar / gap) defaults live in the
-    // config store, which the settings side resets, and the managed baseline
-    // rules older builds seeded are stripped by
-    // ConfigMigration::stripManagedAppearanceBaselineRules at start-up.
-    m_store->load();
-}
-
 } // namespace PhosphorEngineRuntime

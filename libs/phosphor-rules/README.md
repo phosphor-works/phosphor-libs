@@ -22,7 +22,7 @@ permitted).
 | `ActionTypes.h` | the built-in action type ids (wire strings), included by `RuleAction.h` |
 | `ActionParams.h` | param keys, shared validation bounds, closed token vocabularies |
 | `ActionSlots.h` | the built-in slot ids |
-| `Rule.h` | `{ id, name, enabled, priority, match, actions, managed }` |
+| `Rule.h` | `{ id, name, enabled, priority, match, actions }` |
 | `RuleSet.h` | ordered collection, monotonic revision, `rules.json` I/O |
 | `RuleEvaluator.h` | descending-priority resolution + `(windowId, revision)` match cache |
 

@@ -275,9 +275,9 @@ public:
     /// survives a config schema bump without a rebuild). It is NOT a strict no-op — it
     /// retries the still-pending tail steps (strip surviving `_v4*Stash`
     /// keys, retire a still-present assignments.json, and the rules.json
-    /// fix-ups `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule`,
-    /// `renameRetiredAnimationEventPaths` and
-    /// `stripManagedAppearanceBaselineRules`, which DO write the sidecar) so a
+    /// fix-ups `stripManagedAppearanceBaselineRules`,
+    /// `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule` and
+    /// `renameRetiredAnimationEventPaths`, which DO write the sidecar) so a
     /// partial earlier
     /// run that crashed between rules.json commit and the tail
     /// converges to a clean state on the next startup. The rule-rebuild
@@ -469,10 +469,12 @@ public:
     /// Window appearance defaults moved into config.json, so such a rule is a
     /// leftover that would keep applying its actions while the rules page
     /// offers no way to delete it. A user rule carrying one of the ids is left
-    /// alone (only `managed` rules are removed). Runs from
-    /// finalizeV4Conversion's cleanup path, beside the other fix-ups to rows
-    /// this code seeded into the sidecar. Idempotent: once the rules are gone
-    /// there is nothing left to match.
+    /// alone: only a rule whose stored JSON carries `"managed": true` is
+    /// removed. Rule has no such field any more, so the key is read from the
+    /// raw rules.json, and this runs first of finalizeV4Conversion's
+    /// cleanup-path fix-ups, before any of them rewrites the store and drops
+    /// the key. Idempotent: once the rules are gone there is nothing left to
+    /// match.
     ///
     /// @param jsonPath Path to config.json (rules.json is derived as a sibling
     ///                 via ConfigDefaults).

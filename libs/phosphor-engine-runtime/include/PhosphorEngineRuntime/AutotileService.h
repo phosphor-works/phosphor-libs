@@ -41,10 +41,10 @@ class PHOSPHORENGINERUNTIME_EXPORT AutotileService : public QObject
     Q_PROPERTY(QString algorithm READ algorithm WRITE setAlgorithm NOTIFY algorithmChanged)
     Q_PROPERTY(double masterRatio READ masterRatio WRITE setMasterRatio NOTIFY configChanged)
     Q_PROPERTY(int masterCount READ masterCount WRITE setMasterCount NOTIFY configChanged)
-    // Gaps are rule-backed (the managed baseline gap rule, edited over
-    // org.phosphor_works.Placement.Rules) and synced into the engine on every settings
-    // change, so they are READ-ONLY here: a direct write would be reverted on
-    // the next sync. Mirrors the read-only gap getters on the Settings adaptor.
+    // Gaps come from the config store and the context gap rules, and are
+    // synced into the engine on every settings change, so they are READ-ONLY
+    // here: a direct write would be reverted on the next sync. Mirrors the
+    // read-only gap getters on the Settings adaptor.
     Q_PROPERTY(int innerGap READ innerGap NOTIFY configChanged)
     Q_PROPERTY(int outerGap READ outerGap NOTIFY configChanged)
     Q_PROPERTY(bool smartGaps READ smartGaps WRITE setSmartGaps NOTIFY configChanged)
@@ -74,7 +74,7 @@ public:
     int masterCount() const;
     void setMasterCount(int count);
 
-    // Read-only: gaps are rule-backed (see the Q_PROPERTY note above).
+    // Read-only: gaps are synced from settings (see the Q_PROPERTY note above).
     int innerGap() const;
     int outerGap() const;
 

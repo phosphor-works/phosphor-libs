@@ -124,7 +124,6 @@ bool LayoutRegistry::upsertAssignmentRule(const QString& screenId, int virtualDe
         if (byId.has_value()) {
             PWR::Rule merged = rule;
             merged.name = byId->name;
-            merged.managed = byId->managed;
             merged.enabled = byId->enabled;
             // Preserve the stored priority like the exact-rule branch above:
             // a reclaim is an update of an existing rule, and re-seeding it to
@@ -169,7 +168,6 @@ bool LayoutRegistry::upsertAssignmentRule(const QString& screenId, int virtualDe
     // compares name, so a named rule never compared equal and every
     // identical re-apply still bumped the revision.
     rule.name = existing->name;
-    rule.managed = existing->managed;
     // And every action that is not one of the four assignment slots. The
     // deterministic context id means this rebuild lands on the stored rule
     // regardless of any purity gate upstream, so a merge is the only

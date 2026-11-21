@@ -283,13 +283,11 @@ void LayoutRegistry::applyBatchAssignments(const QHash<KeyT, QString>& assignmen
         // therefore destroys a mixed rule's extra actions even when the purity
         // gate deliberately kept the rule. Carried back in at rebuild time.
         QList<PWR::RuleAction> preservedActions;
-        // The user-facing identity, preserved for the same reason
+        // The user-facing name, preserved for the same reason
         // upsertAssignmentRule preserves it: makeAssignmentRule is handed an
-        // empty name and stamps managed=false, so a batch "apply all" would
-        // blank the name the user gave a context rule in the Rules editor and
-        // clear the managed flag on a built-in, making it user-deletable.
+        // empty name, so a batch "apply all" would blank the name the user
+        // gave a context rule in the Rules editor.
         QString name;
-        bool managed = false;
     };
     QHash<KeyT, OldEntrySnapshot> oldEntries;
     for (auto it = assignments.cbegin(); it != assignments.cend(); ++it) {
@@ -306,7 +304,7 @@ void LayoutRegistry::applyBatchAssignments(const QHash<KeyT, QString>& assignmen
             carryOverNonAssignmentActions(carrier, *existing);
             oldEntries.insert(it.key(),
                               {entryFromRuleMatchActions(*existing), existing->enabled, existing->priority,
-                               existing->id, carrier.actions, existing->name, existing->managed});
+                               existing->id, carrier.actions, existing->name});
         }
     }
 
@@ -417,7 +415,6 @@ void LayoutRegistry::applyBatchAssignments(const QHash<KeyT, QString>& assignmen
         // across for the same reason upsertAssignmentRule preserves it.
         rebuilt.actions += oldSnapshot.preservedActions;
         rebuilt.name = oldSnapshot.name;
-        rebuilt.managed = oldSnapshot.managed;
         if (const auto keptIt = keptIndexById.constFind(rebuilt.id); keptIt != keptIndexById.cend()) {
             kept[*keptIt] = rebuilt;
         } else {
@@ -542,13 +539,11 @@ void LayoutRegistry::setAllCombinedAssignments(const QHash<CombinedAssignmentKey
         // therefore destroys a mixed rule's extra actions even when the purity
         // gate deliberately kept the rule. Carried back in at rebuild time.
         QList<PWR::RuleAction> preservedActions;
-        // The user-facing identity, preserved for the same reason
+        // The user-facing name, preserved for the same reason
         // upsertAssignmentRule preserves it: makeAssignmentRule is handed an
-        // empty name and stamps managed=false, so a batch "apply all" would
-        // blank the name the user gave a context rule in the Rules editor and
-        // clear the managed flag on a built-in, making it user-deletable.
+        // empty name, so a batch "apply all" would blank the name the user
+        // gave a context rule in the Rules editor.
         QString name;
-        bool managed = false;
     };
     QHash<CombinedAssignmentKey, OldEntrySnapshot> oldEntries;
     // Validity gate up front: a malformed key (zero desktop or empty
@@ -571,7 +566,7 @@ void LayoutRegistry::setAllCombinedAssignments(const QHash<CombinedAssignmentKey
             carryOverNonAssignmentActions(carrier, *existing);
             oldEntries.insert(key,
                               {entryFromRuleMatchActions(*existing), existing->enabled, existing->priority,
-                               existing->id, carrier.actions, existing->name, existing->managed});
+                               existing->id, carrier.actions, existing->name});
         }
     }
 
@@ -643,7 +638,6 @@ void LayoutRegistry::setAllCombinedAssignments(const QHash<CombinedAssignmentKey
         // Merge, never replace — identical reasoning to applyBatchAssignments.
         rebuilt.actions += oldSnapshot.preservedActions;
         rebuilt.name = oldSnapshot.name;
-        rebuilt.managed = oldSnapshot.managed;
         if (const auto keptIt = keptIndexById.constFind(rebuilt.id); keptIt != keptIndexById.cend()) {
             kept[*keptIt] = rebuilt;
         } else {

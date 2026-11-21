@@ -269,7 +269,7 @@ constexpr QLatin1StringView kLayoutAppRuleTargetScreen{"targetScreen"};
 /// simple window-property rules — a bare leaf or a flat conjunction of leaves,
 /// which covers the AppId/WindowClass excludes, SnapToZone, and the premade
 /// Steam rule — land in Application. One descending offset per band keeps them distinct, mirroring
-/// renormalizePriorities. Managed and already-prioritized rules are untouched.
+/// renormalizePriorities. Already-prioritized rules are untouched.
 /// Past 100 zero-priority rules in one band the offset floors at the band base
 /// (the `qMax(0, ...)` below), so the 100th-onward rules tie there — the same
 /// saturation renormalizePriorities has, and harmless because priority does not
@@ -308,7 +308,7 @@ void assignBandPrioritiesToZeroRules(QList<PhosphorRules::Rule>& rules)
 
     QHash<int, int> nextOffset; // band base → next available offset
     for (Rule& rule : rules) {
-        if (rule.managed || rule.priority != 0) {
+        if (rule.priority != 0) {
             continue;
         }
         const int base = isSimpleConjunction(rule.match) ? kApplicationBandBase : kAdvancedBandBase;

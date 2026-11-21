@@ -91,23 +91,17 @@ public Q_SLOTS:
     /// exists, or the file write failed.
     bool setRulePriority(const QString& ruleId, int priority);
 
-    /// Global Restore Defaults hook for the rule store. Window appearance / gap
-    /// defaults live in the config store, and the store holds no managed rules,
-    /// so this creates and removes nothing: it reloads the store from disk to
-    /// pick up an out-of-process write such as Settings::reset()'s
-    /// disable-rule drop, which the daemon's borrowed store would otherwise
-    /// write back on its next save. rulesChanged fires only when the on-disk
-    /// set differs from the one in memory.
-    void resetManagedDefaults();
-
     /// Re-read rules.json from disk.
     ///
     /// The daemon's RuleStoreWatcher already folds an out-of-process rewrite of
     /// rules.json into the store, but only once its debounce fires on a later
     /// event-loop turn. A caller that rewrites the file and then immediately
     /// reads or mutates rules over D-Bus (the settings app's config import) calls
-    /// this so the reload has happened before that next call. load() is idempotent
-    /// and emits rulesChanged only when the on-disk content actually differs.
+    /// this so the reload has happened before that next call. The global Restore
+    /// Defaults calls it too, after Settings::reset() drops the per-mode disable
+    /// rules from rules.json, so the daemon's borrowed store does not write its
+    /// stale copy back on its next save. load() is idempotent and emits
+    /// rulesChanged only when the on-disk content actually differs.
     void reloadRules();
 
 Q_SIGNALS:

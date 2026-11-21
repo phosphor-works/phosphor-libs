@@ -82,14 +82,11 @@ ContextTilingParams LayoutRegistry::resolveContextTilingParams(const QString& sc
     stampColorScheme(query);
     query.activeLayout = rulesVisibleActiveLayoutId(screenId, virtualDesktop, activity, shape,
                                                     tiledWindowCount(screenId, virtualDesktop, activity));
-    // Filtered resolve, but with NO managed catch-all exclusion (unlike
-    // resolveContextGaps'): the baseline rule carries only gap/default slots,
-    // never tiling params, so there is no catch-all to exclude here. The
-    // slot-carrying gate below is resolveContextGaps' though, and load-bearing
-    // for the same reason: the walk STOPS at the first admitted rule carrying
-    // an in-scope terminal action (Exclude), so admitting a rule that fills
-    // none of these slots lets a higher-priority context Exclude drop every
-    // tiling-param override below it.
+    // Filtered resolve. The slot-carrying gate below is resolveContextGaps',
+    // and load-bearing for the same reason: the walk STOPS at the first
+    // admitted rule carrying an in-scope terminal action (Exclude), so
+    // admitting a rule that fills none of these slots lets a higher-priority
+    // context Exclude drop every tiling-param override below it.
     static const QSet<QString> tilingSlots = {
         QString(PWR::ActionSlot::MaxWindows),       QString(PWR::ActionSlot::SplitRatio),
         QString(PWR::ActionSlot::MasterCount),      QString(PWR::ActionSlot::InsertPosition),
@@ -221,9 +218,8 @@ ContextScrollingParams LayoutRegistry::resolveContextScrollingParams(const QStri
     stampColorScheme(query);
     query.activeLayout = rulesVisibleActiveLayoutId(screenId, virtualDesktop, activity, shape,
                                                     tiledWindowCount(screenId, virtualDesktop, activity));
-    // Filtered resolve with no managed catch-all exclusion: same baseline-slot
-    // rationale as the tiling-param resolver above. The slot-carrying gate is
-    // the same one too, and load-bearing for the same reason: the walk STOPS at
+    // Filtered resolve with the same slot-carrying gate as the tiling-param
+    // resolver above, load-bearing for the same reason: the walk STOPS at
     // the first admitted rule carrying an in-scope terminal action (Exclude),
     // so a rule filling none of these slots must never be admitted.
     static const QSet<QString> scrollingSlots = {

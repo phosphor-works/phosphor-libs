@@ -437,23 +437,18 @@ ContextGapOverride LayoutRegistry::resolveContextGaps(const QString& screenId, i
             query.colorScheme = schemeToken;
 
             // Resolve each gap slot from the highest-priority matching rule that
-            // carries that slot's action. Any CATCH-ALL managed rule is EXCLUDED.
-            // No current build writes one: the global default gaps are config-backed
-            // and the managed baseline gap rule was retired. The guard is LEGACY
-            // DEFENCE, and the only one: nothing strips such a rule any more, so a
-            // rules.json written by an older version can still carry that baseline
-            // for good. Were it admitted, its catch-all match would fill every
-            // gap slot with the old global default and masquerade as a top-tier
-            // context override, shadowing both the per-layout tier and the live
-            // config default that must sit below context overrides. SCREEN-scoped gap rules
-            // (per-monitor overrides authored via the Appearance page's monitor
-            // scope) have a SPECIFIC match, so they are NOT catch-all and DO
-            // participate here as context overrides. Per slot, the winner is chosen
-            // by MATCH SPECIFICITY first (ScreenId-pinned > Mode-pinned > other),
-            // with priority breaking ties within a tier — so a per-monitor override
-            // outranks a global per-mode gap regardless of their raw priorities (see
-            // winningAction below). The catch-all baseline is excluded by the
-            // "carries a gap slot, not the catch-all baseline" filter.
+            // carries that slot's action. The global default gaps are
+            // config-backed and sit below every context override, so any rule
+            // carrying a gap slot here is a context override, a catch-all one
+            // included. The managed baseline gap rule older builds seeded is
+            // stripped from rules.json at start-up
+            // (ConfigMigration::stripManagedAppearanceBaselineRules), so it never
+            // reaches this walk. SCREEN-scoped gap rules (per-monitor overrides)
+            // have a SPECIFIC match and participate as context overrides too. Per
+            // slot, the winner is chosen by MATCH SPECIFICITY first
+            // (ScreenId-pinned > Mode-pinned > other), with priority breaking ties
+            // within a tier — so a per-monitor override outranks a global per-mode
+            // gap regardless of their raw priorities (see winningAction below).
             //
             // ONE walk PER SPECIFICITY TIER, not per slot. resolveFiltered
             // accumulates the first action filling EACH slot in the same
@@ -482,9 +477,6 @@ ContextGapOverride LayoutRegistry::resolveContextGaps(const QString& screenId, i
             const bool modeAgnostic = mode.isEmpty();
             const QSet<PWR::Field> unknownShape = unknownScreenShapeFields(query);
             const auto carries = [&registry, modeAgnostic, &unknownShape](const PWR::Rule& rule) {
-                if (rule.managed && rule.match.isCatchAll()) {
-                    return false;
-                }
                 if (modeAgnostic && rule.match.referencesAnyField({PWR::Field::Mode})) {
                     return false;
                 }
