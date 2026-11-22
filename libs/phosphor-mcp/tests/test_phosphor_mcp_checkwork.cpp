@@ -892,22 +892,31 @@ private Q_SLOTS:
         // array of a string, whose length sets the work it takes, and an
         // object of 10000 members against a list of the schema: the string
         // is as long as brings the check past the bound at a part of the
-        // list's work.
+        // list's work. So does the work of the value that grows with it:
+        // the index of the object's names, the sort of uniqueItems (an array
+        // of 20000 integers) and the sorts of an object's members, each
+        // charged a name or an item at a time.
         QByteArray names;
         QByteArray selves;
         QByteArray empties;
         QByteArray more;
         QByteArray members;
+        QByteArray renamed;
+        QByteArray integers;
         for (int i = 0; i < 20000; ++i) {
             const QByteArray name = "'k" + QByteArray::number(i).rightJustified(5, '0') + "'";
             more += (i ? ", " : "") + name + ": []";
+            integers += (i ? ", " : "") + QByteArray::number(i);
             if (i < 10000) {
                 names += (i ? ", " : "") + name;
                 selves += (i ? ", " : "") + name + ": [" + name + "]";
                 empties += (i ? ", " : "") + name + ": []";
                 members += (i ? ", " : "") + name + ": 1";
+                renamed += (i ? ", " : "") + (i ? name : QByteArray("'a'")) + ": 1";
             }
         }
+        const QByteArray object = "{" + members + "}";
+        const QByteArray array = "[" + integers + "]";
         // The string, of UTF-8, is looked up in 300 enums of nine strings
         // inside not, and its hash costs a unit in each for each eight bytes,
         // four characters here (see lookupUnits()), whatever else the
@@ -917,41 +926,48 @@ private Q_SLOTS:
         for (int i = 0; i < Enums; ++i) {
             enums += (i ? ", " : "") + QByteArray("{'not': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '9']}}");
         }
-        const auto work = [&](const QByteArray& list, qint64 quads) {
+        const auto work = [&](const QByteArray& list, qint64 quads, const QByteArray& second) {
             const QByteArray schema = "{'prefixItems': [{'allOf': [" + enums + "]}, {" + list + "}]}";
             const QByteArray value =
-                "['" + QByteArray("\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9").repeated(quads) + "', {" + members + "}]";
+                "['" + QByteArray("\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9").repeated(quads) + "', " + second + "]";
             return count(parse(schema).toObject(), parse(value));
         };
         // From 1000 characters on, a string costs the same more for each
         // four characters, since its reads stop at four lines.
         constexpr qint64 Base = 250;
-        const qint64 without = work(QByteArray(), Base).work;
-        QCOMPARE(work(QByteArray(), Base + 1000).work - without, 1000 * Enums);
+        const qint64 without = work(QByteArray(), Base, object).work;
+        QCOMPARE(work(QByteArray(), Base + 1000, object).work - without, 1000 * Enums);
         // The list, and the part of its work after the index of the
         // object's names (one step, which a name of required builds) at
         // which the bound passes: in the names of required, in the triggers
         // looked up in the object or the members in the triggers (which
         // builds no index), or in the triggers found and their names (0.85,
-        // and one trigger of 10000 names).
-        const qint64 index = work("'required': ['k00000']", Base).work - without;
-        const QList<std::tuple<QByteArray, qint64, double>> lists{
-            {"'required': [" + names + "]", index, 0.5},
-            {"'dependentRequired': {" + empties + "}", index, 0.3},
-            {"'dependentRequired': {" + empties + "}", index, 0.85},
-            {"'dependentRequired': {" + selves + "}", index, 0.15},
-            {"'dependentRequired': {" + selves + "}", index, 0.85},
-            {"'dependentRequired': {'k00000': [" + names + "]}", index, 0.5},
-            {"'dependentRequired': {" + more + "}", 0, 0.3},
+        // and one trigger of 10000 names). Then the index itself, the
+        // items of uniqueItems hashed, and the members of the two objects
+        // that const compares sorted by name, since their first names
+        // differ.
+        const qint64 index = work("'required': ['k00000']", Base, object).work - without;
+        const QList<std::tuple<QByteArray, qint64, double, QByteArray>> lists{
+            {"'required': [" + names + "]", index, 0.5, object},
+            {"'dependentRequired': {" + empties + "}", index, 0.3, object},
+            {"'dependentRequired': {" + empties + "}", index, 0.85, object},
+            {"'dependentRequired': {" + selves + "}", index, 0.15, object},
+            {"'dependentRequired': {" + selves + "}", index, 0.85, object},
+            {"'dependentRequired': {'k00000': [" + names + "]}", index, 0.5, object},
+            {"'dependentRequired': {" + more + "}", 0, 0.3, object},
+            {"'required': ['k00000']", 0, 0.5, object},
+            {"'uniqueItems': true", 0, 0.5, array},
+            {"'not': {'const': {" + renamed + "}}", 0, 0.25, object},
         };
-        for (const auto& [list, first, part] : lists) {
-            const Counts with = work(list, Base);
+        for (const auto& [list, first, part, second] : lists) {
+            const qint64 before = work(QByteArray(), Base, second).work;
+            const Counts with = work(list, Base, second);
             QCOMPARE(with.lines, QStringList());
-            const qint64 listWork = with.work - without - first;
+            const qint64 listWork = with.work - before - first;
             QVERIFY(listWork > 100000);
             // The work before the list, and as much of it as the part.
-            const qint64 quads = Base + (MaxWork - without - first - qint64(double(listWork) * part)) / Enums;
-            const Counts stopped = work(list, quads);
+            const qint64 quads = Base + (MaxWork - before - first - qint64(double(listWork) * part)) / Enums;
+            const Counts stopped = work(list, quads, second);
             QCOMPARE(stopped.lines,
                      QStringList{QStringLiteral(": is too large for the server to check against the schema")});
             QVERIFY2(stopped.work - MaxWork < 100, qPrintable(QString::number(stopped.work - MaxWork)));

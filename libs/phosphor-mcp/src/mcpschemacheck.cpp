@@ -222,17 +222,18 @@ private:
         if (!m_budget.allocate(m_bytes)) {
             return false;
         }
-        // Each name hashed, and a sort of plain integers.
-        qint64 units = qint64(size) * (UnitsPerMember + std::bit_width(quint64(size)) / ComparisonsPerUnit);
+        // Each name hashed, and its share of a sort of plain integers,
+        // charged before it is hashed, so that the count stops within a
+        // name of the bound.
+        const qint64 sortUnits = UnitsPerMember + std::bit_width(quint64(size)) / ComparisonsPerUnit;
         m_names.reserve(std::size_t(size));
         TextReads reads;
         for (auto it = object.begin(); it != object.end(); ++it) {
             const QAnyStringView name = it.keyView();
-            units += reads.next(name) + hashUnits(name);
+            if (!m_budget.charge(sortUnits + reads.next(name) + hashUnits(name))) {
+                return false;
+            }
             m_names.push_back(Name{hashText(name, m_key), name});
-        }
-        if (!m_budget.charge(units)) {
-            return false;
         }
         std::sort(m_names.begin(), m_names.end(), [](const Name& a, const Name& b) {
             return a.hash < b.hash;
@@ -981,14 +982,16 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
     }
     std::vector<Key> keys;
     keys.reserve(std::size_t(size));
+    // Each item hashed, and its share of a sort of plain integers, whose
+    // comparisons are counted here: some five nanoseconds each, since the
+    // hashes are in no order and the branches of the sort are taken at
+    // random. The share is charged before the item is hashed, so that the
+    // count stops within an item of the bound.
+    const qint64 sortUnits = 1 + std::bit_width(quint64(size)) / ComparisonsPerUnit;
     TextReads items;
-    for (qsizetype i = 0; i < size && !stopped(); ++i) {
+    for (qsizetype i = 0; i < size && !stopped() && charge(sortUnits); ++i) {
         keys.push_back(Key{hashValue(array.at(i), m_key, m_budget, &items), i});
     }
-    // A sort of plain integers, whose comparisons are counted here: some
-    // five nanoseconds each, since the hashes are in no order and the
-    // branches of the sort are taken at random.
-    charge(qint64(size) * (1 + std::bit_width(quint64(size)) / ComparisonsPerUnit));
     if (stopped()) {
         m_budget.release(bytes);
         return false;

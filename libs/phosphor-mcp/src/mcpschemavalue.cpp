@@ -254,19 +254,20 @@ public:
             return;
         }
         const qint64 comparisons = std::bit_width(quint64(object.size()));
-        qint64 units = 0;
         m_members.reserve(std::size_t(object.size()));
         // A name away from the others is read away from them by each
-        // comparison of the sort too.
+        // comparison of the sort too. Each member's share of the sort is
+        // charged as it is taken, so that the count stops within a member
+        // of the bound.
         TextReads reads;
         for (auto it = object.begin(); it != object.end(); ++it) {
             const QAnyStringView name = it.keyView();
-            m_members.push_back(Member{name, it});
             const qint64 gap = reads.next(name);
-            units += UnitsPerMember + gap + comparisons * (1 + gap + textUnits(CompareUnits, name.size()));
-        }
-        if (!m_budget.charge(units)) {
-            return;
+            if (!m_budget.charge(UnitsPerMember + gap
+                                 + comparisons * (1 + gap + textUnits(CompareUnits, name.size())))) {
+                return;
+            }
+            m_members.push_back(Member{name, it});
         }
         std::sort(m_members.begin(), m_members.end(), [](const Member& a, const Member& b) {
             return compareText(a.name, b.name) < 0;
