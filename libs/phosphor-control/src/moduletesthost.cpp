@@ -28,14 +28,18 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <list>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace PhosphorControl {
 
 namespace {
 
-// How long to keep listening after the first result, for a second one.
+// How long to keep listening after a call's first result, for a second one.
+// The windows of all the calls run at once, after the last call, so a run
+// waits for one window rather than for one per call of each domain.
 constexpr int SecondResultGraceMs = 50;
 
 struct ResultCount
@@ -43,39 +47,39 @@ struct ResultCount
     int count = 0;
     /// The error text of every result that reported failure.
     QStringList failures;
+    /// The loop waiting for the first result, while one waits.
+    QEventLoop* waiting = nullptr;
+    QMetaObject::Connection connection;
 };
 
-// Call @p trigger on @p domain and collect every @p signal it sends within
-// the timeout, plus a short grace period to catch a second one.
+// Call @p trigger on @p domain and wait, up to the timeout, for the first
+// @p signal it sends. The connection stays open and goes on counting into
+// @p result, so that the caller can listen for a second result of every call
+// at once. The caller disconnects it.
 template<typename Signal>
-ResultCount countResults(StagingDomain* domain, Signal signal, void (StagingDomain::*trigger)(), int timeoutMs)
+void startCounting(StagingDomain* domain, Signal signal, void (StagingDomain::*trigger)(), int timeoutMs,
+                   ResultCount& result)
 {
-    ResultCount result;
-    QEventLoop loop;
-    const QMetaObject::Connection connection =
-        QObject::connect(domain, signal, &loop, [&result, &loop](bool ok, const QString& error) {
-            ++result.count;
-            if (!ok) {
-                result.failures.append(error.isEmpty() ? QStringLiteral("no error text") : error);
-            }
-            loop.quit();
-        });
+    result.connection = QObject::connect(domain, signal, domain, [&result](bool ok, const QString& error) {
+        ++result.count;
+        if (!ok) {
+            result.failures.append(error.isEmpty() ? QStringLiteral("no error text") : error);
+        }
+        if (result.waiting) {
+            result.waiting->quit();
+        }
+    });
     (domain->*trigger)();
     if (result.count == 0) {
+        QEventLoop loop;
+        result.waiting = &loop;
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
         loop.exec();
+        result.waiting = nullptr;
     }
-    // A second result for the same call is the bug this check exists for.
-    // Wait for it in an event loop, so a result sent through a queued
-    // connection or a timer arrives.
-    QEventLoop grace;
-    QTimer::singleShot(SecondResultGraceMs, &grace, &QEventLoop::quit);
-    grace.exec();
     // Deliver a deleteLater() the call posted, so a domain that deleted
     // itself is seen as gone.
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    QObject::disconnect(connection);
-    return result;
 }
 
 // Whether the QML file @p source names exists, for the schemes that can be
@@ -482,36 +486,81 @@ QStringList ModuleTestHost::run()
         }
     }
 
+    // Each domain is applied and then discarded, one after another. What
+    // the calls answered is read once all of them have been made and have
+    // had the grace period to answer a second time.
+    struct Round
+    {
+        QString name;
+        QPointer<StagingDomain> domain;
+        /// Null when the domain was deleted before its apply() was called.
+        ResultCount* applied = nullptr;
+        /// Null after an apply() when that apply() deleted the domain.
+        ResultCount* discarded = nullptr;
+        bool deletedByDiscard = false;
+    };
+    std::vector<Round> rounds;
+    std::list<ResultCount> counts;
     for (const Checked& checked : std::as_const(domains)) {
+        Round& round = rounds.emplace_back(Round{checked.name, checked.domain});
         if (!checked.domain) {
             // Deleted by another domain's isDirty(), apply() or discard().
-            problems.append(QStringLiteral("%1 was deleted before its apply() was called").arg(checked.name));
             continue;
         }
-        const ResultCount applied =
-            countResults(checked.domain.data(), &StagingDomain::applyResult, &StagingDomain::apply, m_resultTimeoutMs);
-        if (applied.count != 1) {
+        round.applied = &counts.emplace_back();
+        startCounting(checked.domain.data(), &StagingDomain::applyResult, &StagingDomain::apply, m_resultTimeoutMs,
+                      *round.applied);
+        if (!checked.domain) {
+            continue;
+        }
+        round.discarded = &counts.emplace_back();
+        startCounting(checked.domain.data(), &StagingDomain::discardResult, &StagingDomain::discard, m_resultTimeoutMs,
+                      *round.discarded);
+        round.deletedByDiscard = !checked.domain;
+    }
+    if (!counts.empty()) {
+        // A second result for the same call is the bug this check exists
+        // for. Wait for it in an event loop, so a result sent through a
+        // queued connection or a timer arrives. Every call has had at least
+        // this long since its first result by the time the wait ends.
+        QEventLoop grace;
+        QTimer::singleShot(SecondResultGraceMs, &grace, &QEventLoop::quit);
+        grace.exec();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        for (const ResultCount& count : counts) {
+            QObject::disconnect(count.connection);
+        }
+    }
+
+    for (const Round& round : rounds) {
+        if (!round.applied) {
+            problems.append(QStringLiteral("%1 was deleted before its apply() was called").arg(round.name));
+            continue;
+        }
+        if (round.applied->count != 1) {
             problems.append(QStringLiteral("%1 emitted applyResult %2 times for one apply()")
-                                .arg(checked.name, QString::number(applied.count)));
+                                .arg(round.name, QString::number(round.applied->count)));
         }
-        for (const QString& failure : applied.failures) {
-            problems.append(QStringLiteral("%1 reported a failed apply(): %2").arg(checked.name, failure));
+        for (const QString& failure : std::as_const(round.applied->failures)) {
+            problems.append(QStringLiteral("%1 reported a failed apply(): %2").arg(round.name, failure));
         }
-        if (!checked.domain) {
-            problems.append(QStringLiteral("%1 was deleted by apply()").arg(checked.name));
+        if (!round.discarded) {
+            problems.append(QStringLiteral("%1 was deleted by apply()").arg(round.name));
             continue;
         }
-        const ResultCount discarded = countResults(checked.domain.data(), &StagingDomain::discardResult,
-                                                   &StagingDomain::discard, m_resultTimeoutMs);
-        if (discarded.count != 1) {
+        if (round.discarded->count != 1) {
             problems.append(QStringLiteral("%1 emitted discardResult %2 times for one discard()")
-                                .arg(checked.name, QString::number(discarded.count)));
+                                .arg(round.name, QString::number(round.discarded->count)));
         }
-        for (const QString& failure : discarded.failures) {
-            problems.append(QStringLiteral("%1 reported a failed discard(): %2").arg(checked.name, failure));
+        for (const QString& failure : std::as_const(round.discarded->failures)) {
+            problems.append(QStringLiteral("%1 reported a failed discard(): %2").arg(round.name, failure));
         }
-        if (!checked.domain) {
-            problems.append(QStringLiteral("%1 was deleted by discard()").arg(checked.name));
+        if (round.deletedByDiscard) {
+            problems.append(QStringLiteral("%1 was deleted by discard()").arg(round.name));
+        } else if (!round.domain) {
+            // By a later domain's call, or by something its own calls left
+            // to run, after both had answered.
+            problems.append(QStringLiteral("%1 was deleted after its apply() and discard() answered").arg(round.name));
         }
     }
     return problems;
