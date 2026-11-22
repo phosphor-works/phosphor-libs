@@ -17,8 +17,10 @@
 #include <QTest>
 
 #include <clocale>
+#include <limits>
 #include <optional>
 #include <string>
+#include <tuple>
 
 using namespace PhosphorMcp;
 using namespace PhosphorMcpTests;
@@ -629,6 +631,63 @@ private Q_SLOTS:
             QCOMPARE(error, QStringLiteral("outputSchema") + expected);
         }
         QVERIFY(server.tools().isEmpty());
+    }
+
+    void wholeDoublesBuiltInCpp()
+    {
+        // An application that builds its schema in C++ may hold a whole
+        // number within the range of qint64 as a double, which Qt keeps as
+        // one: tools/list sends it in its shortest form, which may end in
+        // zeros where the number has other digits. Parsed, the same number
+        // is an integer, sent with all its digits.
+        const auto schemaWith = [](const char* keyword, const QJsonValue& number) {
+            return QJsonObject{
+                {QLatin1StringView("type"), QStringLiteral("object")},
+                {QLatin1StringView("properties"),
+                 QJsonObject{{QLatin1StringView("a"), QJsonObject{{QLatin1StringView(keyword), number}}}}}};
+        };
+        const auto refusal = [](const char* place, const char* exact, const char* sent) {
+            return QStringLiteral(
+                       "inputSchema/properties/a/%1: %2 is not supported, since tools/list sends it as %3, "
+                       "which a client reads as another integer")
+                .arg(QLatin1StringView(place), QLatin1StringView(exact), QLatin1StringView(sent));
+        };
+        const QJsonValue twoTo62(4611686018427387904.0);
+        const QJsonValue least(-9223372036854775808.0);
+        const QList<std::tuple<const char*, QJsonValue, QString>> refused{
+            {"maximum", twoTo62, refusal("maximum", "4611686018427387904", "4611686018427388000")},
+            {"multipleOf", twoTo62, refusal("multipleOf", "4611686018427387904", "4611686018427388000")},
+            {"minimum", least, refusal("minimum", "-9223372036854775808", "-9223372036854776000")},
+            {"exclusiveMaximum", QJsonValue(9223372036854774784.0),
+             refusal("exclusiveMaximum", "9223372036854774784", "9223372036854775000")},
+            {"enum", QJsonArray{1, least}, refusal("enum/1", "-9223372036854775808", "-9223372036854776000")},
+            {"const", QJsonObject{{QLatin1StringView("b"), twoTo62}},
+             refusal("const/b", "4611686018427387904", "4611686018427388000")},
+        };
+        McpServer server;
+        QString error;
+        for (const auto& [keyword, number, expected] : refused) {
+            QVERIFY(!addQuietly(server, McpTool(QStringLiteral("t")).setInputSchema(schemaWith(keyword, number)),
+                                noop(), &error));
+            QCOMPARE(error, expected);
+        }
+        QVERIFY(server.tools().isEmpty());
+
+        // The same numbers held as integers are sent whole, and doubles that
+        // are sent with all their digits, or with an exponent, are the same
+        // number for a client.
+        const QList<QJsonValue> accepted{QJsonValue(qint64(4611686018427387904)),
+                                         QJsonValue(std::numeric_limits<qint64>::min()),
+                                         QJsonValue(4096.0),
+                                         QJsonValue(9007199254740994.0),
+                                         QJsonValue(1e18),
+                                         QJsonValue(-1e19)};
+        for (qsizetype i = 0; i < accepted.size(); ++i) {
+            QVERIFY2(server.addTool(
+                         McpTool(QStringLiteral("t%1").arg(i)).setInputSchema(schemaWith("maximum", accepted.at(i))),
+                         noop(), &error),
+                     qPrintable(error));
+        }
     }
 
     void acceptedSchemas()

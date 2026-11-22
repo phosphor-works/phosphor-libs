@@ -55,27 +55,31 @@ bool isCount(const QJsonValue& value)
     return number.isInteger && number.integer >= 0 && double(number.integer) < TwoTo53;
 }
 
-// Why a number of the schema is refused, or an empty string. A whole
-// number past the range of qint64 is a double for Qt, and tools/list sends
-// it as QJsonDocument writes it, in its shortest form that reads back as the
+// Why a number of the schema is refused, or an empty string. tools/list
+// sends the number as QJsonDocument writes it: an integer that Qt holds as
+// one (as its parser keeps a whole number within the range of qint64) with
+// all its digits, and a double in its shortest form that reads back as the
 // same double. With an exponent (1e+19), a client reads that double too.
-// Written whole, the shortest form may end in zeros where the double has
-// other digits (9223372036854775808 as 9223372036854776000), and a client
-// that reads integers exactly, as Python does, would compare the
-// arguments with another number than the check does.
-QString numberProblem(const Number& number, const QString& place)
+// Written whole, the shortest form may end in zeros where the number has
+// other digits: 9223372036854775808 as 9223372036854776000, and so a whole
+// number within qint64 that an application built in C++ as a double, 2^62
+// as 4611686018427388000. A client that reads integers exactly, as Python
+// does, would compare the arguments with another number than the check
+// does.
+QString numberProblem(const QJsonValue& value, const QString& place)
 {
-    if (number.isInteger || !isIntegral(number)) {
+    const Number number = numberOf(value);
+    if (!isIntegral(number)) {
         return QString();
     }
-    QByteArray sent = QJsonDocument(QJsonArray{number.real}).toJson(QJsonDocument::Compact);
+    QByteArray sent = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
     sent = sent.mid(1, sent.size() - 2);
-    if (sent.contains('e')) {
+    if (sent.contains('e') || sent.contains('.')) {
         return QString();
     }
-    // All the digits of the double (Qt writes doubles whole up to some
+    // All the digits of the number (Qt writes doubles whole up to some
     // 5e21).
-    const QString exact = QString::number(number.real, 'f', 0);
+    const QString exact = number.isInteger ? QString::number(number.integer) : QString::number(number.real, 'f', 0);
     if (QLatin1StringView(sent) == exact) {
         return QString();
     }
@@ -425,7 +429,7 @@ QString SchemaBuilder::checkLiteral(const QJsonValue& value, int depth)
         return QStringLiteral("%1: a number that is not finite is not supported").arg(here());
     }
     if (value.isDouble()) {
-        return numberProblem(numberOf(value), here());
+        return numberProblem(value, here());
     }
     if (value.isArray()) {
         const QJsonArray array = value.toArray();
@@ -702,7 +706,7 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         if (bound.bit == Node::MultipleOf && !(value.toDouble() > 0)) {
             return QStringLiteral("%1: must be a number greater than 0").arg(here());
         }
-        if (const QString problem = numberProblem(number, here()); !problem.isEmpty()) {
+        if (const QString problem = numberProblem(value, here()); !problem.isEmpty()) {
             return problem;
         }
         node().numberKeywords |= bound.bit;
