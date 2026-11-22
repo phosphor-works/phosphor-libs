@@ -534,12 +534,121 @@ qint64 decodeUnits(QAnyStringView text)
     return (isUtf8(text) ? DecodeUnits : 1) * (text.size() / CharactersPerUnit);
 }
 
+namespace {
+
+std::size_t hashOf(const char* text, qsizetype size, std::size_t seed)
+{
+    return qHash(QByteArrayView(text, size), seed);
+}
+
+std::size_t hashOf(const char16_t* text, qsizetype size, std::size_t seed)
+{
+    return qHash(QStringView(text, size), seed);
+}
+
+// The part of a hash that a slot keeps, beside the bits of its place.
+quint32 tagOf(std::size_t hash)
+{
+    return quint32(quint64(hash) >> 32) ^ quint32(hash);
+}
+
+} // namespace
+
+void NameTable::insert(const QString& name, const QByteArray& utf8, int value)
+{
+    reserve(isEmpty() ? 1 : m_tables->size + 1);
+    if (put(m_tables->utf16, reinterpret_cast<const char16_t*>(name.constData()), name.size(), value)) {
+        ++m_tables->size;
+    }
+    put(m_tables->utf8, utf8.constData(), utf8.size(), value);
+}
+
+void NameTable::reserve(qsizetype size)
+{
+    if (!m_tables) {
+        m_tables = std::make_unique<Tables>();
+    }
+    const std::size_t capacity = std::bit_ceil(std::size_t(std::max<qsizetype>(size, 4)) * 2);
+    if (capacity > m_tables->utf16.entries.size()) {
+        grow(m_tables->utf8, capacity);
+        grow(m_tables->utf16, capacity);
+    }
+}
+
+qint64 NameTable::bytes() const
+{
+    if (!m_tables) {
+        return 0;
+    }
+    return qint64((m_tables->utf8.entries.size() + m_tables->utf16.entries.size()) * sizeof(Slot)
+                  + m_tables->utf8.text.size() * sizeof(char) + m_tables->utf16.text.size() * sizeof(char16_t));
+}
+
+template<typename Char>
+bool NameTable::put(Table<Char>& table, const Char* name, qsizetype size, int value)
+{
+    const std::size_t hash = hashOf(name, size, m_tables->seed);
+    const std::size_t mask = table.entries.size() - 1;
+    for (std::size_t i = hash & mask;; i = (i + 1) & mask) {
+        Slot& slot = table.entries[i];
+        if (slot.value < 0) {
+            slot = Slot{tagOf(hash), quint32(size), quint32(table.text.size()), value};
+            table.text.insert(table.text.end(), name, name + size);
+            return true;
+        }
+        if (slot.tag == tagOf(hash) && slot.size == quint32(size)
+            && std::equal(name, name + size, table.text.data() + slot.offset)) {
+            slot.value = value;
+            return false;
+        }
+    }
+}
+
+template<typename Char>
+void NameTable::grow(Table<Char>& table, std::size_t capacity)
+{
+    std::vector<Slot> old(capacity);
+    old.swap(table.entries);
+    const std::size_t mask = capacity - 1;
+    for (const Slot& slot : old) {
+        if (slot.value < 0) {
+            continue;
+        }
+        std::size_t i = hashOf(table.text.data() + slot.offset, slot.size, m_tables->seed) & mask;
+        while (table.entries[i].value >= 0) {
+            i = (i + 1) & mask;
+        }
+        table.entries[i] = slot;
+    }
+}
+
+template<typename Char>
+int NameTable::find(const Table<Char>& table, const Char* name, qsizetype size) const
+{
+    const std::size_t hash = hashOf(name, size, m_tables->seed);
+    const quint32 tag = tagOf(hash);
+    const std::size_t mask = table.entries.size() - 1;
+    for (std::size_t i = hash & mask;; i = (i + 1) & mask) {
+        const Slot& slot = table.entries[i];
+        if (slot.value < 0) {
+            return -1;
+        }
+        if (slot.tag == tag && slot.size == quint32(size)
+            && std::equal(name, name + size, table.text.data() + slot.offset)) {
+            return slot.value;
+        }
+    }
+}
+
 int NameTable::value(QAnyStringView name) const
 {
+    if (isEmpty()) {
+        return -1;
+    }
     return name.visit([this](auto view) -> int {
         using View = decltype(view);
         if constexpr (std::is_same_v<View, QStringView>) {
-            return m_utf16.value(QString::fromRawData(view.data(), view.size()), -1);
+            return find(m_tables->utf16, view.utf16(), view.size());
         } else if constexpr (std::is_same_v<View, QLatin1StringView>) {
             // Qt keeps text in Latin-1 only when it is ASCII, which is UTF-8
             // too. Other Latin-1, which no QJsonValue holds, is looked up by
@@ -549,11 +658,12 @@ int NameTable::value(QAnyStringView name) const
                 high |= uchar(c);
             }
             if (high < 0x80) {
-                return m_utf8.value(QByteArray::fromRawData(view.data(), view.size()), -1);
+                return find(m_tables->utf8, view.data(), view.size());
             }
-            return m_utf16.value(QString(view), -1);
+            const QString text(view);
+            return find(m_tables->utf16, reinterpret_cast<const char16_t*>(text.constData()), text.size());
         } else {
-            return m_utf8.value(QByteArray::fromRawData(reinterpret_cast<const char*>(view.data()), view.size()), -1);
+            return find(m_tables->utf8, reinterpret_cast<const char*>(view.data()), view.size());
         }
     });
 }

@@ -11,6 +11,7 @@
 #include <QByteArray>
 #include <QByteArrayList>
 #include <QHash>
+#include <QHashSeed>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -18,6 +19,7 @@
 #include <QStringList>
 
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -86,36 +88,66 @@ quint64 hashText(QAnyStringView text, quint64 key);
 
 // Names or strings of the schema, to look a value's text up in whatever its
 // encoding: by UTF-16 for text in UTF-16, and by UTF-8 for text in UTF-8 or
-// ASCII.
+// ASCII. Each encoding has a table of slots, open-addressed, each with a part
+// of its name's hash, its size and its place in one array of all the names'
+// text: a lookup reads a slot or two, and the text of the slot whose hash and
+// size agree with the name's. A table larger than the caches misses them
+// there, which tableUnits() charges.
 class NameTable
 {
 public:
-    // A name inserted twice keeps the last value.
+    // A name inserted twice keeps the last value. Each value is 0 or more.
     void insert(const QString& name, int value)
     {
         insert(name, name.toUtf8(), value);
     }
     // The same, with the name's UTF-8 at hand.
-    void insert(const QString& name, const QByteArray& utf8, int value)
-    {
-        m_utf16.insert(name, value);
-        m_utf8.insert(utf8, value);
-    }
-    void reserve(qsizetype size)
-    {
-        m_utf16.reserve(size);
-        m_utf8.reserve(size);
-    }
+    void insert(const QString& name, const QByteArray& utf8, int value);
+    void reserve(qsizetype size);
     // The value of `name`, or -1.
     [[nodiscard]] int value(QAnyStringView name) const;
     [[nodiscard]] bool isEmpty() const
     {
-        return m_utf16.isEmpty();
+        return !m_tables || m_tables->size == 0;
     }
+    // The memory of the slots and of the text, both encodings.
+    [[nodiscard]] qint64 bytes() const;
 
 private:
-    QHash<QString, int> m_utf16;
-    QHash<QByteArray, int> m_utf8;
+    struct Slot
+    {
+        quint32 tag = 0;
+        quint32 size = 0;
+        quint32 offset = 0;
+        // -1 in an empty slot.
+        qint32 value = -1;
+    };
+    template<typename Char>
+    struct Table
+    {
+        // A power of two of them, at most half full.
+        std::vector<Slot> entries;
+        std::vector<Char> text;
+    };
+    struct Tables
+    {
+        Table<char> utf8;
+        Table<char16_t> utf16;
+        qsizetype size = 0;
+        // The seed of the hashes, Qt's global seed when the table was made.
+        std::size_t seed = QHashSeed::globalSeed();
+    };
+    // Whether the name is new to the table.
+    template<typename Char>
+    bool put(Table<Char>& table, const Char* name, qsizetype size, int value);
+    template<typename Char>
+    void grow(Table<Char>& table, std::size_t capacity);
+    template<typename Char>
+    [[nodiscard]] int find(const Table<Char>& table, const Char* name, qsizetype size) const;
+
+    // Made with the first name, so that a node without a table holds a
+    // pointer alone.
+    std::unique_ptr<Tables> m_tables;
 };
 
 // The JSON types, as bits of Node::types.
@@ -250,6 +282,10 @@ struct CompiledSchema
     // random in each process, so that a model cannot choose values whose
     // hashes are the same.
     quint64 key = 0;
+    // The memory of the tables that a check looks names and strings up in
+    // (enum, properties and dependentRequired, its lists with it), all
+    // nodes together.
+    qint64 tableBytes = 0;
 };
 
 // The JSON pointer of a node, in the schema, built from its parents.

@@ -1117,7 +1117,9 @@ QString compileSchema(const QJsonObject& schema, bool objectRoot, CompiledSchema
     }
     // The names that the check looks up, hashed once.
     const quint64 key = QHashSeed::globalSeed();
+    qint64 tableBytes = 0;
     for (Node& node : nodes) {
+        tableBytes += node.enumTable.bytes() + node.properties.bytes() + node.dependentRequiredIndex.bytes();
         for (const QString& name : std::as_const(node.required)) {
             node.requiredHashes.push_back(hashText(name, key));
         }
@@ -1127,6 +1129,11 @@ QString compileSchema(const QJsonObject& schema, bool objectRoot, CompiledSchema
                 hashes.push_back(hashText(name, key));
             }
             node.dependentRequiredHashes.emplace_back(hashText(trigger, key), std::move(hashes));
+            tableBytes += qint64(sizeof(node.dependentRequired[0]) + sizeof(node.dependentRequiredHashes[0]))
+                + names.size() * qint64(sizeof(QString) + sizeof(quint64));
+            for (const QString& name : names) {
+                tableBytes += name.size() * qint64(sizeof(QChar));
+            }
         }
         for (const auto& dependent : node.dependentSchemas) {
             node.dependentSchemaHashes.push_back(hashText(dependent.first, key));
@@ -1134,6 +1141,7 @@ QString compileSchema(const QJsonObject& schema, bool objectRoot, CompiledSchema
     }
     compiled.nodes = std::move(nodes);
     compiled.key = key;
+    compiled.tableBytes = tableBytes;
     return QString();
 }
 

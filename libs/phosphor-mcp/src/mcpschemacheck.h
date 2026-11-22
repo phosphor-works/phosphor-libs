@@ -66,6 +66,14 @@ constexpr qint64 UnitsPerInPlace = 1;
 constexpr qint64 StackBytesPerApply = 1024;
 constexpr qint64 FootprintBytes = 256 * 1024;
 constexpr qint64 MaxFootprintUnits = 3;
+// More for a name or a string looked up in a table of the schema (enum,
+// properties, dependentRequired), and for the names of a trigger of
+// dependentRequired that an object has: a slot and a text read anywhere in
+// the schema's tables, misses of the caches and of the TLB once the tables
+// together are larger than the caches hold. Four units from FootprintBytes of
+// the tables, and twice as many at each fourfold, up to MaxTableUnits (see
+// tableUnits()).
+constexpr qint64 MaxTableUnits = 16;
 // More for an object or an array, walked, applied to, compared or hashed:
 // its members or items are read through its own storage, away from the
 // last. And for an item that uniqueItems compares, read in the order of
@@ -128,6 +136,8 @@ constexpr qint64 WordsPerUnit = 4;
 qint64 textUnits(qint64 weight, qint64 size);
 // The units more for a subschema applied, for `bytes` of nodes and frames.
 qint64 footprintUnits(qint64 bytes);
+// The units more for a lookup in the schema's tables, for `bytes` of them.
+qint64 tableUnits(qint64 bytes);
 qint64 hashUnits(QAnyStringView text);
 qint64 compareUnits(QAnyStringView a, QAnyStringView b);
 qint64 equalUnits(QAnyStringView a, QAnyStringView b);

@@ -394,6 +394,7 @@ public:
         , m_budget(budget)
         , m_key(schema.key)
         , m_nodeBytes(qint64(schema.nodes.size() * sizeof(Node)))
+        , m_tableUnits(tableUnits(schema.tableBytes))
     {
     }
 
@@ -463,6 +464,8 @@ private:
     quint64 m_key;
     // The memory of the schema's nodes (see footprintUnits()).
     qint64 m_nodeBytes;
+    // What a lookup in the schema's tables costs more (see tableUnits()).
+    qint64 m_tableUnits;
 };
 
 // Applies the node `index` to `value`. When `out` is not null, the members
@@ -698,7 +701,7 @@ bool Checker::checkLiterals(const Node& node, const QJsonValue& value, const QAn
         if (text) {
             if (!node.enumTable.isEmpty()) {
                 // A hash of the string, and a comparison with the entry.
-                charge(lookupUnits(*text));
+                charge(lookupUnits(*text) + m_tableUnits);
                 found = node.enumTable.value(*text) >= 0;
             } else {
                 for (qsizetype i = 0; i < node.enumStrings.size() && !found; ++i) {
@@ -1119,7 +1122,7 @@ bool Checker::checkObject(const Node& node, const QJsonValue& value, const QJson
                 int child = -1;
                 if (!node.properties.isEmpty()) {
                     // A hash of the name, and a comparison with the entry.
-                    charge(lookupUnits(name));
+                    charge(lookupUnits(name) + m_tableUnits);
                     child = node.properties.value(name);
                 }
                 if (child >= 0) {
@@ -1215,7 +1218,7 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
             for (auto it = object.begin(); it != object.end(); ++it) {
                 const QAnyStringView name = it.keyView();
                 // A hash of the name, and a comparison with the entry.
-                charge(reads.next(name) + lookupUnits(name));
+                charge(reads.next(name) + lookupUnits(name) + m_tableUnits);
                 const int i = node.dependentRequiredIndex.value(name);
                 if (i >= 0) {
                     triggered.push_back(i);
@@ -1226,8 +1229,12 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
         }
     }
     for (const int i : triggered) {
+        // The trigger's entry and that of its hashes, read where the schema
+        // keeps them, and then its names and their hashes, two lists of
+        // their own.
         const auto& [trigger, names] = node.dependentRequired[std::size_t(i)];
         const std::vector<quint64>& hashes = node.dependentRequiredHashes[std::size_t(i)].second;
+        charge(m_tableUnits * (names.isEmpty() ? 1 : 2));
         for (qsizetype k = 0; k < names.size(); ++k) {
             const QString& name = names.at(k);
             if (!shared.contains(object, name, hashes[std::size_t(k)])) {
@@ -1491,6 +1498,15 @@ qint64 footprintUnits(qint64 bytes)
         return 0;
     }
     return std::min(MaxFootprintUnits, qint64(1 + (std::bit_width(quint64(steps)) - 1) / 2));
+}
+
+qint64 tableUnits(qint64 bytes)
+{
+    const qint64 steps = bytes / FootprintBytes;
+    if (steps == 0) {
+        return 0;
+    }
+    return std::min(MaxTableUnits, qint64(4) << ((std::bit_width(quint64(steps)) - 1) / 2));
 }
 
 QStringList checkValue(const CompiledSchema& schema, const QJsonValue& value, CheckStats* stats)
