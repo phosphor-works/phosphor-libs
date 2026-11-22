@@ -299,17 +299,50 @@ endif()
 # jsoncons is BSL-1.0 (Daniel Parker) and, in the default pinned build, its
 # headers are compiled into this library, so its licence goes with the
 # distribution: in this tree's own licence directory, next to the vendored
-# Luau notice phosphor-scripting installs. The system-jsoncons build uses
-# separately installed headers that carry their own licence, so it is skipped
-# there. Guarded on the file existing for the same reason as the Luau rule: a
-# scope that skips the extraction must not leave an install rule pointing at a
-# path that was never created.
+# Luau notice phosphor-scripting installs. Two of the headers compiled in
+# carry an MIT notice of their own, which must ship too: grisu3, which writes
+# doubles, and a5hash, which every jsoncons header includes. LICENSE.jsoncons
+# holds the BSL text and then both notices, taken from the headers so that
+# they follow the pinned version. The system-jsoncons build uses separately
+# installed headers that carry their own licence, so it is skipped there.
+# Guarded on the file existing for the same reason as the Luau rule: a scope
+# that skips the extraction must not leave an install rule pointing at a path
+# that was never created.
 if(NOT PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
     set(_phosphorfsloader_jsoncons_license "${jsoncons_SOURCE_DIR}/LICENSE")
     if(EXISTS "${_phosphorfsloader_jsoncons_license}")
-        install(FILES ${_phosphorfsloader_jsoncons_license}
-            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
-            RENAME LICENSE.jsoncons)
+        file(READ "${_phosphorfsloader_jsoncons_license}" _phosphorfsloader_jsoncons_text)
+        foreach(_phosphorfsloader_notice
+                "utility/detail/grisu3.hpp|Copyright \\(c\\) [0-9]+ Florian Loitsch.*OTHER DEALINGS IN THE SOFTWARE\\."
+                "nonstd/a5hash.hpp|Copyright \\(c\\) [0-9]+ Aleksey Vaneev.*DEALINGS IN THE SOFTWARE\\.")
+            string(REPLACE "|" ";" _phosphorfsloader_notice "${_phosphorfsloader_notice}")
+            list(GET _phosphorfsloader_notice 0 _phosphorfsloader_header)
+            list(GET _phosphorfsloader_notice 1 _phosphorfsloader_pattern)
+            set(_phosphorfsloader_header "${jsoncons_SOURCE_DIR}/include/jsoncons/${_phosphorfsloader_header}")
+            if(NOT EXISTS "${_phosphorfsloader_header}")
+                message(FATAL_ERROR
+                    "The jsoncons header ${_phosphorfsloader_header} was not found, and its MIT notice must ship in "
+                    "LICENSE.jsoncons. Check the notices that the pinned jsoncons carries.")
+            endif()
+            file(READ "${_phosphorfsloader_header}" _phosphorfsloader_header_text)
+            string(REGEX MATCH "${_phosphorfsloader_pattern}" _phosphorfsloader_notice_text
+                "${_phosphorfsloader_header_text}")
+            if(NOT _phosphorfsloader_notice_text)
+                message(FATAL_ERROR
+                    "The MIT notice in ${_phosphorfsloader_header} was not found, and it must ship in "
+                    "LICENSE.jsoncons. Check the notices that the pinned jsoncons carries.")
+            endif()
+            # The notice sits in a C comment: drop each line's indent and "*".
+            string(REGEX REPLACE "\n[ \t]*\\*?[ \t]?" "\n" _phosphorfsloader_notice_text
+                "${_phosphorfsloader_notice_text}")
+            string(APPEND _phosphorfsloader_jsoncons_text
+                "\n----\n\n${_phosphorfsloader_header} (MIT):\n\n${_phosphorfsloader_notice_text}\n")
+        endforeach()
+        string(REPLACE "${jsoncons_SOURCE_DIR}/include/" "" _phosphorfsloader_jsoncons_text
+            "${_phosphorfsloader_jsoncons_text}")
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.jsoncons" "${_phosphorfsloader_jsoncons_text}")
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.jsoncons"
+            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs)
     endif()
 endif()
 

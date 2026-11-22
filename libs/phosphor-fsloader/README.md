@@ -227,7 +227,8 @@ parse(mesh->bytes);
   library (whose symbols are hidden but for its own exports, so none of
   jsoncons' leaves it), and its licence installs as
   `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with any
-  distribution. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
+  distribution. That file also holds the MIT notices of the two jsoncons
+  headers compiled in that carry their own, grisu3 and a5hash. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
   headers are used instead, found through `JSONCONS_INCLUDE_DIR`, and the
   configure checks that they compile against the JSON Schema API the library
   uses, which needs jsoncons 1.7.0 or later. The check runs again when
