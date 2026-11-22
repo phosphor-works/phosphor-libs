@@ -144,6 +144,10 @@ constexpr qint64 UniqueBytes = 2 * (sizeof(quint64) + sizeof(qsizetype));
 constexpr qint64 WordBytes = sizeof(quint64);
 // A member sorted by name: a view of the name and an iterator.
 constexpr qint64 SortedBytes = sizeof(QAnyStringView) + sizeof(QJsonObject::const_iterator);
+// A trigger of dependentRequired that an object has: its place in the
+// schema's list, with room for as many as the triggers or the members,
+// whichever are fewer.
+constexpr qint64 TriggerBytes = sizeof(int);
 
 } // namespace
 
@@ -369,17 +373,18 @@ private Q_SLOTS:
             IndexBytes);
         // dependentRequired: a trigger looked up, and its names.
         row("dependentRequired", "{'items': {'dependentRequired': {'a': ['b']}}}", repeat("{'a': 1, 'b': 2}", 256),
-            10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 2 * (1 + 2 + (1 + 1))), 2 * IndexBytes);
+            10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 2 * (1 + 2 + (1 + 1))),
+            2 * IndexBytes + TriggerBytes);
         // More triggers than members: each member looked up in the
         // triggers' table (2, and 2 for each 16 code units, rounded up).
         row("dependentRequired of many triggers", "{'items': {'dependentRequired': {'a': ['a'], 'x': [], 'y': []}}}",
             repeat("{'a': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 1) + (2 + 1) + (1 + 1) + (1 + 1)),
-            IndexBytes);
+            IndexBytes + TriggerBytes);
         row("dependentRequired of many triggers, names apart", "{'dependentRequired': {'a': [], 'x': [], 'y': []}}",
-            Apart, (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1) + 8, 0);
+            Apart, (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1) + 8, 2 * TriggerBytes);
         row("dependentRequired of many triggers, long names",
             "{'items': {'dependentRequired': {'" + A32 + "': [], 'x': [], 'y': []}}}",
-            repeat("{'" + A32 + "': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 * 2)), 0);
+            repeat("{'" + A32 + "': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 * 2)), TriggerBytes);
         row("dependentSchemas", "{'items': {'dependentSchemas': {'a': {'required': ['b']}}}}",
             repeat("{'a': 1, 'b': 2}", 256),
             10
@@ -1377,7 +1382,8 @@ private Q_SLOTS:
     {
         // An object whose index of names would hold more than MaxMemory.
         // The first trigger of dependentRequired makes it and fails, and
-        // the second does not make it again.
+        // the second does not make it again. The list of the triggers found
+        // has room for two.
         const qint64 size = MaxMemory / IndexBytes + 1;
         QByteArray text = "{";
         for (qint64 i = 0; i < size; ++i) {
@@ -1390,7 +1396,7 @@ private Q_SLOTS:
         const Counts counts = count(parse("{'dependentRequired': {'0': [], '1': []}}").toObject(), object);
         QCOMPARE(counts.lines,
                  QStringList{QStringLiteral(": is too large for the server to check against the schema")});
-        QCOMPARE(counts.memory, size * IndexBytes);
+        QCOMPARE(counts.memory, 2 * TriggerBytes + size * IndexBytes);
     }
 
     void errorsBuildTheirPointersOnce()

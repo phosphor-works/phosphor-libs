@@ -280,9 +280,11 @@ is, since the error and each of its tokens are charged units of their own
 besides. The memory the check holds beyond the arguments and the schema is
 counted too, up to 64 MiB. It holds the sets of members and items that
 `unevaluatedProperties` and `unevaluatedItems` read, the keys that
-`uniqueItems` sorts, and the index of an object's names that `required`,
-`dependentRequired` and `dependentSchemas` look names up in. The list of
-errors is capped as above.
+`uniqueItems` sorts, the index of an object's names that `required`,
+`dependentRequired` and `dependentSchemas` look names up in, the members
+of an object sorted by name to be compared, and the list of the triggers
+of `dependentRequired` that an object has. The list of errors is capped
+as above.
 
 A check is also stopped 3000 subschemas deep, and when its own frames
 take 4 MiB of stack, half of what a Linux thread has by default. Each

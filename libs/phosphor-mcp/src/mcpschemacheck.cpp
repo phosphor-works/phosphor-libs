@@ -1210,9 +1210,26 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
         }
     }
     // The triggers that the object has: each trigger looked up in the
-    // object, or each member in the triggers, whichever are fewer.
+    // object, or each member in the triggers, whichever are fewer. Their
+    // list has room for as many, and its memory is counted.
+    struct Held
+    {
+        Budget& budget;
+        qint64 bytes = 0;
+        ~Held()
+        {
+            budget.release(bytes);
+        }
+    };
+    Held held{m_budget, 0};
     std::vector<int> triggered;
     if (!node.dependentRequired.empty()) {
+        const qsizetype room = std::min(qsizetype(node.dependentRequired.size()), size);
+        held.bytes = qint64(room) * qint64(sizeof(int));
+        if (!m_budget.allocate(held.bytes)) {
+            return false;
+        }
+        triggered.reserve(std::size_t(room));
         if (qsizetype(node.dependentRequired.size()) <= size) {
             for (std::size_t i = 0; i < node.dependentRequired.size(); ++i) {
                 const bool found =

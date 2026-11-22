@@ -36,7 +36,9 @@ constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
 // goes: the sets of the members and items that subschemas evaluated (for
 // unevaluatedProperties and unevaluatedItems), the keys that uniqueItems
-// sorts, and the sorted names of the objects whose members are looked up.
+// sorts, the sorted names of the objects whose members are looked up, the
+// members of the objects sorted by name to be compared, and the list of the
+// triggers of dependentRequired that an object has.
 // The errors are not counted here, since MaxCountedErrors and
 // MaxErrorPointerLength bound them.
 constexpr qint64 MaxMemory = 64 * 1024 * 1024;
