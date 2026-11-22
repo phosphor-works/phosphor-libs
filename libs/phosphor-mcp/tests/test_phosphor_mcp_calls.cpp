@@ -196,6 +196,11 @@ private Q_SLOTS:
         QVERIFY(transport->pendingWriteBytes() > 8 * 1024 * 1024);
 
         // Nothing read yet: the next call still runs, and timers still fire.
+        // Counted in ticks rather than over a fixed time: a loaded machine
+        // fires a 1 ms timer far less often than once a millisecond, but an
+        // event loop that the queued reply blocked would fire it never, since
+        // the client reads nothing until after this.
+        constexpr int Ticks = 10;
         int ticks = 0;
         QTimer timer;
         connect(&timer, &QTimer::timeout, this, [&] {
@@ -206,10 +211,14 @@ private Q_SLOTS:
         QVERIFY(spinUntil([&] {
             return f.nowCalls == 1;
         }));
-        spinFor(50);
-        // Sampled while the client still reads nothing, and most of the
-        // reply waits in the queue.
-        QVERIFY2(ticks > 5, qPrintable(QString::number(ticks)));
+        QVERIFY2(spinUntil(
+                     [&] {
+                         return ticks >= Ticks;
+                     },
+                     20000),
+                 qPrintable(QString::number(ticks)));
+        // Still while the client reads nothing, and most of the reply waits
+        // in the queue.
         QVERIFY(transport->pendingWriteBytes() > 8 * 1024 * 1024);
 
         QList<QJsonObject> replies;
