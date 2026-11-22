@@ -140,11 +140,8 @@ public:
     Shared(Budget& budget, quint64 key)
         : m_budget(budget)
         , m_key(key)
+        , m_memory(budget)
     {
-    }
-    ~Shared()
-    {
-        m_budget.release(m_bytes);
     }
     Shared(const Shared&) = delete;
     Shared& operator=(const Shared&) = delete;
@@ -218,8 +215,7 @@ private:
     {
         m_failed = true;
         const qsizetype size = object.size();
-        m_bytes = qint64(size) * qint64(sizeof(Name));
-        if (!m_budget.allocate(m_bytes)) {
+        if (!m_memory.allocate(qint64(size) * qint64(sizeof(Name)))) {
             return false;
         }
         // Each name hashed, and its share of a sort of plain integers,
@@ -245,8 +241,8 @@ private:
 
     Budget& m_budget;
     quint64 m_key;
+    HeldMemory m_memory;
     std::vector<Name> m_names;
-    qint64 m_bytes = 0;
     qsizetype m_length = -1;
     Number m_number;
     QJsonValue::Type m_type = QJsonValue::Null;
@@ -975,9 +971,8 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
         quint64 hash;
         qsizetype index;
     };
-    const qint64 bytes = qint64(size) * qint64(sizeof(Key)) * 2;
-    if (!m_budget.allocate(bytes)) {
-        m_budget.release(bytes);
+    HeldMemory held(m_budget);
+    if (!held.allocate(qint64(size) * qint64(sizeof(Key)) * 2)) {
         return false;
     }
     std::vector<Key> keys;
@@ -993,7 +988,6 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
         keys.push_back(Key{hashValue(array.at(i), m_key, m_budget, &items), i});
     }
     if (stopped()) {
-        m_budget.release(bytes);
         return false;
     }
     std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) {
@@ -1065,7 +1059,6 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
         }
         start = end;
     }
-    m_budget.release(bytes);
     if (stopped() || firstRepeat < 0) {
         return firstRepeat < 0 && !stopped();
     }
@@ -1212,21 +1205,11 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
     // The triggers that the object has: each trigger looked up in the
     // object, or each member in the triggers, whichever are fewer. Their
     // list has room for as many, and its memory is counted.
-    struct Held
-    {
-        Budget& budget;
-        qint64 bytes = 0;
-        ~Held()
-        {
-            budget.release(bytes);
-        }
-    };
-    Held held{m_budget, 0};
+    HeldMemory held(m_budget);
     std::vector<int> triggered;
     if (!node.dependentRequired.empty()) {
         const qsizetype room = std::min(qsizetype(node.dependentRequired.size()), size);
-        held.bytes = qint64(room) * qint64(sizeof(int));
-        if (!m_budget.allocate(held.bytes)) {
+        if (!held.allocate(qint64(room) * qint64(sizeof(int)))) {
             return false;
         }
         triggered.reserve(std::size_t(room));

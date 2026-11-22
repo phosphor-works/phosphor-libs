@@ -264,6 +264,34 @@ private:
     bool m_exceeded = false;
 };
 
+// Memory counted in a budget while it is held: what allocate() counts,
+// whether it passed MaxMemory or not, is released when the holder goes.
+class HeldMemory
+{
+public:
+    explicit HeldMemory(Budget& budget)
+        : m_budget(budget)
+    {
+    }
+    ~HeldMemory()
+    {
+        m_budget.release(m_bytes);
+    }
+    HeldMemory(const HeldMemory&) = delete;
+    HeldMemory& operator=(const HeldMemory&) = delete;
+
+    // Counts `bytes` more. False once the memory passed MaxMemory.
+    bool allocate(qint64 bytes)
+    {
+        m_bytes += bytes;
+        return m_budget.allocate(bytes);
+    }
+
+private:
+    Budget& m_budget;
+    qint64 m_bytes = 0;
+};
+
 // Comparisons of JSON values as JSON Schema 2020-12 makes them (enum, const,
 // uniqueItems): numbers by their value, 1 and 1.0 alike, a boolean never
 // equal to a number, strings by their characters, arrays item by item and

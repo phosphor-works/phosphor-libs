@@ -248,9 +248,9 @@ class SortedMembers
 public:
     SortedMembers(const QJsonObject& object, Budget& budget)
         : m_budget(budget)
-        , m_bytes(qint64(object.size()) * qint64(sizeof(Member)))
+        , m_memory(budget)
     {
-        if (!m_budget.allocate(m_bytes)) {
+        if (!m_memory.allocate(qint64(object.size()) * qint64(sizeof(Member)))) {
             return;
         }
         const qint64 comparisons = std::bit_width(quint64(object.size()));
@@ -273,10 +273,6 @@ public:
             return compareText(a.name, b.name) < 0;
         });
         m_ready = true;
-    }
-    ~SortedMembers()
-    {
-        m_budget.release(m_bytes);
     }
     SortedMembers(const SortedMembers&) = delete;
     SortedMembers& operator=(const SortedMembers&) = delete;
@@ -302,7 +298,7 @@ private:
         QJsonObject::const_iterator at;
     };
     Budget& m_budget;
-    qint64 m_bytes;
+    HeldMemory m_memory;
     std::vector<Member> m_members;
     bool m_ready = false;
 };
