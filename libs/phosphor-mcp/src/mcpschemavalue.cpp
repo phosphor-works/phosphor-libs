@@ -349,7 +349,9 @@ bool isIntegral(const Number& number)
 // As Python's jsonschema does it, which JavaScript validators do too: an
 // integer divisor divides exactly, and a divisor with a fraction (or past
 // qint64) divides as doubles, the quotient a whole number. Only when that
-// quotient overflows is the test made exactly on the binary values.
+// quotient overflows is the test made exactly on the binary values. An
+// integer divisor past 2^53 against a double is rounded to a double first,
+// as Python rounds it, and divides that exactly.
 bool isMultipleOf(const Number& value, const Number& divisor)
 {
     if (divisor.isInteger) {

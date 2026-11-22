@@ -58,8 +58,12 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # kept the result of a check of the headers, or that a development build
 # of phosphor-fsloader set to warn once about these, go silently.
 # VALIJSON_INCLUDE_DIR was phosphor-fsloader's too, which may have removed
-# it first in the tree. JSONCONS_INCLUDE_DIR stays, since phosphor-fsloader
-# reads it.
+# it first in the tree. Only the library's own entries go. The others stay,
+# in a build directory of the library alone too, where nothing reads them:
+# JSONCONS_INCLUDE_DIR, which phosphor-fsloader reads in the tree, and the
+# entries of cmake/PhosphorDependencies.cmake, which fetched valijson
+# (PHOSPHOR_DEPS_ARCHIVES, CPM_PACKAGES, CPM_PACKAGE_valijson_*), and which
+# other libraries of the tree use.
 foreach(_phosphormcp_old PHOSPHORMCP_USE_SYSTEM_VALIJSON PHOSPHORMCP_VALIJSON_INCLUDE_DIR VALIJSON_INCLUDE_DIR
         PHOSPHORMCP_USE_SYSTEM_JSONCONS)
     if(DEFINED CACHE{${_phosphormcp_old}})
