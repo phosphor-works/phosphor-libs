@@ -58,8 +58,11 @@ set_target_properties(test_phosphor_mcp_checkwork PROPERTIES UNITY_BUILD OFF)
 add_test(NAME test_phosphor_mcp_checkwork COMMAND test_phosphor_mcp_checkwork
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 phosphor_apply_test_isolation(test_phosphor_mcp_checkwork)
+# Two of its rows walk a value to the bound, some 40 million units each:
+# a few seconds of a release build, and some twenty seconds of a debug build
+# with sanitizers on a busy machine.
 set_tests_properties(test_phosphor_mcp_checkwork PROPERTIES
-    TIMEOUT 60
+    TIMEOUT 300
     LABELS "phosphormcp"
 )
 

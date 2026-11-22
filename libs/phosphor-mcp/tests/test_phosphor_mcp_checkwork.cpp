@@ -27,6 +27,7 @@
 #include <random>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 using namespace PhosphorMcp::Schema;
 
@@ -61,6 +62,11 @@ struct NameTableProbe
     static QList<std::tuple<std::size_t, quint32, int>> takenUtf16(const NameTable& table)
     {
         return taken(table.m_tables->utf16.entries);
+    }
+    // The slots of each encoding's table, used or not.
+    static std::pair<std::size_t, std::size_t> slots(const NameTable& table)
+    {
+        return {table.m_tables->utf8.entries.size(), table.m_tables->utf16.entries.size()};
     }
 
 private:
@@ -1490,7 +1496,11 @@ private Q_SLOTS:
         }
         QVERIFY(NameTableProbe::takenUtf8(fixed) != NameTableProbe::takenUtf8(random));
         QVERIFY(NameTableProbe::takenUtf16(fixed) != NameTableProbe::takenUtf16(random));
+        // A table is at most half full: four names fill eight slots, and a
+        // fifth grows it to sixteen.
+        QCOMPARE(NameTableProbe::slots(fixed), (std::pair<std::size_t, std::size_t>{8, 8}));
         fixed.insert(QStringLiteral("e"), 4);
+        QCOMPARE(NameTableProbe::slots(fixed), (std::pair<std::size_t, std::size_t>{16, 16}));
         QCOMPARE(valueOf(fixed, QStringLiteral("e")), 4);
         for (qsizetype i = 0; i < names.size(); ++i) {
             QCOMPARE(valueOf(fixed, names.at(i)), int(i));
