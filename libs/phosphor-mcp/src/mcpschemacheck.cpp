@@ -343,7 +343,7 @@ public:
             m_budget.charge(UnitsPerContainer);
             const QJsonArray array = value.toArray();
             TextReads items;
-            for (qsizetype i = 0; i < array.size() && !m_report.isDone(); ++i) {
+            for (qsizetype i = 0; i < array.size() && !m_report.isDone() && !m_budget.exceeded(); ++i) {
                 m_place.pushIndex(i);
                 walk(array.at(i), &items);
                 m_place.pop();
@@ -354,7 +354,7 @@ public:
             m_budget.charge(UnitsPerContainer);
             const QJsonObject object = value.toObject();
             TextReads members;
-            for (auto it = object.begin(); it != object.end() && !m_report.isDone(); ++it) {
+            for (auto it = object.begin(); it != object.end() && !m_report.isDone() && !m_budget.exceeded(); ++it) {
                 const QAnyStringView name = it.keyView();
                 m_place.pushName(name);
                 m_budget.charge(memberUnits(name) + members.next(name)
