@@ -915,6 +915,13 @@ private Q_SLOTS:
         QCOMPARE(compileSchema(parse("{" + big + "}").toObject(), false, compiled), QString());
         QCOMPARE(compiled.tableBytes, qint64(2 * 16384 * 16 + 5000 * (5 + 2 * 5)));
         QCOMPARE(tableUnits(compiled.tableBytes), qint64(4));
+        // The enum's strings are in its table alone, not in its lists too.
+        const auto hashed = std::find_if(compiled.nodes.begin(), compiled.nodes.end(), [](const Node& node) {
+            return !node.enumTable.isEmpty();
+        });
+        QVERIFY(hashed != compiled.nodes.end());
+        QVERIFY(hashed->enumStrings.isEmpty());
+        QVERIFY(hashed->enumUtf8.isEmpty());
         // Those of properties: two names of one letter each.
         QCOMPARE(compileSchema(parse("{'properties': {'a': {}, 'b': {}}}").toObject(), false, compiled), QString());
         QCOMPARE(compiled.tableBytes, qint64(2 * 8 * 16 + 2 * (1 + 2)));
