@@ -546,31 +546,31 @@ private Q_SLOTS:
              "dependentSchemas member by its pointer, which jsoncons files under another name and does not resolve "
              "(an $anchor there resolves)"},
             // jsoncons percent-decodes a location to read it as a JSON
-            // pointer. When a "%7E" in it decodes to a "~" followed by
-            // neither "0" nor "1", it reads the location as an anchor's name
-            // instead, and compiled the member apart from the schema, where a
-            // $ref named another subschema than here, and the first row's
-            // recursed until the stack overflowed at validate(). Such a name
-            // is refused wherever it is.
+            // pointer. When a "%7E" or "%7e" in it decodes to a "~" followed
+            // by neither "0" nor "1", it reads the location as an anchor's
+            // name instead. Before this check, it then compiled the member
+            // apart from the schema, where a $ref named another subschema
+            // than here, and the first row's recursed until the stack
+            // overflowed at validate(). Such a name is refused wherever it is.
             {"{\"properties\": {\"a%7E2\": {\"properties\": {\"x\": {\"$ref\": \"#\"}}}}}",
              "/properties/a%7E2: jsoncons percent-encodes the name \"a%7E2\" into a location that decodes to a \"~\" "
-             "followed by neither \"0\" nor "
-             "\"1\", so it reads that location as an anchor's name, not a JSON pointer (rename the member)"},
+             "followed by neither \"0\" nor \"1\", so it reads that location as an anchor's name, not a JSON pointer "
+             "(rename the member)"},
             {"{\"$defs\": {\"d%7e\": {}}, \"properties\": {\"y\": {\"type\": \"integer\"}}}",
-             "/$defs/d%7e: jsoncons percent-encodes the name \"d%7e\" into a location that decodes to a \"~\" followed "
-             "by neither \"0\" nor "
-             "\"1\", so it reads that location as an anchor's name, not a JSON pointer (rename the member)"},
+             "/$defs/d%7e: jsoncons percent-encodes the name \"d%7e\" into a location that decodes to a \"~\" "
+             "followed by neither \"0\" nor \"1\", so it reads that location as an anchor's name, not a JSON pointer "
+             "(rename the member)"},
             // jsoncons writes a byte below 0x10 among the last two characters
             // with one hex digit, so U+0007 then "E" or "e" becomes "%7E" or
             // "%7e".
             {"{\"properties\": {\"\\u0007E\": {\"properties\": {\"x\": {\"$ref\": \"#\"}}}}}",
              "/properties/\\u0007E: jsoncons percent-encodes the name \"\\u0007E\" into a location that decodes to a "
-             "\"~\" followed by neither \"0\" nor "
-             "\"1\", so it reads that location as an anchor's name, not a JSON pointer (rename the member)"},
+             "\"~\" followed by neither \"0\" nor \"1\", so it reads that location as an anchor's name, not a JSON "
+             "pointer (rename the member)"},
             {"{\"$defs\": {\"x\\u0007e\": {}}}",
              "/$defs/x\\u0007e: jsoncons percent-encodes the name \"x\\u0007e\" into a location that decodes to a "
-             "\"~\" followed by neither \"0\" nor "
-             "\"1\", so it reads that location as an anchor's name, not a JSON pointer (rename the member)"},
+             "\"~\" followed by neither \"0\" nor \"1\", so it reads that location as an anchor's name, not a JSON "
+             "pointer (rename the member)"},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};

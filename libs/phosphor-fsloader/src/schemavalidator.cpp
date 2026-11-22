@@ -721,11 +721,11 @@ private:
                     // JSON pointer, and takes one that does not read as one
                     // for an anchor's name. A "%7E" or "%7e" in the name, or
                     // a U+0007 then an "E" or "e" at its end that it encodes
-                    // as one, decodes to a "~" that can be followed by
-                    // neither "0" nor "1". Then it
-                    // compiles the member and what is below it apart from the
-                    // schema, where a $ref resolves to another subschema than
-                    // this check finds.
+                    // as one, decodes to a "~", and when that "~" is followed
+                    // by neither "0" nor "1" the location does not read as a
+                    // JSON pointer. Then jsoncons compiles the member and what
+                    // is below it apart from the schema, where a $ref resolves
+                    // to another subschema than this check finds.
                     if (memberLocation.has_plain_name_fragment()) {
                         errors.add(
                             memberPointer,
