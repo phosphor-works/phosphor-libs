@@ -1056,6 +1056,30 @@ private Q_SLOTS:
                      QStringList{QStringLiteral(": is too large for the server to check against the schema")});
             QVERIFY2(stopped.work - MaxWork < 100, qPrintable(QString::number(stopped.work - MaxWork)));
         }
+
+        // The walk before the check stops at the bound too, in the middle of
+        // an array or an object, and not at its end. A value that a handler
+        // built: 1000 items that share the storage of one array of 20000
+        // integers, or of one object of 20000 members, 60 million units to
+        // walk or more, held in the memory of one.
+        QJsonArray integerArray;
+        QJsonObject integerObject;
+        for (int i = 0; i < 20000; ++i) {
+            integerArray.append(i);
+            integerObject.insert(QString::number(i), i);
+        }
+        QJsonArray arrays;
+        QJsonArray objects;
+        for (int i = 0; i < 1000; ++i) {
+            arrays.append(integerArray);
+            objects.append(integerObject);
+        }
+        for (const QJsonArray& shared : {arrays, objects}) {
+            const Counts stopped = count(QJsonObject(), shared);
+            QCOMPARE(stopped.lines,
+                     QStringList{QStringLiteral(": is too large for the server to check against the schema")});
+            QVERIFY2(stopped.work - MaxWork < 100, qPrintable(QString::number(stopped.work - MaxWork)));
+        }
     }
 
     void objectsCompareWhateverTheirOrder()
