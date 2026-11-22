@@ -58,12 +58,13 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # kept the result of a check of the headers, or that a development build
 # of phosphor-fsloader set to warn once about these, go silently.
 # VALIJSON_INCLUDE_DIR was phosphor-fsloader's too, which may have removed
-# it first in the tree. Only the library's own entries go. The others stay,
-# in a build directory of the library alone too, where nothing reads them:
-# JSONCONS_INCLUDE_DIR, which phosphor-fsloader reads in the tree, and the
-# entries of cmake/PhosphorDependencies.cmake, which fetched valijson
-# (PHOSPHOR_DEPS_ARCHIVES, CPM_PACKAGES, CPM_PACKAGE_valijson_*), and which
-# other libraries of the tree use.
+# it first in the tree. Other entries stay: JSONCONS_INCLUDE_DIR, which
+# phosphor-fsloader reads in the tree, and those that
+# cmake/PhosphorDependencies.cmake set when it fetched valijson
+# (PHOSPHOR_DEPS_ARCHIVES, and CPM's and FetchContent's entries,
+# CPM_PACKAGE_valijson_* among them), since the tree's other libraries fetch
+# through that file. In a build directory of the library alone nothing reads
+# them.
 foreach(_phosphormcp_old PHOSPHORMCP_USE_SYSTEM_VALIJSON PHOSPHORMCP_VALIJSON_INCLUDE_DIR VALIJSON_INCLUDE_DIR
         PHOSPHORMCP_USE_SYSTEM_JSONCONS)
     if(DEFINED CACHE{${_phosphormcp_old}})
@@ -131,9 +132,13 @@ set_target_properties(PhosphorMcpSchemaChecker PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
     # The anonymous namespaces of the checker's files must stay apart.
     UNITY_BUILD OFF
-    # No QObject in the checker, so no empty mocs_compilation.cpp in the
-    # library and in test_phosphor_mcp_checkwork.
+    # No QObject, form or resource in the checker, so no autogen step, and
+    # no empty mocs_compilation.cpp in the library and in
+    # test_phosphor_mcp_checkwork, also in the tree, which turns all three
+    # on.
     AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
 )
 
 add_library(PhosphorMcp SHARED
