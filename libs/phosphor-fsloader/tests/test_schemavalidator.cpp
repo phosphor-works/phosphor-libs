@@ -507,16 +507,44 @@ private Q_SLOTS:
             {"{\"contentSchema\": {\"$anchor\": \"a\"}, \"properties\": {\"x\": {\"$ref\": \"#a\"}}}",
              "/properties/x/$ref: $ref \"#a\" names a subschema of contentSchema, which jsoncons does not compile "
              "(2020-12 makes contentSchema an annotation)"},
-            // jsoncons compiles items beside prefixItems as additionalItems,
-            // so nothing below it can be named by its pointer.
+            // jsoncons files items beside prefixItems as additionalItems, and
+            // a member of patternProperties or dependentSchemas without the
+            // member's name, so nothing below those can be named by its
+            // pointer. jsoncons threw on the first two, and resolved the
+            // others to another subschema: a wrong verdict, and for the last
+            // two a $ref to the `not` that holds it, which recursed until the
+            // stack overflowed at validate().
             {"{\"prefixItems\": [{}], \"items\": {\"properties\": {\"a\": {}}}, \"properties\": {\"x\": "
              "{\"$ref\": \"#/items/properties/a\"}}}",
-             "/properties/x/$ref: $ref \"#/items/properties/a\" names a subschema of items beside prefixItems by its "
-             "pointer, which jsoncons does not resolve (an $anchor there resolves)"},
+             "/properties/x/$ref: $ref \"#/items/properties/a\" names a subschema below items beside prefixItems by "
+             "its pointer, which jsoncons files under another name and does not resolve (an $anchor there "
+             "resolves)"},
             {"{\"$defs\": {\"d\": {\"prefixItems\": [{}], \"items\": {}}}, \"properties\": {\"x\": {\"$ref\": "
              "\"#/$defs/d/items\"}}}",
-             "/properties/x/$ref: $ref \"#/$defs/d/items\" names a subschema of items beside prefixItems by its "
-             "pointer, which jsoncons does not resolve (an $anchor there resolves)"},
+             "/properties/x/$ref: $ref \"#/$defs/d/items\" names a subschema below items beside prefixItems by its "
+             "pointer, which jsoncons files under another name and does not resolve (an $anchor there resolves)"},
+            {"{\"patternProperties\": {\"a\": {}}, \"properties\": {\"x\": {\"$ref\": \"#/patternProperties/a\"}}}",
+             "/properties/x/$ref: $ref \"#/patternProperties/a\" names a subschema below a patternProperties member "
+             "by its pointer, which jsoncons files under another name and does not resolve (an $anchor there "
+             "resolves)"},
+            {"{\"dependentSchemas\": {\"k\": {}}, \"properties\": {\"x\": {\"$ref\": \"#/dependentSchemas/k\"}}}",
+             "/properties/x/$ref: $ref \"#/dependentSchemas/k\" names a subschema below a dependentSchemas member by "
+             "its pointer, which jsoncons files under another name and does not resolve (an $anchor there "
+             "resolves)"},
+            {"{\"patternProperties\": {\"additionalProperties\": {\"type\": \"string\"}, \"^x\": "
+             "{\"additionalProperties\": {\"type\": \"integer\"}}}, \"properties\": {\"r\": {\"$ref\": "
+             "\"#/patternProperties/additionalProperties\"}}}",
+             "/properties/r/$ref: $ref \"#/patternProperties/additionalProperties\" names a subschema below a "
+             "patternProperties member by its pointer, which jsoncons files under another name and does not resolve "
+             "(an $anchor there resolves)"},
+            {"{\"patternProperties\": {\"not\": {}, \"^x\": {\"not\": {\"$ref\": \"#/patternProperties/not\"}}}}",
+             "/patternProperties/^x/not/$ref: $ref \"#/patternProperties/not\" names a subschema below a "
+             "patternProperties member by its pointer, which jsoncons files under another name and does not resolve "
+             "(an $anchor there resolves)"},
+            {"{\"dependentSchemas\": {\"not\": {}, \"k\": {\"not\": {\"$ref\": \"#/dependentSchemas/not\"}}}}",
+             "/dependentSchemas/k/not/$ref: $ref \"#/dependentSchemas/not\" names a subschema below a "
+             "dependentSchemas member by its pointer, which jsoncons files under another name and does not resolve "
+             "(an $anchor there resolves)"},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
@@ -537,6 +565,18 @@ private Q_SLOTS:
         const auto itemErrors = items.validate(parse(R"({"a": 1, "b": "x", "c": 2})"));
         QVERIFY(itemErrors.has_value());
         QCOMPARE(itemErrors->size(), 3);
+
+        // So does an $anchor below a member of patternProperties or of
+        // dependentSchemas.
+        const SchemaValidator members(
+            QByteArrayLiteral("{\"patternProperties\": {\"^p\": {\"$anchor\": \"p\", \"type\": \"string\"}}, "
+                              "\"dependentSchemas\": {\"k\": {\"$anchor\": \"k\", \"required\": [\"j\"]}}, "
+                              "\"properties\": {\"a\": {\"$ref\": \"#p\"}, \"b\": {\"$ref\": \"#k\"}}}"));
+        QVERIFY(members.isValid());
+        QVERIFY(!members.validate(parse(R"({"a": "x", "b": {"j": 1}})")).has_value());
+        const auto memberErrors = members.validate(parse(R"({"a": 1, "b": {}})"));
+        QVERIFY(memberErrors.has_value());
+        QCOMPARE(memberErrors->size(), 2);
 
         // An $id at the root is allowed, and a $ref by pointer or by anchor
         // resolves within the schema.
@@ -751,24 +791,54 @@ private Q_SLOTS:
         QCOMPARE(reasons->last().path, QStringLiteral("/dependentSchemas/k"));
         QCOMPARE(reasons->last().message, QStringLiteral("additionalProperties: Expected string, found integer"));
 
-        // jsoncons files the subschemas of "a{b" and "a%7Bb" under one
-        // percent-encoded pointer, so a recheck of either could compile the
-        // other and give its reason (here "Expected integer"). A member that
-        // fails either keeps jsoncons' line only.
-        const SchemaValidator shared(
-            QByteArrayLiteral("{\"properties\": {\"a{b\": {\"additionalProperties\": {\"maxLength\": 1}}, \"a%7Bb\": "
-                              "{\"additionalProperties\": {\"type\": \"integer\"}}}}"));
-        QVERIFY(shared.isValid());
-        for (const QString& name : {QStringLiteral("a{b"), QStringLiteral("a%7Bb")}) {
-            QJsonObject inner;
-            inner.insert(QStringLiteral("k"), QStringLiteral("abc"));
-            QJsonObject document;
-            document.insert(name, inner);
-            const auto lines = shared.validate(document);
-            QVERIFY(lines.has_value());
+        // jsoncons files some subschemas under one location and keeps the
+        // first, so a recheck of any could compile another and give its
+        // reason ("Expected integer" here, where the reason is the length).
+        // A member that fails one keeps jsoncons' line only. Such are two
+        // names it percent-encodes alike ("a{b" and "a%7Bb", and "a" with
+        // U+0001 then "0" against "a" with U+0010, since it writes a byte
+        // below 0x10 near the end with one hex digit), also below items
+        // beside prefixItems, which it files as additionalItems, and two
+        // patternProperties members, which it files without their names.
+        const auto keepsOnlyTheLine = [](const char* schema, const char* document) {
+            const SchemaValidator validator{QByteArray(schema)};
+            QVERIFY2(validator.isValid(), schema);
+            const QJsonDocument parsed = QJsonDocument::fromJson(document);
+            const auto lines =
+                validator.validate(parsed.isArray() ? QJsonValue(parsed.array()) : QJsonValue(parsed.object()));
+            QVERIFY2(lines.has_value(), document);
             QCOMPARE(lines->size(), 1);
             QCOMPARE(lines->first().message, QStringLiteral("Additional property 'k' found but was invalid."));
-        }
+        };
+        const char* const encodedAlike =
+            "{\"properties\": {\"a{b\": {\"additionalProperties\": {\"maxLength\": 1}}, \"a%7Bb\": "
+            "{\"additionalProperties\": {\"type\": \"integer\"}}}}";
+        keepsOnlyTheLine(encodedAlike, "{\"a{b\": {\"k\": \"abc\"}}");
+        keepsOnlyTheLine(encodedAlike, "{\"a%7Bb\": {\"k\": \"abc\"}}");
+        keepsOnlyTheLine(
+            "{\"properties\": {\"a\\u00010\": {\"additionalProperties\": {\"type\": \"integer\"}}, "
+            "\"a\\u0010\": {\"additionalProperties\": {\"maxLength\": 1}}}}",
+            "{\"a\\u0010\": {\"k\": \"abc\"}}");
+        keepsOnlyTheLine(
+            "{\"prefixItems\": [{}], \"items\": {\"properties\": {\"a{b\": {\"additionalProperties\": "
+            "{\"maxLength\": 1}}, \"a%7Bb\": {\"additionalProperties\": {\"type\": \"integer\"}}}}}",
+            "[0, {\"a{b\": {\"k\": \"abc\"}}]");
+        keepsOnlyTheLine(
+            "{\"patternProperties\": {\"^a\": {\"additionalProperties\": {\"type\": \"integer\"}}, "
+            "\"^b\": {\"additionalProperties\": {\"maxLength\": 1}}}}",
+            "{\"bx\": {\"k\": \"abc\"}}");
+
+        // Names that decode alike but that jsoncons keeps apart, since it
+        // keeps an existing %XX as written, are each rechecked.
+        const SchemaValidator apart(
+            QByteArrayLiteral("{\"properties\": {\"aA\": {\"additionalProperties\": {\"maxLength\": 1}}, \"a%41\": "
+                              "{\"additionalProperties\": {\"type\": \"integer\"}}}}"));
+        QVERIFY(apart.isValid());
+        const auto apartReasons = apart.validate(parse("{\"aA\": {\"k\": \"abc\"}}"));
+        QVERIFY(apartReasons.has_value());
+        QCOMPARE(apartReasons->size(), 2);
+        QCOMPARE(apartReasons->last().message,
+                 QStringLiteral("additionalProperties: Number of characters must be at most 1"));
     }
 
     void rechecksAreKeptAcrossCallsAndThreads()
@@ -1060,6 +1130,16 @@ private Q_SLOTS:
         QCOMPARE(errors->first().message.size(), 501);
         QVERIFY(errors->first().message.startsWith(QStringLiteral("schema refused at /properties/nnn")));
         QVERIFY(errors->first().message.endsWith(QChar(0x2026)));
+
+        // Nor is an escape in it split: the newline's escape would cross the
+        // limit, so the refusal stops before it.
+        const SchemaValidator escaped("{\"properties\": {\"" + QByteArray(468, 'n') + "\\n" + QByteArray(20, 'n')
+                                      + "\": {\"$ref\": \"#/$defs/x\"}}}");
+        QVERIFY(!escaped.isValid());
+        errors = escaped.validate(QJsonValue(1));
+        QVERIFY(errors.has_value());
+        QCOMPARE(errors->first().message,
+                 QStringLiteral("schema refused at /properties/") + QString(468, u'n') + QChar(0x2026));
     }
 
     void errorsEscapeWhatCouldForgeALogLine()

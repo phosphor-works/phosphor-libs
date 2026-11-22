@@ -252,11 +252,12 @@ parse(mesh->bytes);
 - References stay within the schema. A `$ref` is `#`, `#/<JSON pointer>` or
   `#<anchor>`, not percent-encoded, and names one of its subschemas. An
   `$anchor` is defined once, `$id` appears at the root only, and
-  `$dynamicRef` and `$dynamicAnchor` are refused. jsoncons cannot resolve
-  two kinds of `$ref`, which are refused too. One names a subschema of
-  `contentSchema`, which jsoncons does not compile. The other names a
-  subschema of `items` beside `prefixItems` by its pointer, since jsoncons
-  compiles that `items` as `additionalItems` (an `$anchor` there resolves).
+  `$dynamicRef` and `$dynamicAnchor` are refused. A `$ref` that jsoncons
+  cannot resolve is refused too. Such is one into `contentSchema`, which
+  jsoncons does not compile. Such is also one by pointer below `items`
+  beside `prefixItems`, which jsoncons files as `additionalItems`, or below
+  a member of `patternProperties` or `dependentSchemas`, which it files
+  without the member's name. An `$anchor` below those resolves.
 - A `$ref` that leads back to its own schema without descending into the
   document is refused, even in a `$defs` entry nothing uses, since jsoncons
   would recurse on it until the stack overflowed. That is a `$ref` back
@@ -303,9 +304,10 @@ parse(mesh->bytes);
   triggered it (`/a/c` for member `c`, when `a` triggered it), as jsoncons
   reports it. A member that fails an `additionalProperties` subschema there
   keeps jsoncons' line only, since that location does not name the object
-  validated. So does one that fails a subschema whose name, once
-  percent-decoded, is another's of the same map (`a{b` and `a%7Bb`), since
-  jsoncons files the two under one name.
+  validated. So does one that fails a subschema that jsoncons files under
+  the same location as another, since it keeps only the first of them.
+  Two members of `patternProperties` holding `additionalProperties` share
+  one, and so do two names it percent-encodes alike (`a{b` and `a%7Bb`).
 - In a path or a message, each C0 and C1 control character, DEL, U+2028,
   U+2029 and each bidirectional control (U+202A to U+202E, U+2066 to U+2069)
   is written as `\uXXXX`, so a member name or a quoted string from a data

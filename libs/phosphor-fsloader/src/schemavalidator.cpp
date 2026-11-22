@@ -12,6 +12,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QScopeGuard>
 #include <QtCore/QSet>
 #include <QtCore/QString>
 
@@ -110,6 +111,29 @@ QString shown(QStringView text, qsizetype limit = -1)
         }
     }
     return result;
+}
+
+/// @p text, already as shown() writes it, cut as shown() cuts: to at most
+/// @p limit code units, never between the two halves of a surrogate pair nor
+/// inside a \uXXXX escape, and an ellipsis appended. A refusal is built from
+/// a path and a message each shown() already, so it is cut this way.
+QString cutShown(const QString& text, qsizetype limit)
+{
+    if (text.size() <= limit) {
+        return text;
+    }
+    qsizetype end = limit;
+    if (QChar::isHighSurrogate(text.at(end - 1).unicode()) && QChar::isLowSurrogate(text.at(end).unicode())) {
+        --end;
+    }
+    for (qsizetype back = 1; back <= 5 && back <= end; ++back) {
+        const qsizetype start = end - back;
+        if (text.at(start) == u'\\' && start + 1 < text.size() && text.at(start + 1) == u'u') {
+            end = start;
+            break;
+        }
+    }
+    return text.left(end) + QChar(0x2026);
 }
 
 /// One JSON Pointer reference token, escaped as jsoncons escapes them ("~" to
@@ -558,7 +582,7 @@ public:
         if (m_rootId.endsWith(QChar(u'#'))) {
             m_rootId.chop(1);
         }
-        add(root, QString(), errors);
+        add(root, QString(), jsonschema::uri_wrapper(std::string("https://jsoncons.com#")), errors);
         if (!errors.isEmpty()) {
             return;
         }
@@ -570,27 +594,24 @@ public:
         }
     }
 
-    // The pointers that two subschemas share once percent-decoded. jsoncons
-    // files a subschema under its percent-encoded pointer and keeps the
-    // first of two equal ones, so of the names "a{b" and "a%7Bb" in one map,
-    // a recheck of either compiles the same subschema. Empty unless a
-    // pointer holds a '%'.
-    QSet<QByteArray> sharedPointers() const
+    // The locations, as jsoncons writes them, that more than one subschema
+    // is filed under. jsoncons keeps the first subschema of a location, so a
+    // recheck of any of them could compile another. Two members of
+    // patternProperties, or of dependentSchemas, holding the same keyword
+    // share one, since jsoncons leaves out the member's name. So do two
+    // names it percent-encodes alike ("a{b" and "a%7Bb").
+    QSet<QByteArray> sharedLocations() const
     {
-        const bool anyPercent = std::any_of(m_nodes.begin(), m_nodes.end(), [](const Node& node) {
-            return node.pointer.contains(QChar(u'%'));
-        });
-        QSet<QByteArray> shared;
-        if (!anyPercent) {
-            return shared;
-        }
         QSet<QByteArray> seen;
+        QSet<QByteArray> shared;
         for (const Node& node : m_nodes) {
-            const QByteArray decoded = QByteArray::fromPercentEncoding(node.pointer.toUtf8());
-            if (seen.contains(decoded)) {
-                shared.insert(decoded);
+            if (node.unnamed == Unnamed::InContentSchema) {
+                continue;
+            }
+            if (seen.contains(node.location)) {
+                shared.insert(node.location);
             } else {
-                seen.insert(decoded);
+                seen.insert(node.location);
             }
         }
         return shared;
@@ -599,13 +620,16 @@ public:
 private:
     // Subschemas jsoncons cannot resolve a $ref to. It does not compile
     // contentSchema (2020-12 makes it an annotation), so nothing below it can
-    // be named. It compiles items beside prefixItems under the name
-    // additionalItems, so nothing below it can be named by its pointer, but
-    // an $anchor there resolves.
+    // be named. It files items beside prefixItems as additionalItems, and a
+    // member of patternProperties or dependentSchemas without the member's
+    // name, so nothing below those can be named by its pointer, but an
+    // $anchor there resolves.
     enum class Unnamed : quint8 {
         No,
         InContentSchema,
         ByPointerInItems,
+        ByPointerInPatternProperties,
+        ByPointerInDependentSchemas,
     };
 
     struct Node
@@ -615,18 +639,23 @@ private:
         std::vector<int> inPlace; // the subschemas that apply to the same value
         int reference = -1; // the subschema its $ref names
         Unnamed unnamed = Unnamed::No;
+        QByteArray location; // the fragment jsoncons files it under, encoded
     };
 
     // Adds the schema at `pointer` and every subschema below it, as
     // checkDialect walks them. Returns its index, or -1 for a value that is
     // not a schema (which the meta-schema has refused already).
-    int add(const QJsonValue& schema, const QString& pointer, ErrorList& errors, Unnamed unnamed = Unnamed::No)
+    // `location` is where jsoncons files it, built as jsoncons builds it.
+    int add(const QJsonValue& schema, const QString& pointer, const jsonschema::uri_wrapper& location,
+            ErrorList& errors, Unnamed unnamed = Unnamed::No)
     {
         if (!schema.isObject() && !schema.isBool()) {
             return -1;
         }
         const int index = int(m_nodes.size());
-        m_nodes.push_back(Node{schema.toObject(), pointer, {}, -1, unnamed});
+        const jsoncons::string_view fragment = location.uri().encoded_fragment();
+        m_nodes.push_back(
+            Node{schema.toObject(), pointer, {}, -1, unnamed, QByteArray(fragment.data(), qsizetype(fragment.size()))});
         m_byPointer.insert(pointer, index);
         const QJsonObject object = schema.toObject();
         if (const QJsonValue anchor = object.value(QLatin1StringView("$anchor")); anchor.isString()) {
@@ -643,30 +672,46 @@ private:
             const QString keyword = it.key();
             const QString at = pointer + QChar(u'/') + pointerToken(keyword);
             const bool inPlace = isInPlaceKeyword(keyword, object);
+            const std::string keywordUtf8 = keyword.toStdString();
+            // jsoncons' names for what it compiles below this keyword
+            // (keyword_validator_factory.hpp).
             Unnamed below = unnamed;
+            jsonschema::uri_wrapper keywordLocation = location.append(keywordUtf8);
+            bool memberNamed = true;
             if (keyword == QLatin1StringView("contentSchema")) {
                 below = Unnamed::InContentSchema;
-            } else if (below == Unnamed::No && keyword == QLatin1StringView("items")
-                       && object.contains(QLatin1StringView("prefixItems"))) {
-                below = Unnamed::ByPointerInItems;
+            } else if (keyword == QLatin1StringView("items") && object.contains(QLatin1StringView("prefixItems"))) {
+                keywordLocation = location.append(std::string("additionalItems"));
+                if (below == Unnamed::No) {
+                    below = Unnamed::ByPointerInItems;
+                }
+            } else if (keyword == QLatin1StringView("patternProperties")
+                       || keyword == QLatin1StringView("dependentSchemas")) {
+                memberNamed = false;
+                if (below == Unnamed::No) {
+                    below = keyword == QLatin1StringView("patternProperties") ? Unnamed::ByPointerInPatternProperties
+                                                                              : Unnamed::ByPointerInDependentSchemas;
+                }
             }
-            const auto child = [&](const QJsonValue& value, const QString& childPointer) {
-                const int added = add(value, childPointer, errors, below);
+            const auto child = [&](const QJsonValue& value, const QString& childPointer,
+                                   const jsonschema::uri_wrapper& childLocation) {
+                const int added = add(value, childPointer, childLocation, errors, below);
                 if (inPlace && added >= 0) {
                     m_nodes[std::size_t(index)].inPlace.push_back(added);
                 }
             };
             if (isSubschemaKeyword(keyword)) {
-                child(it.value(), at);
+                child(it.value(), at, keywordLocation);
             } else if (isSubschemaMapKeyword(keyword) && it.value().isObject()) {
                 const QJsonObject members = it.value().toObject();
                 for (auto member = members.constBegin(); member != members.constEnd(); ++member) {
-                    child(member.value(), at + QChar(u'/') + pointerToken(member.key()));
+                    child(member.value(), at + QChar(u'/') + pointerToken(member.key()),
+                          memberNamed ? keywordLocation.append(member.key().toStdString()) : keywordLocation);
                 }
             } else if (isSubschemaArrayKeyword(keyword) && it.value().isArray()) {
                 const QJsonArray items = it.value().toArray();
                 for (qsizetype i = 0; i < items.size(); ++i) {
-                    child(items.at(i), at + QChar(u'/') + QString::number(i));
+                    child(items.at(i), at + QChar(u'/') + QString::number(i), keywordLocation.append(std::size_t(i)));
                 }
             }
         }
@@ -718,11 +763,14 @@ private:
                            .arg(reference));
             return;
         }
-        if (unnamed == Unnamed::ByPointerInItems && isPointer) {
+        if (unnamed != Unnamed::No && isPointer) {
+            const QString below = unnamed == Unnamed::ByPointerInItems ? QStringLiteral("items beside prefixItems")
+                : unnamed == Unnamed::ByPointerInPatternProperties     ? QStringLiteral("a patternProperties member")
+                                                                       : QStringLiteral("a dependentSchemas member");
             errors.add(at,
-                       QStringLiteral("$ref \"%1\" names a subschema of items beside prefixItems by its pointer, "
-                                      "which jsoncons does not resolve (an $anchor there resolves)")
-                           .arg(reference));
+                       QStringLiteral("$ref \"%1\" names a subschema below %2 by its pointer, which jsoncons "
+                                      "files under another name and does not resolve (an $anchor there resolves)")
+                           .arg(reference, below));
             return;
         }
         node.reference = *found;
@@ -1003,11 +1051,11 @@ struct SchemaValidator::Private
     std::mutex recheckMutex;
     std::map<std::string, std::shared_ptr<const CompiledSchema>> keptRechecks;
 
-    // The subschemas' pointers, percent-decoded, that jsoncons files two
-    // subschemas under (ReferenceCheck::sharedPointers). A recheck of one of
-    // them could compile the other and give a wrong reason, so a member that
-    // fails one keeps jsoncons' line.
-    QSet<QByteArray> sharedPointers;
+    // The locations jsoncons files more than one subschema under
+    // (ReferenceCheck::sharedLocations). A recheck of one of them could
+    // compile another and give a wrong reason, so a member that fails one
+    // keeps jsoncons' line.
+    QSet<QByteArray> sharedLocations;
 
     // The subschema at `fragment` as a schema of its own: a copy of the whole
     // schema whose root is a $ref to it. Null when it does not compile.
@@ -1055,6 +1103,11 @@ struct SchemaValidator::Private
 SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
     : d(std::make_unique<Private>())
 {
+    // A refusal holds a path and a message, each up to 501 code units, so it
+    // is cut once more, on whichever return the constructor takes.
+    const auto cutRefusal = qScopeGuard([this] {
+        d->compileError = cutShown(d->compileError, kMaxTextLength);
+    });
     // Qt reads the text, as it reads the documents: comments are refused, and
     // of two members with one name the last is kept, as Python's json module
     // keeps it in CI.
@@ -1138,7 +1191,7 @@ SchemaValidator::SchemaValidator(const QByteArray& schemaJson)
             d->compileError = QStringLiteral("schema refused at %1").arg(problems.summary());
             return;
         }
-        d->sharedPointers = references.sharedPointers();
+        d->sharedLocations = references.sharedLocations();
         Json recheck = schema;
         recheck.erase("$schema");
         recheck.insert_or_assign("$id", std::string(kRecheckId));
@@ -1185,9 +1238,7 @@ std::optional<QList<SchemaValidator::Error>> SchemaValidator::validate(const QJs
         return QList<Error>{Error{QString(), QStringLiteral("schema validator was moved from")}};
     }
     if (!d->schema) {
-        // A refusal holds a path and a message, each of up to 501 code
-        // units, and so is cut again.
-        return QList<Error>{Error{QString(), shown(d->compileError, kMaxTextLength)}};
+        return QList<Error>{Error{QString(), d->compileError}};
     }
 
     // A guard, which no input known reaches: validation with a reporter does
@@ -1213,9 +1264,8 @@ std::optional<QList<SchemaValidator::Error>> SchemaValidator::validate(const QJs
                 return;
             }
             const jsoncons::string_view fragment = message.schema_location().encoded_fragment();
-            if (!d->sharedPointers.isEmpty()
-                && d->sharedPointers.contains(
-                    QByteArray::fromPercentEncoding(QByteArray(fragment.data(), qsizetype(fragment.size()))))) {
+            if (!d->sharedLocations.isEmpty()
+                && d->sharedLocations.contains(QByteArray(fragment.data(), qsizetype(fragment.size())))) {
                 return;
             }
             const std::shared_ptr<const CompiledSchema> subschema =

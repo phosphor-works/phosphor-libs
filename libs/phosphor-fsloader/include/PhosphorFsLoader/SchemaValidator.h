@@ -52,12 +52,13 @@ namespace PhosphorFsLoader {
  *   @c "#", @c "#/<JSON pointer>" or @c "#<anchor>", not percent-encoded,
  *   and names one of the schema's subschemas. An @c $anchor is defined once.
  *   @c $id is allowed at the root only, and @c $dynamicRef and
- *   @c $dynamicAnchor are refused. jsoncons cannot resolve two kinds of
- *   @c $ref, which are refused too. One names a subschema of
- *   @c contentSchema, which jsoncons does not compile (2020-12 makes it an
- *   annotation). The other names a subschema of @c items beside
- *   @c prefixItems by its pointer, since jsoncons compiles that @c items as
- *   @c additionalItems (an @c $anchor there resolves).
+ *   @c $dynamicAnchor are refused. A @c $ref that jsoncons cannot resolve
+ *   is refused too. Such is one into @c contentSchema, which jsoncons does
+ *   not compile (2020-12 makes it an annotation). Such is also one by
+ *   pointer below @c items beside @c prefixItems, which jsoncons files as
+ *   @c additionalItems, or below a member of @c patternProperties or
+ *   @c dependentSchemas, which it files without the member's name. An
+ *   @c $anchor below those resolves.
  * - No @c $ref that leads back to its own schema without descending into the
  *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
  *   @c then and @c else beside an @c if (2020-12 ignores them without one),
@@ -123,10 +124,12 @@ public:
         /// @c additionalProperties subschema below @c dependentSchemas keeps
         /// jsoncons' line only, without the reasons @c message describes,
         /// since that location does not name the object validated. So does
-        /// one that fails a subschema whose name, once percent-decoded, is
-        /// another's of the same map ("a{b" and "a%7Bb"), which jsoncons
-        /// files under one name. The characters that could forge a log line
-        /// are escaped in the path, as in @c message.
+        /// one that fails a subschema that jsoncons files under the same
+        /// location as another, since it keeps only the first of them: two
+        /// members of @c patternProperties holding @c additionalProperties,
+        /// or two names it percent-encodes alike ("a{b" and "a%7Bb"). The
+        /// characters that could forge a log line are escaped in the path,
+        /// as in @c message.
         QString path;
 
         /// Human-readable description of why the node failed. The reasons
