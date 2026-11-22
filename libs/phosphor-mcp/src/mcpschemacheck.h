@@ -26,10 +26,12 @@ namespace PhosphorMcp::Schema {
 // units of a string or a name, or fewer, read, compared or hashed, a word
 // of an annotation set merged, an error built), weighted by what it costs.
 // A sweep of each charge, with short and long text in each encoding,
-// numbers of each kind, and large and deep schemas, measured at most 16 ns
-// a unit, some 1.35 times the 12 ns a unit of a list of integers checked
-// for their type. The check stops the moment the count passes MaxWork, in
-// some 0.6 s at the most measured. The README has the measured times.
+// numbers of each kind, large and deep schemas, and tables of the schema of
+// up to a million entries, measured at most 16 ns a unit, some 1.55 times
+// (1.6 in a single run) the 10 ns a unit of a list of integers checked for
+// their type by the same build beside it. The check stops the moment the
+// count passes MaxWork, in some 0.6 s at the most measured. The README has
+// the measured times.
 constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
 // goes: the sets of the members and items that subschemas evaluated (for
@@ -141,7 +143,11 @@ qint64 tableUnits(qint64 bytes);
 qint64 hashUnits(QAnyStringView text);
 qint64 compareUnits(QAnyStringView a, QAnyStringView b);
 qint64 equalUnits(QAnyStringView a, QAnyStringView b);
-// Decoded to UTF-16, for a JSON pointer.
+// Decoded to UTF-16, for a JSON pointer. The text of an error's pointer,
+// decoded, scanned, written again and hashed, is the one exception to the
+// rounding up of textUnits(): it is charged for each whole CharactersPerUnit,
+// since the error (UnitsPerError) and each of its tokens (UnitsPerToken, or
+// UnitsPerShownToken for a line) are charged units of their own beside it.
 qint64 decodeUnits(QAnyStringView text);
 
 // The names and strings of one object or array read one after the other:

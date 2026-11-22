@@ -226,14 +226,17 @@ a release build. A sweep that drives each charge of the checker with the
 shapes that make it dominate, in each encoding that Qt keeps text in, with
 short and long strings and names (around each sixteen code units), with
 numbers of each kind, with large schemas and checks deep in them, with
-names in random order, and with strings and other values taken out of
-their arrays and objects and compared far apart, measured at most 16 ns a
-unit for a check of a millisecond or more, some 1.35 times what a list of
-integers checked for their type measures beside it (12 ns a unit on a
-loaded machine), and the shapes below measure as much. A check of less
-than a millisecond pays fixed costs too, such as the first use of the
-stack, and nothing that grows with the arguments. The bound is 40 million
-units, under a second whatever the schema and the arguments.
+names in random order, with strings and other values taken out of their
+arrays and objects and compared far apart, and with tables of the schema
+of up to a million entries, measured at most 16 ns a unit for a check of a
+millisecond or more. That is some 1.55 times what a list of integers
+checked for their type measures beside it in the same build (10 ns a
+unit), and 1.6 times in a single run. The dearest read an object or an
+array of 16 MiB again for each of 40 or 50 subschemas, as fast as memory
+gives it, and the shapes below measure as much. A check of less than a
+millisecond pays fixed costs too, such as the first use of the stack, and
+nothing that grows with the arguments. The bound is 40 million units,
+under a second whatever the schema and the arguments.
 
 Strings and names are read where Qt's parser keeps them, and never decoded
 to be compared, hashed or counted, not even the names that `propertyNames`
@@ -263,15 +266,23 @@ unit more than one applied to a member or an item. Each subschema applied
 costs a unit more again once the schema's subschemas and the check's own
 frames (a kilobyte for each subschema it is in) come to 256 KiB, and one
 more at each fourfold, up to 3, since the caches no longer hold them. A
+string looked up in an `enum` of more than eight strings, a name looked up
+in `properties` or in the triggers of `dependentRequired`, and the names
+of each trigger of `dependentRequired` that an object has, cost 4 units
+more once the tables of the whole schema come to 256 KiB, and twice as
+many at each fourfold, up to 16, since each lookup then misses the caches.
+The schema sets the size of its tables, and the server does not cap it. A
 name is decoded, and its `~` and `/` escaped, only for the JSON pointer of
 an error, once for all the errors at its place and below it while the
-check stays there, and again when it comes back. The memory the check
-holds beyond the arguments and the schema is counted too, up to 64 MiB. It
-holds the sets of members and items that `unevaluatedProperties` and
-`unevaluatedItems` read, the keys that `uniqueItems` sorts, and the index
-of an object's names that `required`, `dependentRequired` and
-`dependentSchemas` look names up in. The list of errors is capped as
-above.
+check stays there, and again when it comes back. The text of a pointer is
+charged for each whole sixteen code units, not rounded up as other text
+is, since the error and each of its tokens are charged units of their own
+besides. The memory the check holds beyond the arguments and the schema is
+counted too, up to 64 MiB. It holds the sets of members and items that
+`unevaluatedProperties` and `unevaluatedItems` read, the keys that
+`uniqueItems` sorts, and the index of an object's names that `required`,
+`dependentRequired` and `dependentSchemas` look names up in. The list of
+errors is capped as above.
 
 A check is also stopped 3000 subschemas deep, and when its own frames
 take 4 MiB of stack, half of what a Linux thread has by default. Each
@@ -306,6 +317,9 @@ sizes that a debug build with sanitizers checks in seconds.
 | `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.02 s |
 | `allOf` of 300 `required` | an object of 1,000,000 members | valid | 0.12 s |
 | `dependentRequired` of 2000 triggers | 1,000,000 empty objects | valid | 0.08 s |
+| `enum` of 100,000 strings | 1,000,000 of its strings | valid | 0.21 s |
+| `allOf` of 8 `enum`s of 100,000 strings | 600,000 strings that each holds | too large to check | 0.36 s |
+| `dependentRequired` of 100,000 triggers, each requiring itself | 900,000 objects of one trigger | too large to check | 0.32 s |
 | `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.08 s |
 | the same | 1,000,000 members written in random order | valid | 0.25 s |
 | `allOf` of 50 `additionalProperties` | 300,000 members named with CJK characters | too large to check | 0.34 s |
@@ -675,27 +689,31 @@ name a property twice. Names in `properties`, `required`,
 `dependentRequired`, `dependentSchemas` and `$defs`, and the strings and
 member names in `enum` and `const`, may not hold an unpaired UTF-16
 surrogate. No argument that holds one gets to the check, and no URI
-reaches such a name. A number in `enum`, `const` or a bound must be
-finite. A whole number there past the range of a 64-bit integer is refused
-when `tools/list` would send it rounded to another integer, as Qt writes
-it, so that a client compares with the number the server does. 2^63 is
-sent as 9223372036854776000, and a client that reads integers exactly, as
-Python does, reads that integer. 1e19 and 1e300 are sent with an exponent,
-and read as the same double. A Draft 4 boolean `exclusiveMinimum` and an
-unknown type name are refused as well. Names inside `properties`, `$defs`,
-`dependentRequired` and `dependentSchemas`, and values inside `enum`,
-`const`, `default` and `examples`, are data, not keywords. A tool without
-an input schema takes no arguments, as with `{"type": "object",
-"additionalProperties": false}`.
+reaches such a name. A number in `enum`, `const`, a bound or `multipleOf`
+must be finite. A whole number there is refused when `tools/list` would
+send it rounded to another integer, as Qt writes it, so that a client
+compares with the number the server does. Qt writes a double in its
+shortest form, so 2^63 is sent as 9223372036854776000, and a client that
+reads integers exactly, as Python does, reads that integer. A whole number
+within the range of a 64-bit integer that an application built in C++ as a
+double is sent the same way, so `QJsonValue(4611686018427387904.0)`, which
+is 2^62, is sent as 4611686018427388000. Parsed from JSON, or built as an
+integer, it is sent with all its digits. 1e19 and 1e300 are sent with an
+exponent, and read as the same double. A Draft 4 boolean
+`exclusiveMinimum` and an unknown type name are refused as well. Names
+inside `properties`, `$defs`, `dependentRequired` and `dependentSchemas`,
+and values inside `enum`, `const`, `default` and `examples`, are data, not
+keywords. A tool without an input schema takes no arguments, as with
+`{"type": "object", "additionalProperties": false}`.
 
 A schema of more than 10000 subschemas, or with subschemas nested more
 than 256 deep, is refused. A tool's schema goes to the model with every
 `tools/list`, and Afterglow's largest has some sixty. The compile keeps
 for each subschema its parent and one token, not its path, and takes time
-in proportion to the schema. In a release build, 9999 empty `properties`
-compile in 6 ms, 9037 subschemas 251 levels deep in 6.5 ms, and an `enum`
-of 100,000 strings (1.2 MB) in 35 ms. A megabyte of schema 900 levels
-deep is refused at once.
+in proportion to the schema. In a release build, on a machine loaded with
+other work, 9999 empty `properties` compile in 15 ms, 9037 subschemas 251
+levels deep in 13 ms, and an `enum` of 100,000 strings (1.2 MB) in 40 ms.
+A megabyte of schema 900 levels deep is refused at once.
 
 ## Dependencies
 
