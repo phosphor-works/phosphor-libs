@@ -649,21 +649,29 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         }
         Node& target = node();
         target.hasEnum = true;
-        for (const QJsonValue& entry : value.toArray()) {
+        const QJsonArray entries = value.toArray();
+        // More strings than EnumHashThreshold go to the table alone.
+        qsizetype strings = 0;
+        for (const QJsonValue& entry : entries) {
+            strings += entry.isString() ? 1 : 0;
+        }
+        const bool hashed = strings > EnumHashThreshold;
+        if (hashed) {
+            target.enumTable.reserve(strings);
+        }
+        for (const QJsonValue& entry : entries) {
             if (entry.isString()) {
                 const QString text = entry.toString();
-                target.enumStrings.append(text);
-                target.enumUtf8.append(text.toUtf8());
+                if (hashed) {
+                    target.enumTable.insert(text, 0);
+                } else {
+                    target.enumStrings.append(text);
+                    target.enumUtf8.append(text.toUtf8());
+                }
             } else if (entry.isDouble()) {
                 target.enumNumbers.push_back(numberOf(entry));
             } else {
                 target.enumOthers.push_back(entry);
-            }
-        }
-        if (target.enumStrings.size() > EnumHashThreshold) {
-            target.enumTable.reserve(target.enumStrings.size());
-            for (qsizetype i = 0; i < target.enumStrings.size(); ++i) {
-                target.enumTable.insert(target.enumStrings.at(i), target.enumUtf8.at(i), 0);
             }
         }
         return QString();

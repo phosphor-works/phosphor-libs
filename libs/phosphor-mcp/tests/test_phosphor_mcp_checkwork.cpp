@@ -222,6 +222,12 @@ private Q_SLOTS:
         // and a comparison for each 16 code units, rounded up.
         row("enum of nine strings", "{'items': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '" + A32 + "']}}",
             repeat("'" + A32 + "'", 256), 10 + 256 * (3 + 2 + 2 + 1 + 1 + (2 + 2 * 2)), 0);
+        // Entries of other types do not count: eight strings beside a number
+        // are compared one by one, a step each, and the text of the one of
+        // the same size.
+        row("enum of eight strings and a number",
+            "{'items': {'enum': ['1', '2', '3', '4', '5', '6', '7', '" + A32 + "', 5]}}", repeat("'" + A32 + "'", 256),
+            10 + 256 * (3 + 2 + 2 + 1 + 1 + 7 + (1 + 2)), 0);
 
         // Lengths: counted only when the code units do not decide, once
         // for all the subschemas applied to the string in place. A string

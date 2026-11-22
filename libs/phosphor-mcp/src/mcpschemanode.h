@@ -226,9 +226,9 @@ struct Node
 
     // const and enum. Their strings are kept here in UTF-16 and in UTF-8,
     // so that a string of the value is compared with them in its own
-    // encoding, and a long enum of strings is looked up in a table. Their
-    // numbers are read once, here, and a number of the value once for all
-    // of them.
+    // encoding. An enum of more than EnumHashThreshold strings keeps them in
+    // its table alone, where a string is looked up. Their numbers are read
+    // once, here, and a number of the value once for all of them.
     QJsonValue constValue;
     QString constString;
     QByteArray constUtf8;
