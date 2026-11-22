@@ -698,6 +698,13 @@ private Q_SLOTS:
         QVERIFY2(server.addTool(McpTool(QStringLiteral("levels")).setInputSchema(parse(levels + "'l40': {}}}")), noop(),
                                 &error),
                  qPrintable(error));
+        // then and else without an if apply to nothing, so a $ref back
+        // through them is no loop.
+        QVERIFY2(server.addTool(McpTool(QStringLiteral("orphans"))
+                                    .setInputSchema(parse("{'type': 'object', '$ref': '#/$defs/a', '$defs': {'a': "
+                                                          "{'then': {'$ref': '#/$defs/a'}, 'else': {'$ref': '#'}}}}")),
+                                noop(), &error),
+                 qPrintable(error));
         // The $schema of 2020-12 with an empty fragment, as some generators
         // write it.
         QVERIFY2(

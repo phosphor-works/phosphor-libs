@@ -178,7 +178,8 @@ int arrayIndex(const QString& token, std::size_t size)
 
 // The subschemas that apply to the same value as `node`, in order: `each`
 // gets each, but then and else, which `either` gets together (-1 for one
-// that is not there), since a value takes one of the two.
+// that is not there), since a value takes one of the two. Without an if,
+// then and else apply to nothing, as the check has it.
 template<typename Each, typename Either>
 void forEachInPlace(const Node& node, Each each, Either either)
 {
@@ -192,7 +193,9 @@ void forEachInPlace(const Node& node, Each each, Either either)
             each(single);
         }
     }
-    either(node.thenSchema, node.elseSchema);
+    if (node.ifSchema >= 0) {
+        either(node.thenSchema, node.elseSchema);
+    }
     for (const auto& dependent : node.dependentSchemas) {
         each(dependent.second);
     }
