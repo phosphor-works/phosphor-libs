@@ -627,11 +627,14 @@ O(n log n) whatever their number, and its line names the first item that
 repeats an earlier one. The hash is keyed by Qt's global seed, random in
 each process unless `QT_HASH_SEED` is 0, so a model cannot choose items
 whose hashes are the same. `multipleOf` divides exactly when it is an
-integer, so 10^17 is not a multiple of 3, and 9223372036854775807 is one
-of 7. Against a value that is not a 64-bit integer (one with a fraction,
-or past the range of qint64), an integer divisor past 2^53 is rounded to
-the nearest double first, as Python rounds it, and divides that exactly.
-A `multipleOf` with a fraction divides as doubles, as Python's
+integer, whatever the value, so 10^17 is not a multiple of 3, and
+9223372036854775807 is one of 7. A value written with a fraction or an
+exponent, or past the range of qint64, is the double that Qt's parser
+reads, and is divided exactly too. Python's `jsonschema` rounds an integer
+divisor past 2^53 to the nearest double against a value written with a
+fraction or an exponent. So for it 18014398509481986.0 (the double
+18014398509481984) is a multiple of 9007199254740993, and for the server
+it is not. A `multipleOf` with a fraction divides as doubles, as Python's
 `jsonschema` and JavaScript validators do, and the value passes when the
 quotient is a whole number. So 0.5 is a multiple of 0.1 (0.5 / 0.1 is 5),
 and 0.3 is not (0.3 / 0.1 is 2.9999999999999996), though both are in

@@ -1002,8 +1002,10 @@ private Q_SLOTS:
         // server's own verdicts, which the README gives: an integer past
         // qint64 where the schema asks for an integer (one that Qt's parser
         // rounds to 2^63 too), and an unpaired surrogate in a string or a
-        // name, are refused. Python's jsonschema disagrees with six of them,
-        // and agrees with every other row.
+        // name, are refused, and an integer divisor of multipleOf past 2^53
+        // divides a value written with a fraction exactly. Python's
+        // jsonschema disagrees with seven of them, and agrees with every
+        // other row.
         QTest::addColumn<QByteArray>("property");
         QTest::addColumn<QByteArray>("value");
         QTest::addColumn<bool>("accepted");
@@ -1179,6 +1181,15 @@ private Q_SLOTS:
         row("multipleOf qint64 max refuses", "{'multipleOf': 2}", "9223372036854775807", false);
         row("multipleOf qint64 min", "{'multipleOf': 2}", "-9223372036854775808", true);
         row("multipleOf 1e300 of 2", "{'type': 'number', 'multipleOf': 2}", "1e300", true);
+        // An integer divisor past 2^53 divides a double exactly too: 2^63
+        // is not a multiple of 2^53 + 1.
+        row("multipleOf past 2^53 of 2^63", "{'type': 'number', 'multipleOf': 9007199254740993}", "9223372036854775808",
+            false);
+        // Departure: Python rounds the divisor to 2^53 against a value
+        // written with a fraction, which Qt's parser and Python read as
+        // 18014398509481984, and lets it pass.
+        row("multipleOf past 2^53 of a value with a fraction", "{'type': 'number', 'multipleOf': 9007199254740993}",
+            "18014398509481986.0", false);
         // The quotient overflows: the binary values divide exactly.
         row("multipleOf 0.5 of 1e308", "{'type': 'number', 'multipleOf': 0.5}", "1e308", true);
         row("multipleOf 0.1 of 1e308", "{'type': 'number', 'multipleOf': 0.1}", "1e308", false);
