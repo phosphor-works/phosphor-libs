@@ -229,7 +229,8 @@ private Q_SLOTS:
             10 + 256 * ((3 + 1 + 2) + 2 + 2 + (1 + 1) + 1 + (1 + 2)), 0);
         row("maxLength counted once in place",
             "{'items': {'allOf': [{'maxLength': 20}, {'maxLength': 20}, {'maxLength': 20}]}}",
-            repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 3 * (2 + (1 + 1) + 1) + (1 + 2)), 0);
+            repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 3 * (2 + 1 + (1 + 1) + 1) + (1 + 2)),
+            0);
         // 31 code units of UTF-16 hold at least 16 code points, and are
         // read through in 2.
         row("minLength not counted", "{'items': {'minLength': 16}}",
@@ -328,15 +329,16 @@ private Q_SLOTS:
         // The index of names apart: 8 more for the second.
         row("required of names apart", "{'required': ['a']}", Apart,
             (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 8 + (1 + 2) + (1 + 1), 2 * IndexBytes);
-        // An object of no member: 1.
+        // An object of no member: 1. not applies its subschema in place
+        // (2 + 1).
         row("required in empty objects", "{'items': {'not': {'required': ['a']}}}", repeat("{}", 256),
-            10 + 256 * ((3 + 2) + (2 + 2) + 1 + (2 + 2) + 1 + 1), 0);
+            10 + 256 * ((3 + 2) + (2 + 2) + 1 + (2 + 1 + 2) + 1 + 1), 0);
         // The index once for the subschemas applied in place: 64 members
         // hashed and sorted (2 + 3 + 1 each), two names looked up (1 + 7,
         // and 1 + 1 to compare).
         row("required in place shares the index", "{'allOf': [{'required': ['k000']}, {'required': ['k001']}]}",
             members("1", 64),
-            (3 + 2) + 64 * (2 + 3) + (2 + 2 + 1) + 2 * (2 + 2 + 1) + 64 * (2 + 3 + 1) + 2 * (1 + 7 + (1 + 1)),
+            (3 + 2) + 64 * (2 + 3) + (2 + 2 + 1) + 2 * (2 + 1 + 2 + 1) + 64 * (2 + 3 + 1) + 2 * (1 + 7 + (1 + 1)),
             64 * IndexBytes);
         // dependentRequired: a trigger looked up, and its names.
         row("dependentRequired", "{'items': {'dependentRequired': {'a': ['b']}}}", repeat("{'a': 1, 'b': 2}", 256),
@@ -355,7 +357,7 @@ private Q_SLOTS:
             repeat("{'a': 1, 'b': 2}", 256),
             10
                 + 256
-                    * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + (1 + 2 + (1 + 1)) + (2 + 2 + 1)
+                    * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + (1 + 2 + (1 + 1)) + (2 + 1 + 2 + 1)
                        + (1 + 2 + (1 + 1))),
             2 * IndexBytes);
 
@@ -368,9 +370,9 @@ private Q_SLOTS:
         row("items false", "{'items': false}", repeat("1", 256), 10 + 256 * (3 + 1 + 24 + 2) + 10 * 16, 0,
             QStringLiteral("/0: is not allowed, because the schema allows no items"));
         // A repeated error builds nothing more. Its pointer is hashed and
-        // found.
+        // found. allOf applies each branch in place (2 + 1).
         row("errors repeated", "{'items': {'allOf': [{'type': 'string'}, {'type': 'string'}]}}", repeat("1", 256),
-            10 + 256 * (3 + 2 + 2 * (2 + 1 + 24) + 2) + 10 * 16, 0, QStringLiteral("/0: must be of type string"));
+            10 + 256 * (3 + 2 + 2 * (2 + 1 + 1 + 24) + 2) + 10 * 16, 0, QStringLiteral("/0: must be of type string"));
         // Names of 33 bytes of Latin-1, decoded for a pointer (2 + 2) and
         // scanned for "~" and "/" (2), which is 34 code units long (2). The
         // start of each name in a line is decoded and scanned too (2).
@@ -425,7 +427,8 @@ private Q_SLOTS:
             repeat("1", 1024), 10 + 1024 * 3 + 1024 * (2 + 1) + (1 + 4) + 1024 * 1, 16 * WordBytes);
         // ...and merged (1 + 16 / 4) into another, made too.
         row("annotations merged", "{'allOf': [{'contains': {'type': 'integer'}}], 'unevaluatedItems': false}",
-            repeat("1", 1024), 10 + 1024 * 3 + (2 + 2 + 1) + 1024 * (2 + 1) + (1 + 4) + (1 + 4) + (1 + 4) + 1024 * 1,
+            repeat("1", 1024),
+            10 + 1024 * 3 + (2 + 1 + 2 + 1) + 1024 * (2 + 1) + (1 + 4) + (1 + 4) + (1 + 4) + 1024 * 1,
             2 * 16 * WordBytes);
         row("unevaluatedProperties", "{'properties': {'k000': {}}, 'unevaluatedProperties': {'type': 'integer'}}",
             members("1", 256),
@@ -514,12 +517,12 @@ private Q_SLOTS:
             (3 + 2) + 4 * (3 + 4) + (2 + 2 + 1) + 4 * (1 + 3 + 113) + 4 * (1 + 1) + 2 * (2 * 2 + 1 + 2 * 3 + 8 + 8 + 75)
                 + 24,
             4 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 2 are equal"));
-        // Inside not (applied to, 2 + 2 + 1), uniqueItems compares each run
-        // too, though the first repeat decides: the same work whatever the
-        // run that comes first.
+        // Inside not (applied in place, 2 + 1 + 2 + 1), uniqueItems compares
+        // each run too, though the first repeat decides: the same work
+        // whatever the run that comes first.
         row("uniqueItems of two runs apart, verdict", "{'not': {'uniqueItems': true}}",
             "['" + X600 + "', '" + y600 + "', '" + X600 + "', '" + y600 + "']",
-            (3 + 2) + 4 * (3 + 4) + 2 * (2 + 2 + 1) + 4 * (1 + 3 + 113) + 4 * (1 + 1)
+            (3 + 2) + 4 * (3 + 4) + (2 + 2 + 1) + (2 + 1 + 2 + 1) + 4 * (1 + 3 + 113) + 4 * (1 + 1)
                 + 2 * (2 * 2 + 1 + 2 * 3 + 8 + 8 + 75),
             4 * UniqueBytes);
     }
@@ -654,6 +657,45 @@ private Q_SLOTS:
                 QCOMPARE(other.work, first.work);
             }
         }
+    }
+
+    void largeSchemasAndDeepChecks()
+    {
+        // A subschema applied costs a unit more from 256 KiB of the schema's
+        // nodes and of the check's frames (a kilobyte for each subschema it
+        // is in), and one more at each fourfold, up to 3.
+        QCOMPARE(footprintUnits(0), qint64(0));
+        QCOMPARE(footprintUnits(FootprintBytes - 1), qint64(0));
+        QCOMPARE(footprintUnits(FootprintBytes), qint64(1));
+        QCOMPARE(footprintUnits(4 * FootprintBytes - 1), qint64(1));
+        QCOMPARE(footprintUnits(4 * FootprintBytes), qint64(2));
+        QCOMPARE(footprintUnits(16 * FootprintBytes - 1), qint64(2));
+        QCOMPARE(footprintUnits(16 * FootprintBytes), qint64(3));
+        QCOMPARE(footprintUnits(1000 * FootprintBytes), qint64(3));
+
+        // 400 empty branches of allOf and the root, some 350 KB of nodes:
+        // the number walked (3), the root applied to it (2, and 1), and each
+        // branch in place (2 + 1, and 1).
+        QByteArray branches;
+        for (int i = 0; i < 400; ++i) {
+            branches += i ? ", {}" : "{}";
+        }
+        const qint64 nodeUnits = footprintUnits(401 * qint64(sizeof(Node)));
+        QCOMPARE(nodeUnits, qint64(1));
+        QCOMPARE(count(parse("{'allOf': [" + branches + "]}").toObject(), QJsonValue(1)).work,
+                 3 + (2 + nodeUnits) + 400 * (2 + 1 + nodeUnits));
+
+        // Lists through items and $ref, two subschemas for each level: each
+        // level costs the same until the subschemas are 255 deep, and a unit
+        // more for each subschema applied from there on (146 of those for
+        // lists 200 levels deep, 0 to 400 subschemas deep).
+        const QJsonObject lists = parse("{'items': {'$ref': '#'}}").toObject();
+        const auto work = [&lists](int levels) {
+            return count(lists, parse(QByteArray(levels, '[') + "1" + QByteArray(levels, ']'))).work;
+        };
+        const qint64 level = (work(100) - work(50)) / 50;
+        QCOMPARE(work(100) - work(50), 50 * level);
+        QCOMPARE(work(200), work(100) + 100 * level + 146);
     }
 
     void objectsCompareWhateverTheirOrder()
@@ -1067,12 +1109,12 @@ private Q_SLOTS:
         // Walked (3 for each value, 2 more for each object, 2 for each
         // member and 4 for the lines of its name). The root applied to each
         // object (4, type 1, 1 for the keywords of objects, and the member
-        // 2 + 4), and the $ref to the two inner ones (4 + 1), and both to
-        // the number (2, and 2 + 1). The error: two names decoded and
+        // 2 + 4), and the $ref, in place, to the two inner ones (4 + 1 +
+        // 1), and both to the number (2, and 2 + 1 + 1). The error: two names decoded and
         // scanned for "~" and "/" (2 + 25000 + 25000 each), and a third
         // token begun (2) that would not fit.
         QCOMPARE(counts.work,
-                 qint64(3 * (3 + 2 + 2 + 4) + 3 + 3 * (4 + 1 + 1 + 6) + 2 * (4 + 1) + 2 + (2 + 1) + 24
+                 qint64(3 * (3 + 2 + 2 + 4) + 3 + 3 * (4 + 1 + 1 + 6) + 2 * (4 + 1 + 1) + 2 + (2 + 1 + 1) + 24
                         + 2 * (2 + 400000 / 16 + 400000 / 16) + 2));
 
         // The same with names of UTF-8, which holds a code unit of UTF-16 in
@@ -1089,7 +1131,7 @@ private Q_SLOTS:
         const Counts cjkCounts = count(deep, parse(cjkValue));
         QCOMPARE(cjkCounts.lines, counts.lines);
         QCOMPARE(cjkCounts.work,
-                 qint64(8 * (3 + 2 + 2 + 4) + 3 + 8 * (4 + 1 + 1 + 6) + 7 * (4 + 1) + 2 + (2 + 1) + 24
+                 qint64(8 * (3 + 2 + 2 + 4) + 3 + 8 * (4 + 1 + 1 + 6) + 7 * (4 + 1 + 1) + 2 + (2 + 1 + 1) + 24
                         + 7 * (2 + 4 * (420001 / 16) + 140001 / 16) + 2));
     }
 };

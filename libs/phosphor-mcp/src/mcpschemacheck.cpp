@@ -393,6 +393,7 @@ public:
         , m_report(report)
         , m_budget(budget)
         , m_key(schema.key)
+        , m_nodeBytes(qint64(schema.nodes.size() * sizeof(Node)))
     {
     }
 
@@ -460,6 +461,8 @@ private:
     quintptr m_stackBase = 0;
     // The key of the hashes (see checkUnique() and Shared).
     quint64 m_key;
+    // The memory of the schema's nodes (see footprintUnits()).
+    qint64 m_nodeBytes;
 };
 
 // Applies the node `index` to `value`. When `out` is not null, the members
@@ -475,7 +478,7 @@ bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* ou
         m_budget.exceed();
         return false;
     }
-    charge(UnitsPerApply);
+    charge(UnitsPerApply + (shared ? UnitsPerInPlace : 0) + footprintUnits(m_nodeBytes + m_depth * StackBytesPerApply));
     ++m_depth;
     const Node& node = m_nodes[std::size_t(index)];
     bool valid = node.booleanValue;
@@ -1480,6 +1483,15 @@ bool Checker::checkUnevaluatedProperties(const Node& node, const QJsonObject& ob
 }
 
 } // namespace
+
+qint64 footprintUnits(qint64 bytes)
+{
+    const qint64 steps = bytes / FootprintBytes;
+    if (steps == 0) {
+        return 0;
+    }
+    return std::min(MaxFootprintUnits, qint64(1 + (std::bit_width(quint64(steps)) - 1) / 2));
+}
 
 QStringList checkValue(const CompiledSchema& schema, const QJsonValue& value, CheckStats* stats)
 {

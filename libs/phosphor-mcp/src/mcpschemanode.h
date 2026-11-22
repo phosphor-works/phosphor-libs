@@ -136,6 +136,50 @@ constexpr qsizetype EnumHashThreshold = 8;
 // their indices in CompiledSchema::nodes (-1 when absent).
 struct Node
 {
+    // What each application of the node reads, first and together: a large
+    // schema, whose nodes the cache does not hold, then costs a line or two
+    // of it for each subschema applied, not one for each keyword.
+    bool isBoolean = false;
+    bool booleanValue = true;
+    // type: the bits (the names are below).
+    quint8 types = 0;
+    bool hasConst = false;
+    bool hasEnum = false;
+    enum NumberKeyword : quint8 {
+        Minimum = 1,
+        Maximum = 2,
+        ExclusiveMinimum = 4,
+        ExclusiveMaximum = 8,
+        MultipleOf = 16,
+    };
+    quint8 numberKeywords = 0;
+    bool uniqueItems = false;
+    // Applicators, by their indices.
+    int ref = -1;
+    int notSchema = -1;
+    int ifSchema = -1;
+    int thenSchema = -1;
+    int elseSchema = -1;
+    int items = -1;
+    int contains = -1;
+    int additionalProperties = -1;
+    int propertyNames = -1;
+    int unevaluatedItems = -1;
+    int unevaluatedProperties = -1;
+    // Lengths and counts, -1 when absent.
+    qint64 minLength = -1;
+    qint64 maxLength = -1;
+    std::vector<int> allOf;
+    std::vector<int> anyOf;
+    std::vector<int> oneOf;
+    std::vector<int> prefixItems;
+    qint64 minItems = -1;
+    qint64 maxItems = -1;
+    qint64 minProperties = -1;
+    qint64 maxProperties = -1;
+    qint64 minContains = -1;
+    qint64 maxContains = -1;
+
     // Where the node is: its parent (-1 for the root), and the one or two
     // tokens from the parent's object to it ("items", or "properties" and
     // the name). A JSON pointer is built from them when one is needed, so
@@ -145,11 +189,7 @@ struct Node
     QString name;
     bool hasName = false;
 
-    bool isBoolean = false;
-    bool booleanValue = true;
-
-    // type: the bits, and the names in the schema's order for the error.
-    quint8 types = 0;
+    // The names of the types, in the schema's order, for the error.
     QStringList typeNames;
 
     // const and enum. Their strings are kept here in UTF-16 and in UTF-8,
@@ -157,12 +197,10 @@ struct Node
     // encoding, and a long enum of strings is looked up in a table. Their
     // numbers are read once, here, and a number of the value once for all
     // of them.
-    bool hasConst = false;
     QJsonValue constValue;
     QString constString;
     QByteArray constUtf8;
     Number constNumber;
-    bool hasEnum = false;
     QStringList enumStrings;
     QByteArrayList enumUtf8;
     NameTable enumTable;
@@ -170,30 +208,11 @@ struct Node
     // The entries that are neither strings nor numbers.
     std::vector<QJsonValue> enumOthers;
 
-    enum NumberKeyword : quint8 {
-        Minimum = 1,
-        Maximum = 2,
-        ExclusiveMinimum = 4,
-        ExclusiveMaximum = 8,
-        MultipleOf = 16,
-    };
-    quint8 numberKeywords = 0;
     Number minimum;
     Number maximum;
     Number exclusiveMinimum;
     Number exclusiveMaximum;
     Number multipleOf;
-
-    // Lengths and counts, -1 when absent.
-    qint64 minLength = -1;
-    qint64 maxLength = -1;
-    qint64 minItems = -1;
-    qint64 maxItems = -1;
-    qint64 minProperties = -1;
-    qint64 maxProperties = -1;
-    qint64 minContains = -1;
-    qint64 maxContains = -1;
-    bool uniqueItems = false;
 
     QStringList required;
     std::vector<std::pair<QString, QStringList>> dependentRequired;
@@ -208,27 +227,12 @@ struct Node
     std::vector<std::pair<quint64, std::vector<quint64>>> dependentRequiredHashes;
     std::vector<quint64> dependentSchemaHashes;
 
-    // Applicators.
+    // The other applicators.
     NameTable properties;
     std::vector<std::pair<QString, int>> dependentSchemas;
     // By name, for a $ref through dependentSchemas.
     QHash<QString, int> dependentSchemaIndex;
     QHash<QString, int> definitions;
-    std::vector<int> prefixItems;
-    std::vector<int> allOf;
-    std::vector<int> anyOf;
-    std::vector<int> oneOf;
-    int items = -1;
-    int contains = -1;
-    int additionalProperties = -1;
-    int propertyNames = -1;
-    int notSchema = -1;
-    int ifSchema = -1;
-    int thenSchema = -1;
-    int elseSchema = -1;
-    int unevaluatedItems = -1;
-    int unevaluatedProperties = -1;
-    int ref = -1;
     QString refValue;
     bool hasRef = false;
     // contentSchema, checked as any subschema is but never applied: the

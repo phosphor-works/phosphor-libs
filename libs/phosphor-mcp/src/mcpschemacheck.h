@@ -50,6 +50,18 @@ constexpr qint64 MaxCheckStackBytes = 4 * 1024 * 1024;
 constexpr qint64 UnitsPerValueWalked = 3;
 // A subschema applied to a value.
 constexpr qint64 UnitsPerApply = 2;
+// More for a subschema applied in place (allOf, anyOf, oneOf, not, if,
+// then, else, $ref, dependentSchemas): the frames of the keyword that
+// applies it, and its annotations kept apart.
+constexpr qint64 UnitsPerInPlace = 1;
+// More for a subschema applied when the schema's nodes and the frames of
+// the check (StackBytesPerApply for each subschema it is in) take more
+// memory than the caches hold, since each application then misses them: a
+// unit from FootprintBytes, and one more at each fourfold, up to
+// MaxFootprintUnits (see footprintUnits()).
+constexpr qint64 StackBytesPerApply = 1024;
+constexpr qint64 FootprintBytes = 256 * 1024;
+constexpr qint64 MaxFootprintUnits = 3;
 // More for an object or an array, walked, applied to, compared or hashed:
 // its members or items are read through its own storage, away from the
 // last. And for an item that uniqueItems compares, read in the order of
@@ -110,6 +122,8 @@ constexpr qint64 WordsPerUnit = 4;
 // `weight` units for each CharactersPerUnit, rounded up, so that a short
 // text pays its share too.
 qint64 textUnits(qint64 weight, qint64 size);
+// The units more for a subschema applied, for `bytes` of nodes and frames.
+qint64 footprintUnits(qint64 bytes);
 qint64 hashUnits(QAnyStringView text);
 qint64 compareUnits(QAnyStringView a, QAnyStringView b);
 qint64 equalUnits(QAnyStringView a, QAnyStringView b);
