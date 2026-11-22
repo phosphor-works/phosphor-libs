@@ -72,6 +72,12 @@ QString numberProblem(const QJsonValue& value, const QString& place)
     if (!isIntegral(number)) {
         return QString();
     }
+    // Every whole number up to 2^53 is a double of its own, and written
+    // with all its digits, or with an exponent.
+    constexpr qint64 Exact = qint64(1) << 53;
+    if (number.isInteger && number.integer >= -Exact && number.integer <= Exact) {
+        return QString();
+    }
     QByteArray sent = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
     sent = sent.mid(1, sent.size() - 2);
     if (sent.contains('e') || sent.contains('.')) {

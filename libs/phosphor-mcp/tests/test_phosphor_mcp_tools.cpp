@@ -660,6 +660,9 @@ private Q_SLOTS:
             {"minimum", least, refusal("minimum", "-9223372036854775808", "-9223372036854776000")},
             {"exclusiveMaximum", QJsonValue(9223372036854774784.0),
              refusal("exclusiveMaximum", "9223372036854774784", "9223372036854775000")},
+            // The least whole double, from 2^53 on, whose shortest form is
+            // another integer.
+            {"minimum", QJsonValue(18014398509481992.0), refusal("minimum", "18014398509481992", "18014398509481990")},
             {"enum", QJsonArray{1, least}, refusal("enum/1", "-9223372036854775808", "-9223372036854776000")},
             {"const", QJsonObject{{QLatin1StringView("b"), twoTo62}},
              refusal("const/b", "4611686018427387904", "4611686018427388000")},
@@ -674,11 +677,13 @@ private Q_SLOTS:
         QVERIFY(server.tools().isEmpty());
 
         // The same numbers held as integers are sent whole, and doubles that
-        // are sent with all their digits, or with an exponent, are the same
-        // number for a client.
+        // are sent with all their digits (as every whole number up to 2^53
+        // is), or with an exponent, are the same number for a client.
         const QList<QJsonValue> accepted{QJsonValue(qint64(4611686018427387904)),
                                          QJsonValue(std::numeric_limits<qint64>::min()),
                                          QJsonValue(4096.0),
+                                         QJsonValue(9007199254740992.0),
+                                         QJsonValue(-9007199254740992.0),
                                          QJsonValue(9007199254740994.0),
                                          QJsonValue(1e18),
                                          QJsonValue(-1e19)};
