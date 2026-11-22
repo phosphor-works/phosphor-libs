@@ -229,6 +229,12 @@ private Q_SLOTS:
             10 + 256 * (3 + 2 + 2 + 1 + 1), 0);
         row("maxLength counted, UTF-8", "{'items': {'maxLength': 20}}", repeat("'" + Cjk11 + "'", 256),
             10 + 256 * (3 + 2 + 2 + 1 + 1 + (1 + 2)), 0);
+        // Two strings of 64 code units of UTF-16, 128 bytes each (2 lines,
+        // and 4 units read through before the check), the second 8 bytes
+        // after the end of the first: no line between them.
+        row("strings of UTF-16 one after the other", "{'items': {'maxLength': 1000}}",
+            repeat("'" + QByteArray("\\u00e9").repeated(64) + "'", 2),
+            (3 + 2) + 2 * (3 + 2 + 4) + (2 + 2 + 1) + 2 * (2 + 2 + (1 + 2) + 1), 0);
 
         // Arrays and objects: more for each (2), walked and applied to, and
         // the step of their keywords.
@@ -269,6 +275,14 @@ private Q_SLOTS:
         row("names a value apart", "{'additionalProperties': {'type': 'string'}}",
             "{'a': '" + X140 + "', 'b': '" + X140 + "'}",
             (3 + 2) + 2 * (2 + (3 + 2)) + (2 + 2 + 1) + 2 * (2 + (2 + 2 + 1)) + 2, 0);
+        // "b" and a value of 300 or 488 bytes before "a", which is read
+        // first: 327 bytes back to "b" (5), or 511 (7), short of the cap of
+        // 512, before the check and in it. The value of "a" is a number,
+        // and that of "b" a string of 4 lines, taken out of the object (2).
+        row("names 327 bytes apart", "{'additionalProperties': {}}", "{'b': '" + QByteArray(300, 'x') + "', 'a': 1}",
+            (3 + 2) + 2 * 2 + 5 + 3 + (3 + 4) + (2 + 2 + 1) + 2 * 2 + 5 + 2 + (2 + 2), 0);
+        row("names 511 bytes apart", "{'additionalProperties': {}}", "{'b': '" + QByteArray(488, 'x') + "', 'a': 1}",
+            (3 + 2) + 2 * 2 + 7 + 3 + (3 + 4) + (2 + 2 + 1) + 2 * 2 + 7 + 2 + (2 + 2), 0);
         // propertyNames: a step, and the subschema applied to the name in
         // place, which reads its text.
         row("propertyNames", "{'propertyNames': {'maxLength': 20}}", members("1", 256),
@@ -276,6 +290,14 @@ private Q_SLOTS:
         // Names of 71 bytes: a line more each time one is visited or read.
         row("propertyNames of long names", "{'propertyNames': {'maxLength': 100}}", members("1", 256, 70),
             3 + 2 + 2 + 2 + 1 + 256 * ((2 + 1 + 3) + (2 + 1) + (1 + 2 + (1 + 1) + 1)), 0);
+        // The name is read where its member was visited (8 for "b", which
+        // lies before "a"), and not again in the reads of the array that
+        // the object is an item of. The array has read nothing yet, and
+        // there "b" would be 8 more again, away from "a" in the same
+        // storage.
+        row("propertyNames of an item, names apart", "{'items': {'propertyNames': {'maxLength': 100}}}",
+            "[" + Apart + "]",
+            (3 + 2) + (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + (2 + 2 + 1) + 2 * (2 + (1 + 2 + 1 + 1)) + 8, 0);
 
         // Names looked up: the members hashed and sorted once (2 each, half
         // the bits of their count, and 3 for each 16 code units), the name
@@ -623,9 +645,9 @@ private Q_SLOTS:
         row("objects of names apart", item(Apart), item(Apart), (1 + 4) + 2 * (2 + 2 * 3 + 76) + 2 * 8,
             (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1 + (8 + 2 * 8)) + 2 * (2 + 2 * 3 + 151) + 2 * 8,
             (1 + 2) + 2 * (2 + 3 + 112) + 8);
-        // Values set after both names, each read away from the last text
-        // of its object, and the second name away from the first value (8
-        // each, in each object).
+        // Values set after both names, "b" first: the value of "a" is read
+        // away from its name, and the name "b" away from that value (8
+        // each, in each object). The value of "b" lies beside its name.
         row("objects of values apart", membersApart(), membersApart(), (1 + 4) + 2 * (2 + 2 * 3 + 76) + 2 * 2 * 8,
             (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1) + 2 * (2 + 2 * 3 + 151) + 2 * 2 * 8, (1 + 2) + 2 * (2 + 3 + 112) + 2 * 8);
         // The same names in two orders, their text in the order of the
