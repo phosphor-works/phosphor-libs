@@ -7,6 +7,7 @@
 
 #include "mcpschemacheck.h"
 
+#include <QHashSeed>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -649,6 +650,8 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
                 const QString text = entry.toString();
                 target.enumStrings.append(text);
                 target.enumUtf8.append(text.toUtf8());
+            } else if (entry.isDouble()) {
+                target.enumNumbers.push_back(numberOf(entry));
             } else {
                 target.enumOthers.push_back(entry);
             }
@@ -670,6 +673,7 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         node().constValue = value;
         node().constString = value.toString();
         node().constUtf8 = node().constString.toUtf8();
+        node().constNumber = numberOf(value);
         return QString();
     }
     struct Bound
@@ -1110,7 +1114,25 @@ QString compileSchema(const QJsonObject& schema, bool objectRoot, CompiledSchema
     if (!error.isEmpty()) {
         return error;
     }
+    // The names that the check looks up, hashed once.
+    const quint64 key = QHashSeed::globalSeed();
+    for (Node& node : nodes) {
+        for (const QString& name : std::as_const(node.required)) {
+            node.requiredHashes.push_back(hashText(name, key));
+        }
+        for (const auto& [trigger, names] : node.dependentRequired) {
+            std::vector<quint64> hashes;
+            for (const QString& name : names) {
+                hashes.push_back(hashText(name, key));
+            }
+            node.dependentRequiredHashes.emplace_back(hashText(trigger, key), std::move(hashes));
+        }
+        for (const auto& dependent : node.dependentSchemas) {
+            node.dependentSchemaHashes.push_back(hashText(dependent.first, key));
+        }
+    }
     compiled.nodes = std::move(nodes);
+    compiled.key = key;
     return QString();
 }
 

@@ -14,6 +14,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 namespace PhosphorMcp::Schema {
@@ -22,6 +23,16 @@ namespace {
 
 // 2^63, the first double past qint64.
 constexpr double TwoTo63 = 9223372036854775808.0;
+// 2^52, from which every double is a whole number.
+constexpr double TwoTo52 = 4503599627370496.0;
+
+// Whether a finite double is a whole number. Below 2^52 it converts to
+// qint64 and back unchanged when it is one: std::trunc() is a call into
+// libm where the build cannot assume SSE4.1.
+bool isWhole(double d)
+{
+    return std::fabs(d) >= TwoTo52 || d == double(qint64(d));
+}
 
 // The order of the JSON types in compareValues().
 int typeRank(QJsonValue::Type type)
@@ -252,7 +263,7 @@ public:
             const QAnyStringView name = it.keyView();
             m_members.push_back(Member{name, it});
             const qint64 gap = reads.next(name);
-            units += UnitsPerMember + gap + comparisons * (1 + gap + CompareUnits * (name.size() / CharactersPerUnit));
+            units += UnitsPerMember + gap + comparisons * (1 + gap + textUnits(CompareUnits, name.size()));
         }
         if (!m_budget.charge(units)) {
             return;
@@ -301,14 +312,21 @@ Number numberOf(const QJsonValue& value)
 {
     Number number;
     // toInteger() gives the default unless the value is a whole number that
-    // qint64 holds.
-    const qint64 a = value.toInteger(0);
-    if (a == value.toInteger(1)) {
+    // qint64 holds. Only qint64's minimum is the default and such a number
+    // too, and it is -2^63 as a double.
+    constexpr qint64 Least = std::numeric_limits<qint64>::min();
+    const qint64 a = value.toInteger(Least);
+    if (a != Least) {
         number.integer = a;
         return number;
     }
+    const double d = value.toDouble();
+    if (d == -TwoTo63) {
+        number.integer = Least;
+        return number;
+    }
     number.isInteger = false;
-    number.real = value.toDouble();
+    number.real = d;
     return number;
 }
 
@@ -332,18 +350,17 @@ int compareNumbers(const Number& a, const Number& b)
     if (d < -TwoTo63) {
         return 1;
     }
-    const double whole = std::trunc(d);
-    const qint64 t = qint64(whole);
+    const qint64 t = qint64(d);
     if (a.integer != t) {
         return a.integer < t ? -1 : 1;
     }
-    const double fraction = d - whole;
+    const double fraction = d - double(t);
     return fraction > 0 ? -1 : (fraction < 0 ? 1 : 0);
 }
 
 bool isIntegral(const Number& number)
 {
-    return number.isInteger || number.real == std::trunc(number.real);
+    return number.isInteger || isWhole(number.real);
 }
 
 // An integral divisor divides exactly, whatever the value. A divisor with a
@@ -363,7 +380,7 @@ bool isMultipleOf(const Number& value, const Number& divisor)
     }
     const double quotient = value.toDouble() / divisor.real;
     if (std::isfinite(quotient)) {
-        return quotient == std::trunc(quotient);
+        return isWhole(quotient);
     }
     return isExactMultiple(value, divisor);
 }
@@ -492,19 +509,24 @@ bool isUtf8(QAnyStringView text)
     });
 }
 
+qint64 textUnits(qint64 weight, qint64 size)
+{
+    return (weight * size + CharactersPerUnit - 1) / CharactersPerUnit;
+}
+
 qint64 hashUnits(QAnyStringView text)
 {
-    return HashUnits * (text.size() / CharactersPerUnit);
+    return textUnits(HashUnits, text.size());
 }
 
 qint64 compareUnits(QAnyStringView a, QAnyStringView b)
 {
-    return CompareUnits * ((a.size() + b.size()) / CharactersPerUnit);
+    return textUnits(CompareUnits, a.size() + b.size());
 }
 
 qint64 equalUnits(QAnyStringView a, QAnyStringView b)
 {
-    return (isUtf8(a) == isUtf8(b) ? 1 : DecodeUnits) * ((a.size() + b.size()) / CharactersPerUnit);
+    return textUnits(isUtf8(a) == isUtf8(b) ? 1 : DecodeUnits, a.size() + b.size());
 }
 
 qint64 decodeUnits(QAnyStringView text)
@@ -578,7 +600,10 @@ bool equalIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge(readUnits(readsA, first) + readUnits(readsB, second) + equalUnits(first, second));
+        // In this order, since readsA and readsB may be the same.
+        const qint64 readA = readUnits(readsA, first);
+        const qint64 readB = readUnits(readsB, second);
+        budget.charge(readA + readB + equalUnits(first, second));
         return QAnyStringView::equal(first, second);
     }
     case QJsonValue::Array: {
@@ -670,7 +695,9 @@ int compareIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextRead
     case QJsonValue::String: {
         const QAnyStringView first = a.toStringView();
         const QAnyStringView second = b.toStringView();
-        budget.charge(readUnits(readsA, first) + readUnits(readsB, second) + compareUnits(first, second));
+        const qint64 readA = readUnits(readsA, first);
+        const qint64 readB = readUnits(readsB, second);
+        budget.charge(readA + readB + compareUnits(first, second));
         return compareText(first, second);
     }
     case QJsonValue::Array: {

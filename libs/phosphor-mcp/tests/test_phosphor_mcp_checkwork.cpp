@@ -22,7 +22,9 @@
 #include <QTest>
 #include <QThread>
 
+#include <algorithm>
 #include <memory>
+#include <random>
 #include <type_traits>
 
 using namespace PhosphorMcp::Schema;
@@ -188,10 +190,17 @@ private Q_SLOTS:
         // entry tried.
         row("const of a number", "{'items': {'const': 1}}", repeat("1", 256), 10 + 256 * (3 + 2 + 1 + 1), 0);
         row("enum of numbers", "{'items': {'enum': [5, 1]}}", repeat("1", 256), 10 + 256 * (3 + 2 + 1 + 2), 0);
+        // A number tries the numbers of enum alone, and a value of another
+        // type the entries of other types alone.
+        row("enum of mixed values, numbers", "{'items': {'enum': [true, null, 'x', 1.5]}}", repeat("1.5", 256),
+            10 + 256 * (3 + 2 + 1 + 1), 0);
+        row("enum of mixed values, null", "{'items': {'enum': [true, 2, 'x', null]}}", repeat("null", 256),
+            10 + 256 * (3 + 2 + 1 + 2), 0);
         // A string applied to as an item, taken out of its array (2), its
         // text read for the keywords of strings (1, and 1 for each 64 bytes,
         // at most 4), and compared in its own encoding when the sizes agree:
-        // two units for 32 bytes. type alone reads no text.
+        // a unit for each 16 code units, rounded up, two for 32 bytes and
+        // three for 33. type alone reads no text.
         row("type of strings", "{'items': {'type': 'string'}}", repeat("'" + A32 + "'", 256),
             10 + 256 * (3 + 2 + 2 + 1), 0);
         row("enum of strings", "{'items': {'enum': ['" + B32 + "', '" + A32 + "']}}", repeat("'" + A32 + "'", 256),
@@ -199,36 +208,38 @@ private Q_SLOTS:
         row("const of a string", "{'items': {'const': '" + A32 + "'}}", repeat("'" + A32 + "'", 256),
             10 + 256 * (3 + 2 + 2 + 1 + 1 + 2), 0);
         row("const of a string, UTF-8", "{'items': {'const': '" + Cjk11 + "'}}", repeat("'" + Cjk11 + "'", 256),
-            10 + 256 * (3 + 2 + 2 + 1 + 1 + 2), 0);
+            10 + 256 * (3 + 2 + 2 + 1 + 1 + 3), 0);
         // A string of 4096 bytes, whose reads stop at 4 lines, before the
         // check and in it, and 256 units to compare.
         row("const of a long string", "{'items': {'const': '" + QByteArray(4096, 'a') + "'}}",
             repeat("'" + QByteArray(4096, 'a') + "'", 4), 10 + 4 * ((3 + 4) + 2 + 2 + (1 + 4) + 1 + 256), 0);
         // More than eight strings are a table: a name looked up, and a hash
-        // and a comparison for each 16 code units.
+        // and a comparison for each 16 code units, rounded up.
         row("enum of nine strings", "{'items': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '" + A32 + "']}}",
             repeat("'" + A32 + "'", 256), 10 + 256 * (3 + 2 + 2 + 1 + 1 + (2 + 2 * 2)), 0);
 
         // Lengths: counted only when the code units do not decide, once
         // for all the subschemas applied to the string in place. A string
         // in UTF-16 is read through before the check (2 units for 32 code
-        // units), its 64 bytes are a line each time it is read, and its
-        // count is 1 + 2. Each string is taken out of the array once (2),
+        // units, rounded up), its 64 bytes are a line each time it is read,
+        // and its count is 1 + 2 (1, and 1 for each 16 code units, rounded
+        // up). Each string is taken out of the array once (2),
         // whatever the subschemas applied to it in place.
         row("maxLength counted", "{'items': {'maxLength': 20}}", repeat("'" + Pairs16 + "'", 256),
             10 + 256 * ((3 + 1 + 2) + 2 + 2 + (1 + 1) + 1 + (1 + 2)), 0);
         row("maxLength counted once in place",
             "{'items': {'allOf': [{'maxLength': 20}, {'maxLength': 20}, {'maxLength': 20}]}}",
             repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 3 * (2 + (1 + 1) + 1) + (1 + 2)), 0);
-        // 31 code units of UTF-16 hold at least 16 code points.
+        // 31 code units of UTF-16 hold at least 16 code points, and are
+        // read through in 2.
         row("minLength not counted", "{'items': {'minLength': 16}}",
-            repeat("'" + QByteArray("\\ud83d\\ude00").repeated(15) + "a'", 256), 10 + 256 * ((3 + 1) + 2 + 2 + 1 + 1),
+            repeat("'" + QByteArray("\\ud83d\\ude00").repeated(15) + "a'", 256), 10 + 256 * ((3 + 2) + 2 + 2 + 1 + 1),
             0);
         // 33 bytes of UTF-8 hold at least 9 code points.
         row("minLength not counted, UTF-8", "{'items': {'minLength': 9}}", repeat("'" + Cjk11 + "'", 256),
             10 + 256 * (3 + 2 + 2 + 1 + 1), 0);
         row("maxLength counted, UTF-8", "{'items': {'maxLength': 20}}", repeat("'" + Cjk11 + "'", 256),
-            10 + 256 * (3 + 2 + 2 + 1 + 1 + (1 + 2)), 0);
+            10 + 256 * (3 + 2 + 2 + 1 + 1 + (1 + 3)), 0);
         // Two strings of 64 code units of UTF-16, 128 bytes each (2 lines,
         // and 4 units read through before the check), the second 8 bytes
         // after the end of the first: no line between them.
@@ -241,14 +252,14 @@ private Q_SLOTS:
         row("arrays", "{'items': {'type': 'array'}}", repeat("[]", 256), 10 + 256 * ((3 + 2) + (2 + 2) + 1 + 1), 0);
         row("objects", "{'items': {'type': 'object'}}", repeat("{}", 256), 10 + 256 * ((3 + 2) + (2 + 2) + 1 + 1), 0);
         // A member: visited before the check (2) and in it (2), its name
-        // looked up (2, and 2 for each 16 bytes).
+        // looked up (2, and 2 for each 16 bytes, rounded up).
         row("properties", "{'items': {'properties': {'a': {'type': 'integer'}}}}", repeat("{'a': 1}", 256),
-            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2) + (2 + 1)), 0);
+            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 + 1) + (2 + 1)), 0);
         row("properties of long names", "{'items': {'properties': {'" + A32 + "': {'type': 'integer'}}}}",
             repeat("{'" + A32 + "': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 + 2 * 2) + (2 + 1)),
             0);
         // A name in UTF-16 is read through before the check, for an unpaired
-        // surrogate (1 unit for 19 code units).
+        // surrogate (2 units for 19 code units, rounded up).
         row(
             "names in UTF-16", "{}",
             []() -> QByteArray {
@@ -259,7 +270,7 @@ private Q_SLOTS:
                 }
                 return object + "}";
             }(),
-            (3 + 2) + 256 * (2 + 1 + 3) + (2 + 2 + 1), 0);
+            (3 + 2) + 256 * (2 + 2 + 3) + (2 + 2 + 1), 0);
         row("additionalProperties", "{'additionalProperties': {'type': 'integer'}}", members("1", 256),
             3 + 2 + 2 + 2 + 1 + 256 * ((2 + 3) + 2 + (2 + 1)), 0);
         // A name read away from the last one read of its object: a unit for
@@ -300,43 +311,52 @@ private Q_SLOTS:
             (3 + 2) + (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + (2 + 2 + 1) + 2 * (2 + (1 + 2 + 1 + 1)) + 8, 0);
 
         // Names looked up: the members hashed and sorted once (2 each, half
-        // the bits of their count, and 3 for each 16 code units), the name
-        // hashed (1, the bits of the count, and 3 for each 16 code units)
-        // and compared with the members of its hash (1, and 1 for each 16
-        // code units, or 4 when one of the two is UTF-8).
+        // the bits of their count, and 3 for each 16 code units, rounded
+        // up), the name found by its hash, which the compile computed (1,
+        // and the bits of the count), and compared with the members of its
+        // hash (1, and 1 for each 16 code units of the two, or 4 when one of
+        // the two is UTF-8, rounded up). The schema's names are UTF-16.
         row("required", "{'items': {'required': ['a']}}", repeat("{'a': 1}", 256),
-            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + 2 + (1 + 1) + 1), IndexBytes);
+            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 1) + (1 + 1) + (1 + 1)), IndexBytes);
         row("required of a long name", "{'items': {'required': ['" + A32 + "']}}", repeat("{'" + A32 + "': 1}", 256),
-            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 3 * 2) + (1 + 1 + 3 * 2) + (1 + 4)), IndexBytes);
+            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 3 * 2) + (1 + 1) + (1 + 4)), IndexBytes);
+        // 34 bytes of UTF-8 hashed (7) and compared with 12 code units of
+        // UTF-16 (4 * 46 / 16, 12).
         row("required of a long name, UTF-8", "{'items': {'required': ['" + Cjk11 + "x']}}",
             repeat("{'" + Cjk11 + "x': 1}", 256),
-            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 3 * 2) + (1 + 1) + (1 + 4 * 2)), IndexBytes);
+            10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 7) + (1 + 1) + (1 + 12)), IndexBytes);
         // The index of names apart: 8 more for the second.
         row("required of names apart", "{'required': ['a']}", Apart,
-            (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1) + 8 + (1 + 2) + 1, 2 * IndexBytes);
+            (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 8 + (1 + 2) + (1 + 1), 2 * IndexBytes);
         // An object of no member: 1.
         row("required in empty objects", "{'items': {'not': {'required': ['a']}}}", repeat("{}", 256),
             10 + 256 * ((3 + 2) + (2 + 2) + 1 + (2 + 2) + 1 + 1), 0);
         // The index once for the subschemas applied in place: 64 members
-        // sorted (2 + 3 each), two names looked up (1 + 7 + 1 each).
+        // hashed and sorted (2 + 3 + 1 each), two names looked up (1 + 7,
+        // and 1 + 1 to compare).
         row("required in place shares the index", "{'allOf': [{'required': ['k000']}, {'required': ['k001']}]}",
-            members("1", 64), (3 + 2) + 64 * (2 + 3) + (2 + 2 + 1) + 2 * (2 + 2 + 1) + 64 * (2 + 3) + 2 * (1 + 7 + 1),
+            members("1", 64),
+            (3 + 2) + 64 * (2 + 3) + (2 + 2 + 1) + 2 * (2 + 2 + 1) + 64 * (2 + 3 + 1) + 2 * (1 + 7 + (1 + 1)),
             64 * IndexBytes);
         // dependentRequired: a trigger looked up, and its names.
         row("dependentRequired", "{'items': {'dependentRequired': {'a': ['b']}}}", repeat("{'a': 1, 'b': 2}", 256),
-            10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1) + 2 * (1 + 2 + 1)), 2 * IndexBytes);
+            10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 2 * (1 + 2 + (1 + 1))), 2 * IndexBytes);
         // More triggers than members: each member looked up in the
-        // triggers' table (2, and 2 for each 16 code units).
+        // triggers' table (2, and 2 for each 16 code units, rounded up).
         row("dependentRequired of many triggers", "{'items': {'dependentRequired': {'a': ['a'], 'x': [], 'y': []}}}",
-            repeat("{'a': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + 2 + 2 + (1 + 1) + 1), IndexBytes);
+            repeat("{'a': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 1) + (2 + 1) + (1 + 1) + (1 + 1)),
+            IndexBytes);
         row("dependentRequired of many triggers, names apart", "{'dependentRequired': {'a': [], 'x': [], 'y': []}}",
-            Apart, (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * 2 + 8, 0);
+            Apart, (3 + 2) + 2 * (2 + (3 + 4)) + 8 + (2 + 2 + 1) + 2 * (2 + 1) + 8, 0);
         row("dependentRequired of many triggers, long names",
             "{'items': {'dependentRequired': {'" + A32 + "': [], 'x': [], 'y': []}}}",
             repeat("{'" + A32 + "': 1}", 256), 10 + 256 * ((3 + 2 + 2 + 3) + (2 + 2 + 1) + (2 + 2 * 2)), 0);
         row("dependentSchemas", "{'items': {'dependentSchemas': {'a': {'required': ['b']}}}}",
             repeat("{'a': 1, 'b': 2}", 256),
-            10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1) + (1 + 2 + 1) + (2 + 2 + 1) + (1 + 2 + 1)),
+            10
+                + 256
+                    * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + (1 + 2 + (1 + 1)) + (2 + 2 + 1)
+                       + (1 + 2 + (1 + 1))),
             2 * IndexBytes);
 
         // Errors: 24, the tokens of the pointer that the last error did not
@@ -386,12 +406,14 @@ private Q_SLOTS:
             }(),
             (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2 + 1 + 24 + (2 + 8) + 1) + 10 * 16, 0,
             QString::fromUtf8("/" + Cjk11 + "0000: must be of type string"));
-        // An unpaired surrogate, refused before the check.
-        row("unpaired surrogates", "{}", repeat("'\\ud800'", 256), (3 + 2) + 256 * (3 + 24 + 2) + 10 * 16, 0,
+        // An unpaired surrogate, refused before the check, its UTF-16 read
+        // through (1).
+        row("unpaired surrogates", "{}", repeat("'\\ud800'", 256), (3 + 2) + 256 * (3 + 1 + 24 + 2) + 10 * 16, 0,
             QStringLiteral("/0: contains an unpaired UTF-16 surrogate"));
-        // A name with one, shown with U+FFFD in its stead: its member (2),
-        // the error (24), its token (2) and that of the line (16).
-        row("unpaired surrogate in a name", "{}", "{'x\\udc00': 1}", (3 + 2) + 2 + 24 + 2 + 16 + 3, 0,
+        // A name with one, shown with U+FFFD in its stead: its member (2,
+        // and 1 to read its UTF-16 through), the error (24), its token (2)
+        // and that of the line (16).
+        row("unpaired surrogate in a name", "{}", "{'x\\udc00': 1}", (3 + 2) + (2 + 1) + 24 + 2 + 16 + 3, 0,
             QStringLiteral("/x") + QChar(QChar::ReplacementCharacter)
                 + QStringLiteral(": the property name contains an unpaired UTF-16 surrogate"));
 
@@ -407,7 +429,7 @@ private Q_SLOTS:
             2 * 16 * WordBytes);
         row("unevaluatedProperties", "{'properties': {'k000': {}}, 'unevaluatedProperties': {'type': 'integer'}}",
             members("1", 256),
-            (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2) + (2 + 2) + 256 * 1 + 255 * (2 + 2 + 1),
+            (3 + 2) + 256 * (2 + 3) + (2 + 2 + 1) + 256 * (2 + 2 + 1) + (2 + 2) + 256 * 1 + 255 * (2 + 2 + 1),
             4 * WordBytes);
         // Names of 71 bytes, a line more each time a member is visited.
         row("unevaluatedProperties of long names", "{'unevaluatedProperties': {'type': 'integer'}}",
@@ -444,32 +466,62 @@ private Q_SLOTS:
         // Strings hashed (3 for 16 code units), each taken out of its array
         // with a reference to its storage (1 + 2). Two equal items compared:
         // each read away from the last one in the array (2) and taken out
-        // of it (1 + 2), and 1 for 16 code units.
+        // of it (1 + 2), the first text that their run of one hash reads
+        // anywhere in the array (8), and 1 for 16 code units.
         row("uniqueItems of strings", "{'uniqueItems': true}", repeat("'" + A32 + "'", 256),
-            (3 + 2) + 256 * 3 + (2 + 2 + 1) + 256 * (1 + 3 + 3 * 2) + 256 * (1 + 4) + (2 * 2 + 1 + 2 * 3 + 4) + 24,
+            (3 + 2) + 256 * 3 + (2 + 2 + 1) + 256 * (1 + 3 + 3 * 2) + 256 * (1 + 4) + (2 * 2 + 1 + 2 * 3 + 8 + 4) + 24,
             256 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 1 are equal"));
-        // Two equal strings of 600 bytes with another between them: the
-        // second read some 600 bytes after the first (8) when the two are
-        // compared.
+        // Two equal strings of 600 bytes with another between them, each
+        // hashed in 113 (3 * 600 / 16 rounded up): the second read some 600
+        // bytes after the first (8) when the two are compared.
         row("uniqueItems of strings apart", "{'uniqueItems': true}",
             "['" + X600 + "', '" + QByteArray(600, 'y') + "', '" + X600 + "']",
-            (3 + 2) + 3 * (3 + 4) + (2 + 2 + 1) + 3 * (1 + 3 + 3 * 37) + 3 * (1 + 1) + (2 * 2 + 1 + 2 * 3 + 8 + 75)
+            (3 + 2) + 3 * (3 + 4) + (2 + 2 + 1) + 3 * (1 + 3 + 113) + 3 * (1 + 1) + (2 * 2 + 1 + 2 * 3 + 8 + 8 + 75)
                 + 24,
             3 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 2 are equal"));
         // Arrays and objects hashed and compared through their own storage
         // (2, and 4 for two), and taken out of their container (1 + 2, or
-        // 1 for a number), objects member by member (2, and the hash of the
-        // name).
+        // 1 for a number), objects member by member (2, and the hash or the
+        // comparison of the name, 1 for a letter).
         row("uniqueItems of objects", "{'uniqueItems': true}", repeat("{'a': 1, 'b': [1]}", 256),
             (3 + 2) + 256 * ((3 + 2) + (2 + 3) + (2 + 3 + 2 + 3)) + (2 + 2 + 1)
-                + 256 * ((1 + 3) + 2 + (2 + (1 + 1)) + (2 + (1 + 3) + 2 + (1 + 1))) + 256 * (1 + 4)
-                + (2 * 2 + (1 + 2 * 3) + 4 + (2 + (1 + 2 * 1)) + (2 + (1 + 2 * 3) + 4 + (1 + 2 * 1))) + 24,
+                + 256 * ((1 + 3) + 2 + (2 + 1 + (1 + 1)) + (2 + 1 + (1 + 3) + 2 + (1 + 1))) + 256 * (1 + 4)
+                + (2 * 2 + (1 + 2 * 3) + 4 + (2 + 1 + (1 + 2 * 1)) + (2 + 1 + (1 + 2 * 3) + 4 + (1 + 2 * 1))) + 24,
             256 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 1 are equal"));
         // Names of 32 code units hashed (2 + 6) and compared (2 + 4).
         row("uniqueItems of objects of long names", "{'uniqueItems': true}", repeat("{'" + A32 + "': 1}", 256),
             (3 + 2) + 256 * ((3 + 2) + (2 + 3)) + (2 + 2 + 1) + 256 * ((1 + 3) + 2 + (2 + 3 * 2) + (1 + 1))
                 + 256 * (1 + 4) + (2 * 2 + (1 + 2 * 3) + 4 + (2 + 4) + (1 + 2 * 1)) + 24,
             256 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 1 are equal"));
+        // Strings of three letters hashed (1, 3 * 3 / 16 rounded up) and
+        // compared (1, 6 / 16 rounded up).
+        row("uniqueItems of short strings", "{'uniqueItems': true}", repeat("'abc'", 256),
+            (3 + 2) + 256 * 3 + (2 + 2 + 1) + 256 * (1 + 3 + 1) + 256 * (1 + 4) + (2 * 2 + 1 + 2 * 3 + 8 + 1) + 24,
+            256 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 1 are equal"));
+        // Booleans and null are taken out of the array without a reference
+        // to storage (1): hashed (1 + 1), and the two runs of equal items
+        // compared (2 * 2, and 1 + 1 + 1), each run anew.
+        row("uniqueItems of booleans and null", "{'uniqueItems': true}", "[true, null, false, true, null]",
+            (3 + 2) + 5 * 3 + (2 + 2 + 1) + 5 * (1 + 1) + 5 * (1 + 1) + 2 * (2 * 2 + (1 + 1 + 1)) + 24, 5 * UniqueBytes,
+            QStringLiteral(": must have unique items, and items 0 and 3 are equal"));
+        // Two runs of two strings of 600 bytes, whichever comes first in
+        // the order of the hashes: the first text that each run reads is
+        // anywhere in the array (8), and the second 1200 bytes after it (8).
+        // Hashed in 113 each, compared in 75.
+        const QByteArray y600(600, 'y');
+        row("uniqueItems of two runs apart", "{'uniqueItems': true}",
+            "['" + X600 + "', '" + y600 + "', '" + X600 + "', '" + y600 + "']",
+            (3 + 2) + 4 * (3 + 4) + (2 + 2 + 1) + 4 * (1 + 3 + 113) + 4 * (1 + 1) + 2 * (2 * 2 + 1 + 2 * 3 + 8 + 8 + 75)
+                + 24,
+            4 * UniqueBytes, QStringLiteral(": must have unique items, and items 0 and 2 are equal"));
+        // Inside not (applied to, 2 + 2 + 1), uniqueItems compares each run
+        // too, though the first repeat decides: the same work whatever the
+        // run that comes first.
+        row("uniqueItems of two runs apart, verdict", "{'not': {'uniqueItems': true}}",
+            "['" + X600 + "', '" + y600 + "', '" + X600 + "', '" + y600 + "']",
+            (3 + 2) + 4 * (3 + 4) + 2 * (2 + 2 + 1) + 4 * (1 + 3 + 113) + 4 * (1 + 1)
+                + 2 * (2 * 2 + 1 + 2 * 3 + 8 + 8 + 75),
+            4 * UniqueBytes);
     }
 
     void work()
@@ -496,36 +548,57 @@ private Q_SLOTS:
         // out of it (1 each, and 2 more for a string or an object).
         QTest::addColumn<QByteArray>("value");
         QTest::addColumn<QByteArray>("twin");
+        // The item that repeats the first.
+        QTest::addColumn<int>("repeat");
         QTest::addColumn<qint64>("work");
         // The array walked (14) and applied to (5), three hashes of items
         // taken out of it (3 * 2), the sort of the hashes (3 * (1 + 1)), the
         // first two items compared (4 + 3), the run sorted in three
         // comparisons (3 * (4 + 3)), the items compared in their order
         // (2 * (4 + 3)), and the error (24).
-        QTest::newRow("numbers") << QByteArray("[0.5, -173880412977153776, 0.5]") << QByteArray("0.5")
+        QTest::newRow("numbers") << QByteArray("[0.5, -173880412977153776, 0.5]") << QByteArray("0.5") << 2
                                  << qint64(14 + 5 + 3 * 2 + 3 * (1 + 1) + (4 + 3) + 3 * (4 + 3) + 2 * (4 + 3) + 24);
         // Strings hashed (1 + 3 + 6 each). A comparison of a string and the
         // integer is 4 + 5, and one of the two strings 4 + 7, with 8 more
-        // in the sort (by code point), or 4 more after it.
-        QTest::newRow("strings") << "['" + A32 + "', 8151061848735542478, '" + A32 + "']" << "'" + A32 + "'"
-                                 << qint64(14 + 5 + (10 + 2 + 10) + 3 * (1 + 1) + (4 + 5) + (2 * (4 + 5) + (4 + 7 + 8))
-                                           + (4 + 5) + (4 + 7 + 4) + 24);
-        // Objects walked (15 each) and hashed (1 + 3 + 2, and 2 + 2 for each
-        // member), and the two compared in the sort (4 + 7) through their
-        // storage (4), their members sorted by name (2 + 2 each, twice) and
-        // compared (2 + 3 each), and after it in the same order (4 + 7 + 4,
-        // and 2 + 3 each). The integer and an object compared are 4 + 5.
+        // in the sort (by code point), or 4 more after it. The first text
+        // that the run reads is anywhere in the array (8).
+        QTest::newRow("strings") << "['" + A32 + "', 8151061848735542478, '" + A32 + "']" << "'" + A32 + "'" << 2
+                                 << qint64(14 + 5 + (10 + 2 + 10) + 3 * (1 + 1) + (4 + 5 + 8)
+                                           + (2 * (4 + 5) + (4 + 7 + 8)) + (4 + 5) + (4 + 7 + 4) + 24);
+        // Objects walked (15 each) and hashed (1 + 3 + 2, and 2 + 3 for each
+        // member, its name 1), and the two compared in the sort (4 + 7)
+        // through their storage (4), their members sorted by name (2, and 2
+        // comparisons of 1 + 1, each, twice) and compared (2 + 1 + 3 each),
+        // and after it in the same order (4 + 7 + 4, and 2 + 1 + 3 each).
+        // The integer and an object compared are 4 + 5.
         QTest::newRow("objects") << QByteArray("[{'a': 2, 'b': 1}, 3459555847912036335, {'b': 1, 'a': 2}]")
-                                 << QByteArray("{'a': 2, 'b': 1}")
-                                 << qint64((5 + 15 + 3 + 15) + 5 + (2 * (1 + 3 + 2 + 2 * (2 + 2)) + 2) + 3 * (1 + 1)
-                                           + (4 + 5) + (2 * (4 + 5) + (4 + 7 + 4 + 2 * 2 * (2 + 2) + 2 * (2 + 3)))
-                                           + (4 + 5) + (4 + 7 + 4 + 2 * (2 + 3)) + 24);
+                                 << QByteArray("{'a': 2, 'b': 1}") << 2
+                                 << qint64((5 + 15 + 3 + 15) + 5 + (2 * (1 + 3 + 2 + 2 * (2 + 3)) + 2) + 3 * (1 + 1)
+                                           + (4 + 5)
+                                           + (2 * (4 + 5) + (4 + 7 + 4 + 2 * 2 * (2 + 2 * (1 + 1)) + 2 * (2 + 1 + 3)))
+                                           + (4 + 5) + (4 + 7 + 4 + 2 * (2 + 1 + 3)) + 24);
+        // Four strings of 600 bytes one after the other, X0, X2, X3 and X4
+        // by their indices, and the integer: a run of five. Each comparison of two strings is 4 + 7, and 150
+        // by code point in the sort or 75 after it, and reads each string
+        // away from the last one that the run read (0 or 8 here, and 8 for
+        // the first), whether the sort or the comparisons after it read it.
+        // The sort reads X3 and X2 (8 + 0), X2 and X0 (0 + 0), and X4 with
+        // each of the three others (8 + 8, 8 + 8 and 8 + 0). After it, X0
+        // is read away from X3 (8), and X2, X3 and X4 in their order.
+        QTest::newRow("strings apart") << "['" + X600 + "', -6792571494992432110, '" + X600 + "', '" + X600 + "', '"
+                + X600 + "']" << "'" + X600 + "'"
+                                       << 2
+                                       << qint64((5 + 4 * 7 + 3) + 5 + (4 * (1 + 3 + 113) + (1 + 1)) + 5 * (1 + 1)
+                                                 + (4 + 5) + ((4 + 5) + (4 + 7 + 8 + 150)) + ((4 + 5) + (4 + 7 + 150))
+                                                 + ((4 + 5) + 2 * (4 + 7 + 8 + 8 + 150) + (4 + 7 + 8 + 150))
+                                                 + ((4 + 5) + (4 + 7 + 8 + 75) + 2 * (4 + 7 + 75)) + 24);
     }
 
     void collisionsAreSorted()
     {
         QFETCH(QByteArray, value);
         QFETCH(QByteArray, twin);
+        QFETCH(int, repeat);
         QFETCH(qint64, work);
         const QJsonArray items = parse(value).toArray();
         Budget budget;
@@ -537,7 +610,8 @@ private Q_SLOTS:
         const Counts collided = count(parse("{'uniqueItems': true}").toObject(), items);
         // A random seed again, also under QT_HASH_SEED=0.
         QHashSeed::resetRandomGlobalSeed();
-        QCOMPARE(collided.lines, QStringList{QStringLiteral(": must have unique items, and items 0 and 2 are equal")});
+        QCOMPARE(collided.lines,
+                 QStringList{QStringLiteral(": must have unique items, and items 0 and %1 are equal").arg(repeat)});
         QCOMPARE(collided.work, work);
 
         // With a random seed the hashes differ: the same line, and less
@@ -546,6 +620,40 @@ private Q_SLOTS:
         const Counts apart = count(parse("{'uniqueItems': true}").toObject(), items);
         QCOMPARE(apart.lines, collided.lines);
         QVERIFY2(apart.work < collided.work, qPrintable(QString::number(apart.work)));
+    }
+
+    void uniqueItemsWorkWhateverTheSeed()
+    {
+        // Pairs of equal strings in a random order, short ones and strings
+        // of 600 bytes: the runs of one hash come in an order that the key
+        // decides, and each charges the same. So does a check of
+        // uniqueItems inside not, which a repeat decides.
+        QByteArray value = "[";
+        std::vector<int> order;
+        for (int i = 0; i < 400; ++i) {
+            order.push_back(i / 2);
+        }
+        std::mt19937 random(7);
+        std::shuffle(order.begin(), order.end(), random);
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            const QByteArray text = QByteArray::number(order[i]).rightJustified(order[i] % 2 ? 8 : 600, 'x');
+            value += (i ? ",'" : "'") + text + "'";
+        }
+        const QJsonValue parsed = parse(value + "]");
+        QVERIFY(parsed.isArray());
+        for (const QByteArray& schema :
+             {QByteArray("{'uniqueItems': true}"), QByteArray("{'not': {'uniqueItems': true}}")}) {
+            QHashSeed::setDeterministicGlobalSeed();
+            const Counts first = count(parse(schema).toObject(), parsed);
+            QHashSeed::resetRandomGlobalSeed();
+            QVERIFY(first.work > 0);
+            for (int i = 0; i < 4; ++i) {
+                QHashSeed::resetRandomGlobalSeed();
+                const Counts other = count(parse(schema).toObject(), parsed);
+                QCOMPARE(other.lines, first.lines);
+                QCOMPARE(other.work, first.work);
+            }
+        }
     }
 
     void objectsCompareWhateverTheirOrder()
@@ -574,11 +682,15 @@ private Q_SLOTS:
                  QStringList{QStringLiteral(": must have unique items, and items 0 and 2 are equal")});
         // The object walked (15) and applied to (4, and 1 for the keywords
         // of objects), const (1), the comparison through the storage of the
-        // two (1 + 4), the first names that differ (2), both objects'
-        // members sorted by name (2 + 2 each), and each member compared
-        // (2 + 1), its two values taken out of their objects (1 each).
+        // two (1 + 4), the first names that differ (2, and 2 to compare 2
+        // code units of UTF-16 with 3 bytes of UTF-8), both objects' members
+        // sorted by name (2, and 2 comparisons of 1 + 1, each), and each
+        // member compared (2 + 1, and 1 or 2 for its names), its two values
+        // taken out of their objects (1 each).
         const Counts counts = count(QJsonObject{{QLatin1StringView("const"), built}}, parsed);
-        QCOMPARE(counts.work, qint64(15 + 4 + 1 + 1 + (1 + 4) + 2 + 2 * 2 * (2 + 2) + 2 * (2 + 1 + 2)));
+        QCOMPARE(
+            counts.work,
+            qint64(15 + 4 + 1 + 1 + (1 + 4) + (2 + 2) + 2 * 2 * (2 + 2 * (1 + 1)) + (2 + 1 + 1 + 2) + (2 + 1 + 2 + 2)));
         QCOMPARE(counts.memory, qint64(2 * 2 * SortedBytes));
     }
 
@@ -600,14 +712,21 @@ private Q_SLOTS:
             return parse("[" + text + "]").toArray().at(0);
         };
         // Strings: equal 1 for each 16 code units of the two, by code point
-        // 2, hashed 3 for each 16 of the first.
+        // 2, hashed 3 for each 16 of the first, each rounded up.
         row("strings", item("'" + A32 + "'"), item("'" + A32 + "'"), 1 + 4, 1 + 2 * 4, 1 + 3 * 2);
-        // Both in UTF-8: 66 bytes, compared as they are.
-        row("strings, UTF-8", item("'" + Cjk11 + "'"), item("'" + Cjk11 + "'"), 1 + 4, 1 + 2 * 4, 1 + 3 * 2);
+        // Both in UTF-8: 66 bytes, compared as they are (66 / 16, 5), by
+        // code point (2 * 66 / 16, 9), and hashed (3 * 33 / 16, 7).
+        row("strings, UTF-8", item("'" + Cjk11 + "'"), item("'" + Cjk11 + "'"), 1 + 5, 1 + 9, 1 + 7);
+        // Short ones: a unit each, rounded up from 6 / 16, 12 / 16 and
+        // 9 / 16, or from 4 * 3 / 16, 2 * 3 / 16 and 3 * 2 / 16 for "é" in
+        // UTF-8 and UTF-16.
+        row("short strings", item("'abc'"), item("'abc'"), 1 + 1, 1 + 1, 1 + 1);
+        row("short strings, UTF-8 and UTF-16", item("'\xC3\xA9'"), item("'\\u00e9'"), 1 + 1, 1 + 1, 1 + 1);
         // Where one is UTF-8 and the other not, Qt decodes as it compares:
-        // 4 for each 16 code units of the two (33 bytes and 11 code units).
+        // 4 for each 16 code units of the two (33 bytes and 11 code units,
+        // 4 * 44 / 16), and 2 by code point (2 * 44 / 16, 6).
         row("strings, UTF-8 and UTF-16", item("'" + Cjk11 + "'"), item("'" + QByteArray("\\u4e2d").repeated(11) + "'"),
-            1 + 4 * 2, 1 + 2 * 2, 1 + 3 * 2);
+            1 + 11, 1 + 6, 1 + 7);
         // Objects through their storage (1 + 4, or 1 + 2 for the hash), and
         // their members in the same order: 2 each and its names, or both
         // objects sorted by name first for compareValues() (2, and 2
@@ -619,9 +738,11 @@ private Q_SLOTS:
             (1 + 4) + 2 * 2 * (2 + 2 * (1 + 2 * 2)) + 2 * (2 + 2 * 4 + (1 + 2)), (1 + 2) + 2 * (2 + 3 * 2 + (1 + 1)));
         // An object built in C++ keeps its names in UTF-16, in the order of
         // their code units, and a parsed one in UTF-8, in that of their code
-        // points. The first names differ (2 + 4 * 4), and equalValues()
-        // sorts both too. Each name is 33 or 34 code units, or 35 or 36
-        // bytes.
+        // points. The first names differ (2, and 4 * 69 / 16 rounded up, 18),
+        // and equalValues() sorts both too. Each name is 33 or 34 code units,
+        // or 35 or 36 bytes, 5 to compare by code point in each comparison of
+        // the sort (2 * 33 / 16 to 2 * 36 / 16, rounded up), and 17 or 18 to
+        // compare with its twin (9 by code point), and hashed in 7.
         const QString first = QString::fromLatin1(A32) + QChar(0xFF41);
         const QString second = QString::fromLatin1(A32) + QString::fromUtf8("\xF0\x9F\x98\x80");
         QJsonObject built;
@@ -629,29 +750,31 @@ private Q_SLOTS:
         built.insert(second, 2);
         row("objects of long names in two orders", built,
             item("{'" + first.toUtf8() + "': 1, '" + second.toUtf8() + "': 2}"),
-            (1 + 4) + (2 + 4 * 4) + 2 * 2 * (2 + 2 * (1 + 2 * 2)) + 2 * (2 + 4 * 4 + (1 + 2)),
-            (1 + 4) + 2 * 2 * (2 + 2 * (1 + 2 * 2)) + 2 * (2 + 2 * 4 + (1 + 2)), (1 + 2) + 2 * (2 + 3 * 2 + (1 + 1)));
+            (1 + 4) + (2 + 18) + 2 * 2 * (2 + 2 * (1 + 5)) + (2 + 17 + (1 + 2)) + (2 + 18 + (1 + 2)),
+            (1 + 4) + 2 * 2 * (2 + 2 * (1 + 5)) + 2 * (2 + 9 + (1 + 2)), (1 + 2) + 2 * (2 + 7 + (1 + 1)));
         row("arrays", item("[1, [2]]"), item("[1, [2]]"), (1 + 4) + (1 + 2) + (1 + 2 * 3 + 4) + (1 + 2),
             (1 + 4) + (1 + 2) + (1 + 2 * 3 + 4) + (1 + 2), (1 + 2) + (1 + 1) + (1 + 3 + 2) + (1 + 1));
         // Strings of 600 bytes, the third read away from the first in each
         // array (8).
         row("arrays of strings apart", itemsApart(), itemsApart(), (1 + 4) + 3 * (1 + 2 * 3 + 75) + 2 * 8,
-            (1 + 4) + 3 * (1 + 2 * 3 + 2 * 75) + 2 * 8, (1 + 2) + 3 * (1 + 3 + 3 * 37) + 8);
+            (1 + 4) + 3 * (1 + 2 * 3 + 2 * 75) + 2 * 8, (1 + 2) + 3 * (1 + 3 + 113) + 8);
         // Names apart (8 for the second name of each object), with values
         // of 600 bytes: compared (1 + 75 each, or 1 + 2 * 75 by code point)
-        // and hashed (1 + 3 * 37). The sort reads the second name away from
-        // the first in each of its comparisons too (2 * 8). Each value is
-        // read beside its name.
-        row("objects of names apart", item(Apart), item(Apart), (1 + 4) + 2 * (2 + 2 * 3 + 76) + 2 * 8,
-            (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1 + (8 + 2 * 8)) + 2 * (2 + 2 * 3 + 151) + 2 * 8,
-            (1 + 2) + 2 * (2 + 3 + 112) + 8);
+        // and hashed (1 + 113, 3 * 600 / 16 rounded up). A name of one
+        // letter is 1 to compare or hash. The sort reads the second name
+        // away from the first in each of its comparisons too (2 * 8). Each
+        // value is read beside its name.
+        row("objects of names apart", item(Apart), item(Apart), (1 + 4) + 2 * (2 + 1 + 2 * 3 + 76) + 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * (1 + 1) + (8 + 2 * 8)) + 2 * (2 + 1 + 2 * 3 + 151) + 2 * 8,
+            (1 + 2) + 2 * (2 + 1 + 3 + 1 + 113) + 8);
         // Values set after both names, "b" first: the value of "a" is read
         // away from its name, and the name "b" away from that value (8
         // each, in each object). The value of "b" lies beside its name.
-        row("objects of values apart", membersApart(), membersApart(), (1 + 4) + 2 * (2 + 2 * 3 + 76) + 2 * 2 * 8,
-            (1 + 4) + 2 * (2 * 2 + 2 * 2 * 1) + 2 * (2 + 2 * 3 + 151) + 2 * 2 * 8, (1 + 2) + 2 * (2 + 3 + 112) + 2 * 8);
+        row("objects of values apart", membersApart(), membersApart(), (1 + 4) + 2 * (2 + 1 + 2 * 3 + 76) + 2 * 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * (1 + 1)) + 2 * (2 + 1 + 2 * 3 + 151) + 2 * 2 * 8,
+            (1 + 2) + 2 * (2 + 1 + 3 + 1 + 113) + 2 * 8);
         // The same names in two orders, their text in the order of the
-        // second name first in both: the first names compared (2 + 4 * 4),
+        // second name first in both: the first names compared (2 + 18),
         // each object sorted, the name read after the other apart (8, and 8
         // in each comparison), and the members compared in the order of
         // their code points, the second name apart in both. The built object
@@ -661,10 +784,10 @@ private Q_SLOTS:
         builtApart.insert(first, QString::fromLatin1(X600));
         row("objects of names apart in two orders", builtApart,
             item("{'" + second.toUtf8() + "': '" + X600 + "', '" + first.toUtf8() + "': '" + X600 + "'}"),
-            (1 + 4) + (2 + 4 * 4) + 2 * (2 * 2 + 2 * 2 * (1 + 2 * 2) + (8 + 2 * 8)) + 2 * (2 + 4 * 4 + 2 * 3 + 76)
-                + 2 * 8,
-            (1 + 4) + 2 * (2 * 2 + 2 * 2 * (1 + 2 * 2) + (8 + 2 * 8)) + 2 * (2 + 2 * 4 + 2 * 3 + 151) + 2 * 8,
-            (1 + 2) + 2 * (2 + 3 * 2 + 3 + 112));
+            (1 + 4) + (2 + 18) + 2 * (2 * 2 + 2 * 2 * (1 + 5) + (8 + 2 * 8)) + (2 + 17 + 2 * 3 + 76)
+                + (2 + 18 + 2 * 3 + 76) + 2 * 8,
+            (1 + 4) + 2 * (2 * 2 + 2 * 2 * (1 + 5) + (8 + 2 * 8)) + 2 * (2 + 9 + 2 * 3 + 151) + 2 * 8,
+            (1 + 2) + 2 * (2 + 7 + 1 + 3 + 113));
         // The same, with the values of the built object set after its names,
         // the second first. In the order of code points, its first value is
         // read after the second (8), its second name before the first value
@@ -679,11 +802,11 @@ private Q_SLOTS:
         builtLater.insert(first, QString::fromLatin1(X600));
         row("objects of values apart in two orders", builtLater,
             item("{'" + first.toUtf8() + "': '" + X600 + "', '" + second.toUtf8() + "': '" + X600 + "'}"),
-            (1 + 4) + (2 + 4 * 4) + (2 * 2 + 2 * 2 * (1 + 2 * 2)) + (2 * 2 + 2 * 2 * (1 + 2 * 2) + 8 + 2 * 8)
-                + 2 * (2 + 4 * 4) + 2 * (1 + 2 * 3 + 75) + (8 + 8 + 1),
-            (1 + 4) + (2 * 2 + 2 * 2 * (1 + 2 * 2)) + (2 * 2 + 2 * 2 * (1 + 2 * 2) + 8 + 2 * 8) + 2 * (2 + 2 * 4)
+            (1 + 4) + (2 + 18) + (2 * 2 + 2 * 2 * (1 + 5)) + (2 * 2 + 2 * 2 * (1 + 5) + 8 + 2 * 8) + (2 + 17) + (2 + 18)
+                + 2 * (1 + 2 * 3 + 75) + (8 + 8 + 1),
+            (1 + 4) + (2 * 2 + 2 * 2 * (1 + 5)) + (2 * 2 + 2 * 2 * (1 + 5) + 8 + 2 * 8) + 2 * (2 + 9)
                 + 2 * (1 + 2 * 3 + 2 * 75) + (8 + 8 + 1),
-            (1 + 2) + 2 * (2 + 3 * 2) + 2 * (1 + 3 + 3 * 37) + (1 + 8));
+            (1 + 2) + 2 * (2 + 7) + 2 * (1 + 3 + 113) + (1 + 8));
     }
 
     void stringsApart_data()
@@ -708,10 +831,10 @@ private Q_SLOTS:
         // A step more for each item.
         QTest::newRow("unevaluatedItems")
             << QByteArray("{'unevaluatedItems': {'maxLength': 1000}}") << Walked + 3 * (1 + 2 + 2 + (1 + 4) + 1) + 8;
-        // Taken out of the array (1 + 2) and hashed (1 + 3 * 37), and the
-        // hashes sorted (1 + 1 each).
+        // Taken out of the array (1 + 2) and hashed (1 + 113, 3 * 600 / 16
+        // rounded up), and the hashes sorted (1 + 1 each).
         QTest::newRow("uniqueItems") << QByteArray("{'uniqueItems': true}")
-                                     << Walked + 3 * (1 + 3 + 3 * 37) + 8 + 3 * (1 + 1);
+                                     << Walked + 3 * (1 + 3 + 113) + 8 + 3 * (1 + 1);
         // Compared (1 + 4, and 1 + 75 for each string, each of the two
         // taken out of its array, 1 + 2) with the schema's, parsed in the
         // order of its items.
@@ -734,10 +857,10 @@ private Q_SLOTS:
         // reads away (8 + 8).
         QTest::newRow("additionalProperties") << QByteArray("{'additionalProperties': {'maxLength': 1000}}")
                                               << Walked + 2 * (2 + 2 + 2 + (1 + 4) + 1) + 8 + 8;
-        // Each name looked up too (2).
+        // Each name looked up too (2 + 1).
         QTest::newRow("properties") << QByteArray(
             "{'properties': {'a': {'maxLength': 1000}, 'b': {'maxLength': 1000}}}")
-                                    << Walked + 2 * (2 + 2 + 2 + 2 + (1 + 4) + 1) + 8 + 8;
+                                    << Walked + 2 * (2 + (2 + 1) + 2 + 2 + (1 + 4) + 1) + 8 + 8;
         // A step more for each member.
         QTest::newRow("unevaluatedProperties") << QByteArray("{'unevaluatedProperties': {'maxLength': 1000}}")
                                                << Walked + 2 * (1 + 2 + 2 + 2 + (1 + 4) + 1) + 8 + 8;
@@ -778,6 +901,25 @@ private Q_SLOTS:
         Budget hashBudget;
         hashValue(first, 7, hashBudget);
         QCOMPARE(hashBudget.work(), hash);
+    }
+
+    void valuesOfTwoTypesCompared()
+    {
+        // A string and an integer, each taken out of its array: 1, and 1 for
+        // each taken out, 2 more for the string, which holds a reference to
+        // its storage. Each is charged by its own type, in either order.
+        const QJsonValue text = parse("['" + A32 + "']").toArray().at(0);
+        const QJsonValue number = parse("[1]").toArray().at(0);
+        for (const auto& [first, second] : {std::pair(text, number), std::pair(number, text)}) {
+            TextReads readsA;
+            TextReads readsB;
+            Budget equalBudget;
+            QVERIFY(!equalValues(first, second, equalBudget, &readsA, &readsB));
+            QCOMPARE(equalBudget.work(), qint64(1 + (1 + 2) + 1));
+            Budget compareBudget;
+            QVERIFY(compareValues(first, second, compareBudget, &readsA, &readsB) != 0);
+            QCOMPARE(compareBudget.work(), qint64(1 + (1 + 2) + 1));
+        }
     }
 
     void textIsTheSameInEveryEncoding()

@@ -106,7 +106,10 @@ constexpr qint64 DecodeUnits = 4;
 // Words of an annotation set merged or cleared for each unit.
 constexpr qint64 WordsPerUnit = 4;
 
-// What reading text costs, in units (see above).
+// What reading text costs, in units (see above): `size` code units at
+// `weight` units for each CharactersPerUnit, rounded up, so that a short
+// text pays its share too.
+qint64 textUnits(qint64 weight, qint64 size);
 qint64 hashUnits(QAnyStringView text);
 qint64 compareUnits(QAnyStringView a, QAnyStringView b);
 qint64 equalUnits(QAnyStringView a, QAnyStringView b);
@@ -115,16 +118,23 @@ qint64 decodeUnits(QAnyStringView text);
 
 // The names and strings of one object or array read one after the other:
 // the units of the bytes between each and the last (see MaxGapUnits). The
-// first is charged with the container (UnitsPerContainer), and a text read
-// again costs nothing more.
+// first is charged with the container (UnitsPerContainer), or `first`
+// units for a first read that may be anywhere in it, and a text read again
+// costs nothing more.
 class TextReads
 {
 public:
+    TextReads() = default;
+    explicit TextReads(qint64 first)
+        : m_first(first)
+    {
+    }
+
     qint64 next(QAnyStringView text)
     {
         const auto start = quintptr(text.data());
         const quintptr end = start + quintptr(text.size_bytes());
-        qint64 units = 0;
+        qint64 units = m_first;
         if (m_end != 0) {
             const quintptr gap = start >= m_end ? start - m_end : (m_start >= end ? m_start - end : 0);
             units = gap >= quintptr(MaxGapUnits * BytesPerLine) ? MaxGapUnits : qint64(gap) / BytesPerLine;
@@ -137,6 +147,7 @@ public:
 private:
     quintptr m_start = 0;
     quintptr m_end = 0;
+    qint64 m_first = 0;
 };
 
 // Values nested deeper than this are refused before any check. Qt's JSON

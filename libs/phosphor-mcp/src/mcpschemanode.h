@@ -154,15 +154,20 @@ struct Node
 
     // const and enum. Their strings are kept here in UTF-16 and in UTF-8,
     // so that a string of the value is compared with them in its own
-    // encoding, and a long enum of strings is looked up in a table.
+    // encoding, and a long enum of strings is looked up in a table. Their
+    // numbers are read once, here, and a number of the value once for all
+    // of them.
     bool hasConst = false;
     QJsonValue constValue;
     QString constString;
     QByteArray constUtf8;
+    Number constNumber;
     bool hasEnum = false;
     QStringList enumStrings;
     QByteArrayList enumUtf8;
     NameTable enumTable;
+    std::vector<Number> enumNumbers;
+    // The entries that are neither strings nor numbers.
     std::vector<QJsonValue> enumOthers;
 
     enum NumberKeyword : quint8 {
@@ -195,6 +200,13 @@ struct Node
     // The triggers of dependentRequired by name, to look the members of an
     // object up in when it has fewer members than there are triggers.
     NameTable dependentRequiredIndex;
+    // The hashes of the names above and of the triggers of
+    // dependentSchemas, keyed by CompiledSchema::key, in the same order:
+    // the check looks them up in an object's names, sorted by the same
+    // hash, without hashing them again for each object.
+    std::vector<quint64> requiredHashes;
+    std::vector<std::pair<quint64, std::vector<quint64>>> dependentRequiredHashes;
+    std::vector<quint64> dependentSchemaHashes;
 
     // Applicators.
     NameTable properties;
@@ -229,6 +241,11 @@ struct CompiledSchema
 {
     // The root is the first node.
     std::vector<Node> nodes;
+    // The key of the hashes of the check (of uniqueItems' items, and of
+    // the names it looks up), Qt's global seed when the schema compiled:
+    // random in each process, so that a model cannot choose values whose
+    // hashes are the same.
+    quint64 key = 0;
 };
 
 // The JSON pointer of a node, in the schema, built from its parents.
