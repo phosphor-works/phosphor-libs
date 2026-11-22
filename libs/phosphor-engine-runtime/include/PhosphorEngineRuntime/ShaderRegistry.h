@@ -24,7 +24,7 @@
 namespace PhosphorEngineRuntime {
 
 /// PlasmaZones-specific ShaderRegistry that adds:
-/// - Hardcoded system/user shader paths (plasmazones/overlays)
+/// - Hardcoded system/user shader paths (phosphor-works/shaders/overlays)
 /// - userShadersEnabled(), userShaderDirectory(), openUserShaderDirectory()
 class PHOSPHORENGINERUNTIME_EXPORT ShaderRegistry : public PhosphorShaders::ShaderRegistry
 {

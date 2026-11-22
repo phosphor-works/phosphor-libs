@@ -74,8 +74,6 @@ void SurfaceUniformProfile::fill(const PhosphorShaders::UboFrameState& state)
     for (std::size_t i = 0; i < std::size(m_u.uBackdropRect); ++i) {
         m_u.uBackdropRect[i] = state.backdropRect[i];
     }
-    // No rule opacity on the daemon — qt_Opacity carries host opacity.
-    m_u.uSurfaceOpacity = 1.0f;
 
     // Loop bounds derive from the destination array extents (pinned by the
     // SurfaceUniforms static_asserts) so they can't silently under-copy if the

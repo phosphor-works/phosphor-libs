@@ -70,34 +70,6 @@ enum class SnapIntent {
     AutoReplaced,
 };
 
-/// Coarse structural classification of a window, carried on the open and close
-/// wire calls and on the placement record. Nothing branches on it any more:
-/// the pending-restore consume gate it fed was removed with that queue.
-/// Wire/JSON encoding is `int`; `Unknown` is the permissive default.
-enum class WindowKind : int {
-    Unknown = 0,
-    Normal = 1,
-    Transient = 2,
-};
-
-/// Clamp an integer wire value to a valid WindowKind. Unknown wire values
-/// (out-of-range, future enum values from an older daemon) collapse to
-/// `Unknown` rather than producing an undefined enum. Centralised here so the
-/// persistence-layer call sites
-/// (`WindowTrackingAdaptor::windowClosed`, `SnapAdaptor::resolveWindowRestore`,
-/// `WindowPlacement::fromJson`) stay in lockstep when a new kind is added.
-inline WindowKind clampWindowKindFromWire(int wire)
-{
-    switch (wire) {
-    case static_cast<int>(WindowKind::Normal):
-        return WindowKind::Normal;
-    case static_cast<int>(WindowKind::Transient):
-        return WindowKind::Transient;
-    default:
-        return WindowKind::Unknown;
-    }
-}
-
 /// Why a snap restore is being resolved. Replaces the `isOpenPath` bool the
 /// Snap.resolveWindowRestore wire used to carry.
 ///
@@ -127,8 +99,8 @@ enum class RestoreReason : int {
     DesktopReapply = 5,
 };
 
-/// Clamp an integer wire value to a valid RestoreReason. Mirrors
-/// clampWindowKindFromWire: an out-of-range value collapses to `Open`.
+/// Clamp an integer wire value to a valid RestoreReason: an out-of-range
+/// value collapses to `Open`.
 ///
 /// Note that Open is the most PERMISSIVE value, not the safest one — it is the
 /// only reason that grants both gates. It is chosen anyway because it is the
@@ -179,12 +151,6 @@ struct SnapResult
     QString zoneId;
     QStringList zoneIds;
     QString screenId;
-    /// INERT, kept for ABI layout: snap's resolve once set it when it stood
-    /// down for a record that homed the window TILED on another engine's
-    /// screen, so the adaptor would offer the window to that engine's
-    /// cross-screen reclaim. The reopen contract removed both halves; nothing
-    /// sets or reads it now, and it stays false.
-    bool deferredToTilingEngine = false;
     /// Target virtual desktop the snap should be committed in (1-based). 0 means
     /// "the window's current desktop" — the historical behaviour. Set non-zero only
     /// by a placement rule that also routes the window to a desktop (RouteToDesktop),

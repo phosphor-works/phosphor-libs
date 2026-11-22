@@ -169,29 +169,6 @@ void ScreenContextTracker::pruneDesktop(int removedDesktop)
     }
 }
 
-void ScreenContextTracker::renumberDesktopsAfterRemoval(int removedDesktop)
-{
-    // Plain in-place decrement: both maps hold a desktop number per screen,
-    // not a desktop-keyed bucket, so there is no collision to order around
-    // (unlike the engines' state stores, which must walk ascending).
-    // pruneDesktop has already dropped anything that named removedDesktop, so
-    // no value here can equal it.
-    const auto shift = [removedDesktop](QHash<QString, int>& map) {
-        for (auto it = map.begin(); it != map.end(); ++it) {
-            if (it.value() > removedDesktop) {
-                --it.value();
-            }
-        }
-    };
-    shift(m_screenDesktopOverride);
-    shift(m_screenCurrentDesktop);
-    // The global desktop is the startup seed every unpinned screen falls back
-    // to, so it follows the desktop it named rather than the number (F799).
-    if (m_currentDesktop > removedDesktop) {
-        --m_currentDesktop;
-    }
-}
-
 void ScreenContextTracker::remapDesktops(const DesktopRemap& remap)
 {
     if (remap.isIdentity()) {

@@ -3,7 +3,8 @@
 
 #include <PhosphorEngineRuntime/ConfigMigration.h>
 
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
+#include <PhosphorPaths/TreeMove.h>
 #include <PhosphorEngineRuntime/ConfigKeys.h>
 #include <PhosphorEngineRuntime/Constants.h>
 
@@ -28,12 +29,10 @@
 #include <PhosphorRules/RuleSet.h>
 #include <PhosphorZones/LayoutRegistry.h>
 
-#include <algorithm>
 #include <utility>
 
 #include <QColor>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -77,6 +76,7 @@ PhosphorConfig::Schema makeMigrationSchema(ConfigMigration::ExternalImports impo
          [importFiles](QJsonObject& root) {
              ConfigMigration::migrateV7ToV8(root, importFiles);
          }},
+        {8, &ConfigMigration::migrateV8ToV9},
     };
     // clang-format on
     return s;
@@ -112,45 +112,6 @@ std::atomic<ConfigMigration::CorruptConfigHandling> s_corruptHandling{
 
 namespace {
 
-/// Move every file under @p from into the same place under @p to, leaving a
-/// file that already exists there alone, then remove what is left empty of
-/// @p from. A rename where the two share a filesystem, a copy otherwise.
-void moveTreeContents(const QString& from, const QString& to)
-{
-    if (from.isEmpty() || !QFileInfo(from).isDir()) {
-        return;
-    }
-    QDirIterator it(from, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        const QString source = it.next();
-        if (source.endsWith(QLatin1String(".migrate.lock"))) {
-            continue;
-        }
-        const QString target = to + QLatin1Char('/') + QDir(from).relativeFilePath(source);
-        if (QFileInfo::exists(target)) {
-            continue;
-        }
-        QDir().mkpath(QFileInfo(target).absolutePath());
-        if (!QFile::rename(source, target) && QFile::copy(source, target)) {
-            QFile::remove(source);
-        }
-    }
-    // Empty directories, deepest first; a directory something stayed in
-    // refuses to go.
-    QDirIterator dirs(from, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    QStringList found;
-    while (dirs.hasNext()) {
-        found.append(dirs.next());
-    }
-    std::sort(found.begin(), found.end(), [](const QString& a, const QString& b) {
-        return a.size() > b.size();
-    });
-    for (const QString& dir : std::as_const(found)) {
-        QDir().rmdir(dir);
-    }
-    QDir().rmdir(from);
-}
-
 /// 3.x kept the app's config in <config root>/<app>/ and the user's own data
 /// trees in <data root>/<app>/<tree>. 4.0 keeps the config in the app's folder
 /// under phosphor-works and the data trees in the common ones every Phosphor
@@ -165,13 +126,14 @@ void adoptPreviousLocations()
     }
     const QString configRoot = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
     if (!configRoot.isEmpty()) {
-        moveTreeContents(configRoot + QLatin1Char('/') + appDirectoryName(), appConfigDir());
+        PhosphorPaths::moveTreeContents(configRoot + QLatin1Char('/') + PhosphorPaths::appDirectoryName(),
+                                        PhosphorPaths::appConfigDir());
     }
     const QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     if (dataRoot.isEmpty()) {
         return;
     }
-    const QString oldData = dataRoot + QLatin1Char('/') + appDirectoryName();
+    const QString oldData = dataRoot + QLatin1Char('/') + PhosphorPaths::appDirectoryName();
     // 3.x's tree name under <data root>/<app>, and where it lives now.
     const QList<std::pair<QString, QString>> trees = {
         {QStringLiteral("layouts"), ConfigKeys::layoutsSubdir()},
@@ -191,7 +153,7 @@ void adoptPreviousLocations()
     for (const auto& [oldName, tree] : trees) {
         // The surface packs' tree is the host's to name, so it may be unset.
         if (!tree.isEmpty()) {
-            moveTreeContents(oldData + QLatin1Char('/') + oldName, dataRoot + QLatin1Char('/') + tree);
+            PhosphorPaths::moveTreeContents(oldData + QLatin1Char('/') + oldName, dataRoot + QLatin1Char('/') + tree);
         }
     }
     QDir().rmdir(oldData);
@@ -638,10 +600,11 @@ bool ConfigMigration::ensureJsonConfigImpl()
 
     qInfo("ConfigMigration: migration complete");
     // The in-memory chain above ran through migrateV4ToV5 up to
-    // migrateV7ToV8 — pure config→config transforms (v5 folds the per-mode
+    // migrateV8ToV9 — pure config→config transforms (v5 folds the per-mode
     // appearance/gap values into the unified "Windows" / "Gaps" groups; v6
     // converts the snapping zone colours to theme-fallback strings; v7
-    // renames the placement animation nodes; v8 only stamps the version), so
+    // renames the placement animation nodes; v8 only stamps the version; v9
+    // turns JSON-encoded structured values native), so
     // the filesystem-touching finalizers run here: finalizeV4Conversion
     // (which also adopts a legacy windowrules.json as rules.json and prunes
     // the retired provider-default rule) plus the v8 overlay-shader sidecar

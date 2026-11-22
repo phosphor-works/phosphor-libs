@@ -32,8 +32,8 @@ namespace PhosphorSurfaceShaders {
 ///
 /// std140 note: the three trailing geometry vec2s (uSurfaceSize /
 /// uSurfaceFrameTopLeft / uSurfaceFrameSize) end at offset 104. The two floats
-/// uHasBackdrop (104) and uSurfaceOpacity (108) fill what would otherwise be an
-/// 8-byte hole before customParams (a vec4 array, 16-byte-aligned), which lands
+/// uHasBackdrop (104) and the uSurfacePad0 padding float (108) fill what would
+/// otherwise be an 8-byte hole before customParams (a vec4 array, 16-byte-aligned), which lands
 /// at offset 112 exactly as the GLSL compiler places it.
 struct alignas(16) SurfaceUniforms
 {
@@ -57,12 +57,9 @@ struct alignas(16) SurfaceUniforms
     // styling on this rather than on which runtime they are on.
     float uHasBackdrop; // float: 4 bytes at offset 104 (1 when the host bound a backdrop, else 0)
 
-    // Legacy: a constant 1.0 on BOTH runtimes, kept so the layout and the
-    // pack-facing name survive. It no longer carries the window's
-    // rule-resolved opacity — that was the retired handlesOpacity contract —
-    // and a host fading a whole decoration does it through qt_Opacity. See
-    // kUSurfaceOpacity in SurfaceShaderContract.h.
-    float uSurfaceOpacity; // float: 4 bytes at offset 108 (constant 1.0)
+    // std140 padding before customParams; nothing reads it. Named to match
+    // surface_uniforms.glsl's UBO block.
+    float uSurfacePad0; // float: 4 bytes at offset 108
 
     // Pack-declared parameters (float/int/bool → customParams, colours →
     // customColors), addressed by the registry-generated `p_<id>` preambles.
@@ -137,8 +134,8 @@ static_assert(offsetof(SurfaceUniforms, uSurfaceFrameSize) == 96,
               "SurfaceUniforms::uSurfaceFrameSize must remain at std140 offset 96");
 static_assert(offsetof(SurfaceUniforms, uHasBackdrop) == 104,
               "SurfaceUniforms::uHasBackdrop must remain at std140 offset 104");
-static_assert(offsetof(SurfaceUniforms, uSurfaceOpacity) == 108,
-              "SurfaceUniforms::uSurfaceOpacity must remain at std140 offset 108");
+static_assert(offsetof(SurfaceUniforms, uSurfacePad0) == 108,
+              "SurfaceUniforms::uSurfacePad0 must remain at std140 offset 108");
 static_assert(offsetof(SurfaceUniforms, customParams) == 112,
               "SurfaceUniforms::customParams must remain at std140 offset 112");
 static_assert(offsetof(SurfaceUniforms, customColors) == 240,

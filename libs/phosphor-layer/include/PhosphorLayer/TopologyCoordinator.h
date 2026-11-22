@@ -51,10 +51,6 @@ class PHOSPHORLAYER_EXPORT TopologyCoordinator : public QObject
 {
     Q_OBJECT
 public:
-    /// Convenience alias — existing call sites that spell out the full name
-    /// still compile, but `TopologyCoordinator::Config` reads fine too.
-    using Config = TopologyConfig;
-
     TopologyCoordinator(IScreenProvider* screens, ILayerShellTransport* transport, TopologyConfig cfg = {},
                         QObject* parent = nullptr);
     ~TopologyCoordinator() override;

@@ -60,7 +60,7 @@ bool WindowPlacementStore::record(WindowPlacement incoming)
                 continue;
             }
             // Merge incoming into a copy of the existing record. Context (screen /
-            // desktop / activity / kind) is the OWNING engine's business, so only a
+            // desktop / activity) is the OWNING engine's business, so only a
             // real engine capture updates it — a geometry-only write (no engine slot,
             // e.g. recordFreeGeometry) must NOT clobber the managed-context fields.
             WindowPlacement merged = bucket.at(i);
@@ -76,9 +76,6 @@ bool WindowPlacementStore::record(WindowPlacement incoming)
                 }
                 merged.virtualDesktop = incoming.virtualDesktop;
                 merged.activity = incoming.activity;
-                if (incoming.kind != WindowKind::Unknown) {
-                    merged.kind = incoming.kind;
-                }
             }
             for (auto e = incoming.engines.constBegin(); e != incoming.engines.constEnd(); ++e) {
                 EngineSlot slot = e.value();
@@ -564,29 +561,13 @@ std::optional<WindowPlacement> WindowPlacementStore::takeForReopen(const QString
     return rec;
 }
 
-bool WindowPlacementStore::burnReclaimCredit(const QString& windowId, const QString& appId)
-{
-    // Inert, kept for ABI: the reclaim credit retired with the cross-screen
-    // reclaim it rationed. See the header.
-    Q_UNUSED(windowId)
-    Q_UNUSED(appId)
-    return false;
-}
-
-void WindowPlacementStore::markInstanceMovedLive(const QString& windowId)
-{
-    // Inert, kept for ABI: it excused the credit burn above.
-    Q_UNUSED(windowId)
-}
-
-bool WindowPlacementStore::markInstanceClosed(const QString& windowId, bool graceEligible)
+bool WindowPlacementStore::markInstanceClosed(const QString& windowId)
 {
     // What survives of the close mark is the open claim, which dies with the
     // instance: the alive-set prune reaches a window that died without a close
     // signal, and a claim left standing would hold the record it took at open
     // away from every later same-app open until eviction. There is no credit
     // left to revoke and no close time to stamp, so the answer is always false.
-    Q_UNUSED(graceEligible)
     releaseOpenClaim(windowId);
     return false;
 }

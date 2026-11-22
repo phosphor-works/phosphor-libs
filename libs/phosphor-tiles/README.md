@@ -85,8 +85,9 @@ AlgorithmRegistry reg;
 // Point a loader at an XDG-relative subdirectory and scan. The bundled
 // algorithms live in the system data dir; user algorithms override by
 // filename from the writable data dir. Each discovered *.luau registers a
-// LuauTileAlgorithm against the injected registry.
-ScriptedAlgorithmLoader loader(QStringLiteral("plasmazones/algorithms"), &reg);
+// LuauTileAlgorithm against the injected registry. The placement apps share
+// one tree, phosphor-works/algorithms (phosphor-paths names it).
+ScriptedAlgorithmLoader loader(PhosphorPaths::commonDataSubdir(QStringLiteral("algorithms")), &reg);
 loader.scanAndRegister();
 
 auto *alg = reg.algorithm(QStringLiteral("master-stack"));

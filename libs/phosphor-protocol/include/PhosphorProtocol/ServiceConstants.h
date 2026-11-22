@@ -493,7 +493,7 @@ inline constexpr QLatin1String Interface("org.phosphor_works.PlasmaZones.Editor"
 //       window tiled for the session. The reclaim was later removed (a window
 //       is restored only on the output it opens on); restoreReason still gates
 //       the snap restore's same-app record FIFO, placement rules and the
-//       free-size restore, and the min sizes are accepted and ignored.
+//       free-size restore, and the min sizes were ignored until v11 dropped them.
 //
 //       Why the handshake and not signature matching. Parts of the above
 //       widen NOTHING: the interface moves above, and scrollEdge's closed set
@@ -895,6 +895,12 @@ inline constexpr QLatin1String Interface("org.phosphor_works.PlasmaZones.Editor"
 //       The dynamic-workspaces map stream the branch carried for a future
 //       overview (a signal and its replay method) is removed before release:
 //       nothing read it.
+//
+//       Arguments the daemon accepted and ignored only to keep an old
+//       signature are dropped in the same unreleased cycle, so they fold in
+//       here. Snap.resolveWindowRestore loses windowKind, minWidth and
+//       minHeight, (ssbiiii) -> (ssbi); WindowTracking.windowClosed loses
+//       windowKind, (sis) -> (ss).
 
 inline constexpr int ApiVersion = 11;
 inline constexpr int MinPeerApiVersion = 11;

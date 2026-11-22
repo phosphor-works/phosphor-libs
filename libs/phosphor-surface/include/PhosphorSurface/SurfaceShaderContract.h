@@ -188,16 +188,6 @@ inline constexpr const char* kUSurfaceFocused = "uSurfaceFocused";
 /// static decoration costs nothing.
 inline constexpr const char* kITime = "iTime";
 
-/// `float uSurfaceOpacity` — a constant 1.0 on BOTH runtimes. Retained only
-/// so the UBO layout and the pack-facing name survive; there is nothing to
-/// read from it. It no longer carries the window's rule-resolved SetOpacity:
-/// that was the retired `handlesOpacity` contract, SetOpacity is layer-backed
-/// now (the plain opacity-tint layer folds it into its own pack param) and
-/// in-pack content dimming is an ordinary pack parameter (frost/glass
-/// `contentOpacity`). A host that fades a whole decoration does it through
-/// `qt_Opacity`, not this, so a pack has no reason to sample it.
-inline constexpr const char* kUSurfaceOpacity = "uSurfaceOpacity";
-
 /// `sampler2D uBackdrop` — BOTH RUNTIMES, with different content. The scene BEHIND the window,
 /// captured over the same (padded) canvas as `uTexture0` each frame for
 /// packs that declare `"needsBackdrop": true` (frost / glass). Texel-aligned

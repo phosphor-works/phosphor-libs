@@ -14,10 +14,8 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QLoggingCategory>
-#include <QSaveFile>
 #include <QStandardPaths>
 #include <QStringList>
-#include <QUuid>
 
 #include <algorithm>
 #include <any>
@@ -55,168 +53,6 @@ QString standardUserPresetRoot(const QString& subdirectory)
 QString userPresetDirectory(const QString& root, ShaderFamily family)
 {
     return root + QLatin1Char('/') + shaderFamilyToken(family);
-}
-
-namespace {
-/// Namespace UUID for deriving a migrated preset's id from its old filename.
-/// Function-local static rather than a namespace-scope QUuid: fromString is not
-/// constexpr, and a dynamic-initialised global would be subject to cross-TU
-/// static-init ordering. Same idiom as `shaderNamespaceUuid` in the registry.
-const QUuid& legacyPresetNamespaceUuid()
-{
-    static const QUuid uuid = QUuid::fromString(QStringLiteral("{6f2b8d51-4c3a-4e7f-9b10-2d8e4a5c7b63}"));
-    return uuid;
-}
-
-// The keys the old zone-only save path wrote. Named here rather than inline so
-// the mapping onto the current shape reads as a table.
-constexpr auto LegacyFieldShaderId = "shaderId";
-constexpr auto LegacyFieldShaderParams = "shaderParams";
-constexpr auto LegacyFieldName = "name";
-} // namespace
-
-int migrateLegacyOverlayPresets(const QString& root)
-{
-    QDir rootDir(root);
-    if (!rootDir.exists()) {
-        return 0;
-    }
-    QStringList candidates = rootDir.entryList({QStringLiteral("*.json")}, QDir::Files);
-    if (candidates.isEmpty()) {
-        return 0;
-    }
-    // Same entry cap the rest of the preset path inherits from DirectoryLoader,
-    // and for the same reason. The per-file byte cap below bounded how much each
-    // file could cost but nothing bounded HOW MANY, and this scan runs at startup
-    // in four processes over a user-writable directory: fifty thousand junk JSON
-    // files would stall the daemon, the effect and the settings window before any
-    // of them drew. Truncating rather than refusing, so a directory that is merely
-    // large still migrates what it can.
-    if (candidates.size() > PhosphorFsLoader::DirectoryLoader::kMaxEntries) {
-        qCWarning(lcPresetStore) << "Legacy preset directory holds" << candidates.size() << "files; migrating the first"
-                                 << PhosphorFsLoader::DirectoryLoader::kMaxEntries << "and leaving the rest:" << root;
-        candidates = candidates.mid(0, PhosphorFsLoader::DirectoryLoader::kMaxEntries);
-    }
-
-    const QString targetDir = userPresetDirectory(root, ShaderFamily::Overlay);
-    // Hoisted: the whole migration aborts if this fails, so nothing depended on
-    // it running once per candidate file.
-    if (!QDir().mkpath(targetDir)) {
-        qCWarning(lcPresetStore) << "Cannot create the overlay preset directory, aborting migration:" << targetDir;
-        return 0;
-    }
-    int migrated = 0;
-
-    for (const QString& fileName : candidates) {
-        const QString sourcePath = rootDir.absoluteFilePath(fileName);
-
-        QFile source(sourcePath);
-        if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            qCWarning(lcPresetStore) << "Legacy preset will not open, leaving it:" << sourcePath
-                                     << source.errorString();
-            continue;
-        }
-        // Same per-file cap the rest of the preset path inherits from
-        // DirectoryLoader. This scan runs at startup in four processes over a
-        // user-writable directory, and read-all had no bound at all.
-        if (source.size() > PhosphorFsLoader::DirectoryLoader::kMaxFileBytes) {
-            qCWarning(lcPresetStore) << "Legacy preset is larger than"
-                                     << PhosphorFsLoader::DirectoryLoader::kMaxFileBytes
-                                     << "bytes, leaving it:" << sourcePath;
-            continue;
-        }
-        QJsonParseError parseError{};
-        const QJsonDocument doc = QJsonDocument::fromJson(source.readAll(), &parseError);
-        source.close();
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-            qCWarning(lcPresetStore) << "Legacy preset is not a JSON object, leaving it:" << sourcePath;
-            continue;
-        }
-
-        const QJsonObject obj = doc.object();
-        const QString packId = obj.value(QLatin1String(LegacyFieldShaderId)).toString();
-        if (packId.isEmpty()) {
-            // Not a preset this ever wrote. Someone else's file living in the
-            // same directory, and not ours to move or delete.
-            continue;
-        }
-
-        ShaderPreset preset;
-        // Derived, not random: two processes racing this migration must land on
-        // the same target path, or the user ends up with the preset twice.
-        //
-        // WithoutBraces because this id becomes a filename below, and CLAUDE.md
-        // reserves the braced spelling for everything that is not a filesystem
-        // path. It also makes the id identical to the file's stem, so the
-        // stem fallback and the declared `id` field agree.
-        preset.id = QUuid::createUuidV5(legacyPresetNamespaceUuid(), fileName).toString(QUuid::WithoutBraces);
-        preset.name = obj.value(QLatin1String(LegacyFieldName)).toString();
-        if (preset.name.isEmpty()) {
-            preset.name = QFileInfo(fileName).completeBaseName();
-        }
-        // Truncate at the write, the same bound ShaderPreset::fromJson applies at
-        // the read. Without it the migration produced a file fromJson would then
-        // silently shorten, so the name on disk and the name in every picker row
-        // disagreed — the asymmetric half of a defensive pair.
-        if (preset.name.size() > ShaderPreset::MaxNameChars) {
-            preset.name.truncate(ShaderPreset::MaxNameChars);
-            // And drop a surrogate the cut split, exactly as fromJson does.
-            if (!preset.name.isEmpty() && preset.name.back().isHighSurrogate()) {
-                preset.name.chop(1);
-            }
-        }
-        preset.packId = packId;
-        preset.params = obj.value(QLatin1String(LegacyFieldShaderParams)).toObject().toVariantMap();
-        // BOUNDED here too, the same two caps fromJson applies on the read. Without them
-        // the migration wrote a file that every later read silently shortened, so the name
-        // cap's own argument about the asymmetric half of a defensive pair applied to the
-        // params map as well.
-        if (preset.params.size() > ShaderPreset::MaxParams) {
-            auto cut = preset.params.begin();
-            std::advance(cut, ShaderPreset::MaxParams);
-            preset.params.erase(cut, preset.params.end());
-        }
-        for (auto it = preset.params.begin(); it != preset.params.end(); ++it) {
-            if (it.value().typeId() == QMetaType::QString
-                && it.value().toString().size() > ShaderPreset::MaxValueChars) {
-                it.value() = it.value().toString().left(ShaderPreset::MaxValueChars);
-            }
-        }
-
-        const QString targetPath = targetDir + QLatin1Char('/') + preset.id + QStringLiteral(".json");
-
-        if (!QFile::exists(targetPath)) {
-            // QSaveFile so a crash mid-write cannot leave a truncated preset
-            // behind that the scan then refuses on every later pass.
-            QSaveFile target(targetPath);
-            if (!target.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                qCWarning(lcPresetStore) << "Cannot write migrated preset, leaving the original:" << targetPath
-                                         << target.errorString();
-                continue;
-            }
-            const QByteArray json = QJsonDocument(preset.toJson()).toJson(QJsonDocument::Indented);
-            if (target.write(json) != json.size() || !target.commit()) {
-                qCWarning(lcPresetStore) << "Failed writing migrated preset, leaving the original:" << targetPath
-                                         << target.errorString();
-                continue;
-            }
-            ++migrated;
-        }
-
-        // Remove only once the target is known to exist, so a failure anywhere
-        // above leaves the original in place to be retried. A target that
-        // already existed means an earlier run wrote it and died before the
-        // removal; finishing the job here is why this is not gated on having
-        // just written the file.
-        if (!QFile::remove(sourcePath)) {
-            qCWarning(lcPresetStore) << "Migrated preset but could not remove the original:" << sourcePath;
-        }
-    }
-
-    if (migrated > 0) {
-        qCInfo(lcPresetStore) << "Imported" << migrated << "overlay preset(s) into" << targetDir;
-    }
-    return migrated;
 }
 
 /// Turns one preset file into a `ShaderPreset` and commits each rescan batch to
@@ -372,9 +208,9 @@ ShaderPresetStore::~ShaderPresetStore()
 void ShaderPresetStore::load(const QString& root, const QList<ShaderFamily>& families)
 {
     // An empty root would resolve against the process working directory:
-    // QDir(QString()) is QDir("."), whose exists() is true, so the migration
-    // would scan and read the CWD's *.json files, and userPresetDirectory()
-    // would hand out filesystem-root paths like "/animation". A relative root
+    // QDir(QString()) is QDir("."), so the loaders would scan the CWD, and
+    // userPresetDirectory() would hand out filesystem-root paths like
+    // "/animation". A relative root
     // is the same hazard with a mkpath that succeeds.
     if (root.isEmpty() || !QDir::isAbsolutePath(root)) {
         qCWarning(lcPresetStore) << "Refusing to load presets from a root that is not an absolute path:" << root;
@@ -399,10 +235,6 @@ void ShaderPresetStore::load(const QString& root, const QList<ShaderFamily>& fam
     }
 
     m_root = root;
-
-    // Before the scan, or the imported presets would not be seen until the
-    // next rescan. Idempotent, so calling it on every startup is free.
-    migrateLegacyOverlayPresets(root);
 
     // An empty list means every family, so an existing caller keeps the old
     // behaviour and a new one opts in to less.

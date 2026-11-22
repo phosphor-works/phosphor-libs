@@ -724,7 +724,6 @@ void WindowTrackingService::recordFloatingClose(const QString& windowId, const Q
     if (const auto existing = m_placementStore.peekExact(windowId)) {
         p.virtualDesktop = existing->virtualDesktop;
         p.activity = existing->activity;
-        p.kind = existing->kind;
         p.engines = existing->engines;
         staleDesktopZones = mismatchedDesktopZones(p, existing->screenId, screenId);
         downgradeMismatchedManagedSlots(p, existing->screenId, screenId);

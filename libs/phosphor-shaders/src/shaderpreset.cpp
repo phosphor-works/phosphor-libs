@@ -115,8 +115,6 @@ ShaderPreset ShaderPreset::fromJson(const QJsonObject& obj, const QString& fallb
         // QString counts UTF-16 code units, so the cut can land between a
         // surrogate pair and leave a lone high surrogate: an unpaired one renders
         // as a replacement glyph in every picker row that shows the name. Drop it.
-        // ShaderPresetStore's legacy migration truncates the same field and carries
-        // the same correction.
         if (!preset.name.isEmpty() && preset.name.back().isHighSurrogate()) {
             preset.name.chop(1);
         }

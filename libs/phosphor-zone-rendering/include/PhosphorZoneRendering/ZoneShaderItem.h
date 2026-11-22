@@ -39,7 +39,7 @@ namespace PhosphorZoneRendering {
  * ZoneShaderItem {
  *     anchors.fill: parent
  *     zones: zoneDataProvider.zones
- *     shaderSource: "file:///usr/share/plasmazones/overlays/neon-city/effect.frag"
+ *     shaderSource: "file:///usr/share/phosphor-works/shaders/overlays/neon-city/effect.frag"
  *     customColor1: "#ff8800"
  * }
  * @endcode

@@ -405,7 +405,10 @@ private Q_SLOTS:
         // setScreenDesktopRequested now names its desktop by id with a
         // purpose, windowWorkspaceMoveRequested replaces the by-id desktop
         // move and the bare output move with one step that carries both
-        // legs, and the workspace map stream is gone.
+        // legs, and the workspace map stream is gone. The same unreleased
+        // cycle drops the arguments the daemon accepted and ignored
+        // (Snap.resolveWindowRestore's windowKind, minWidth and minHeight, and
+        // WindowTracking.windowClosed's windowKind), which folds into v11.
         QCOMPARE(Service::ApiVersion, 11);
         QCOMPARE(Service::MinPeerApiVersion, 11);
     }

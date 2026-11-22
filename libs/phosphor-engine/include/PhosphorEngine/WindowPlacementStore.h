@@ -55,7 +55,7 @@ public:
     /// Restore lookup: the first record whose `accept` predicate passes, trying
     /// the same-instance match before the appId FIFO (oldest first). The matched
     /// record is REMOVED (consumed) and returned. `accept` lets the caller reject
-    /// cross-screen / disabled-context / wrong-kind candidates.
+    /// cross-screen / disabled-context candidates.
     ///
     /// `preferred` (optional) ranks the appId-FIFO branch ONLY: when supplied, the
     /// oldest entry satisfying BOTH `accept` and `preferred` is consumed first, and
@@ -205,17 +205,8 @@ public:
 
     /// The window CLOSED: drop its open claim (releaseOpenClaim). The rest of
     /// the old contract retired with the cross-screen reclaim, so the records
-    /// are left untouched and the answer is always false. @p graceEligible
-    /// is ignored; both stay for ABI.
-    bool markInstanceClosed(const QString& windowId, bool graceEligible = true);
-
-    /// INERT, kept for ABI. It excused a live move from the reclaim-credit
-    /// burn, and the credit is gone.
-    void markInstanceMovedLive(const QString& windowId);
-
-    /// INERT, kept for ABI. It retired one reclaim credit per open, and the
-    /// credit is gone. Always returns false.
-    bool burnReclaimCredit(const QString& windowId, const QString& appId);
+    /// are left untouched and the answer is always false.
+    bool markInstanceClosed(const QString& windowId);
 
     /// Reserve, once per opening window instance, the record that instance owns.
     ///
@@ -480,10 +471,6 @@ private:
 public:
     /// Per-app record cap (public so tests can pin the eviction contract).
     static constexpr int MaxPerApp = 16;
-
-    /// INERT, kept for source compatibility: the shutdown-close grace
-    /// serialize() once applied to the reclaim credit, which is gone.
-    static constexpr qint64 ShutdownCloseGraceMs = 30000;
 
     /// The serialized format's version, stamped as "_version". 1 (no stamp):
     /// absolute float-back rects. 2: rects relative to their output.

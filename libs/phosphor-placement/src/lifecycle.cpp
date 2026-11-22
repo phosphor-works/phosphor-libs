@@ -28,12 +28,8 @@ namespace PhosphorPlacement {
 // Window Lifecycle
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void WindowTrackingService::windowClosed(const QString& windowId, PhosphorEngine::WindowKind kind)
+void WindowTrackingService::windowClosed(const QString& windowId)
 {
-    // Nothing reads the window's kind any more. It gated the pending-restore
-    // queue this close used to write, which had no reader and was removed; a
-    // reopen restores from the placement store the adaptor's capture feeds.
-    Q_UNUSED(kind)
     if (!hasSnapState())
         return;
     PhosphorSnapEngine::SnapState* snapState = snapForWindow(windowId);

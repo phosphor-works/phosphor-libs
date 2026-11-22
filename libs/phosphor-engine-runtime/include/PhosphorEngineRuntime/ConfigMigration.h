@@ -29,8 +29,9 @@ namespace PhosphorEngineRuntime {
 ///     assignments.json is superseded. QuickLayouts slots relocate to the
 ///     quicklayouts.json sidecar. The Animations.AnimationAppRules array also
 ///     folds into rules.json as OverrideAnimation{Shader,Timing} actions
-///     on `WindowClass Contains <pattern>` matchers — the legacy
-///     AnimationAppRule/Bridge types are removed and the runtime reads
+///     (a timing entry's curve as an OverrideAnimationCurve action beside
+///     its timing action) on `WindowClass Contains <pattern>` matchers — the
+///     legacy AnimationAppRule/Bridge types are removed and the runtime reads
 ///     animation overrides exclusively from the unified rule store.
 ///     The legacy `Exclusions` group (`Applications` / `WindowClasses`
 ///     comma-joined pattern lists) folds into the same rules.json: each
@@ -83,6 +84,10 @@ namespace PhosphorEngineRuntime {
 /// v7 config step cannot reach it (see renameRetiredAnimationEventPaths).
 /// The strip of the managed appearance baseline rules older builds seeded
 /// rides it for the first reason (see stripManagedAppearanceBaselineRules).
+/// So does the split of a curve carried on a timing action onto its own
+/// curve action, for the second reason: the timing action stopped carrying a
+/// curve, and the actions that still do live in that sidecar (see
+/// splitTimingActionCurves).
 /// These are the only cleanups that run outside the chain. Anything else
 /// touching the config root needs a version bump.
 /// v5: the per-mode Snapping/Tiling appearance and gap settings fold into the
@@ -104,7 +109,13 @@ namespace PhosphorEngineRuntime {
 ///     the sidecar lift needs filesystem access, so it runs from
 ///     ensureJsonConfig's finalize pass (see relocateOverlayShaderAssignments),
 ///     mirroring how the v4 layout-settings relocation runs outside the chain.
-inline constexpr int ConfigSchemaVersion = 8;
+/// v9: every key the v8 schema types as a JSON object or array holds the native
+///     value. A JSON-ENCODED STRING that parses to the right shape (what
+///     migrateV1ToV2 wrote for Animations.Profile, and what older builds wrote
+///     before the store went native) is rewritten as the object or array it
+///     encodes, so PhosphorConfig::Store reads structured keys natively only
+///     (see migrateV8ToV9).
+inline constexpr int ConfigSchemaVersion = 9;
 
 class PHOSPHORENGINERUNTIME_EXPORT ConfigMigration
 {
@@ -206,7 +217,8 @@ public:
     /// Recover pre-v8 per-event timing files on the ensureJsonConfig exits the
     /// version chain never reaches (corrupt-with-no-INI, whitespace-only, fresh
     /// install). Idempotent, and a no-op unless the config is already stamped
-    /// v8 and carries no MotionProfileTree. Mirrors finalizeV4Conversion, which
+    /// v8 or later (up to ConfigSchemaVersion) and carries no
+    /// MotionProfileTree. Mirrors finalizeV4Conversion, which
     /// exists on the same exits for the same reason.
     static bool finalizeV8MotionImport(const QString& jsonPath);
 
@@ -275,7 +287,8 @@ public:
     /// survives a config schema bump without a rebuild). It is NOT a strict no-op — it
     /// retries the still-pending tail steps (strip surviving `_v4*Stash`
     /// keys, retire a still-present assignments.json, and the rules.json
-    /// fix-ups `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule`,
+    /// fix-ups `splitTimingActionCurves` (always first, see its comment),
+    /// `pruneRetiredProviderDefaultRule`, `repairSeededSteamRule`,
     /// `renameRetiredAnimationEventPaths` and
     /// `stripManagedAppearanceBaselineRules`, which DO write the sidecar) so a
     /// partial earlier
@@ -404,6 +417,17 @@ public:
     /// clobber a since-edited assignment).
     static bool relocateOverlayShaderAssignments(const QString& jsonPath);
 
+    /// v8 → v9: structured keys hold native JSON.
+    ///
+    /// For each (group, key) the v8 schema types as a JSON object or array
+    /// (frozen in configmigration_v9.cpp), a STRING value that parses to that
+    /// shape is replaced by the parsed object or array. Anything else is left
+    /// exactly as found: an absent key, a value already native, and a string
+    /// that does not parse to the expected shape (the store then treats it as
+    /// the malformed blob it is). Pure config → config, so it is correct for a
+    /// sparse profile delta too. Stamps `_version = 9`.
+    static void migrateV8ToV9(QJsonObject& root);
+
     /// Prune the retired provider-default catch-all assignment rule from
     /// rules.json. Runs from @ref finalizeV4Conversion's idempotent cleanup
     /// path, so it executes for every already-converted user without consuming a
@@ -478,6 +502,47 @@ public:
     ///                 via ConfigDefaults).
     /// @return true on success or a clean no-op; false on an I/O failure.
     static bool stripManagedAppearanceBaselineRules(const QString& jsonPath);
+
+    /// Move the curve a stored `overrideAnimationTiming` action still carries
+    /// onto an `overrideAnimationCurve` action for the same event, and drop it
+    /// from the timing action. The timing action carries only the duration
+    /// now and refuses a `curve` key, so without this a rule written before
+    /// the split would lose the whole timing action on load.
+    ///
+    /// Per timing action carrying a string curve:
+    ///  - the `curve` key is removed. The timing action itself is KEPT even
+    ///    when nothing but its event is left: an engaged timing slot with no
+    ///    duration still shadows a lower-priority rule's duration for that
+    ///    event, so dropping it would change which duration applies.
+    ///  - an empty curve (the "inherit" sentinel) moves nowhere.
+    ///  - if the rule already has a curve action for the event with a
+    ///    non-empty curve, that one wins and the timing curve is discarded.
+    ///    This is the precedence the compositor applied, reading the curve
+    ///    slot first and the timing action's curve only when that was empty.
+    ///  - if the rule's curve action for the event has an empty or absent
+    ///    curve, it takes the timing curve, for the same reason.
+    ///  - otherwise a new curve action is inserted right after the timing
+    ///    action.
+    /// A timing action whose curve is not a string or is longer than the old
+    /// validator allowed already failed to load, and is left exactly as found.
+    ///
+    /// One precedence cannot carry over. The compositor preferred a curve
+    /// action from ANY matching rule over a timing curve, even when the timing
+    /// curve sat in a higher-priority rule. Once split, the moved curve is an
+    /// ordinary curve action, so it now outranks a lower-priority rule's curve
+    /// for the same window and event like every other slot does.
+    ///
+    /// Reads and writes the RAW rules.json with frozen key spellings (the
+    /// live Rule/RuleAction types cannot represent the old shape), so it runs
+    /// FIRST in finalizeV4Conversion's cleanup path: every other fix-up there
+    /// round-trips the store through RuleSet, which would drop the
+    /// un-migrated action. Idempotent: once split, no timing action carries a
+    /// curve and nothing is written.
+    ///
+    /// @param jsonPath Path to config.json (rules.json is derived as a sibling
+    ///                 via ConfigDefaults).
+    /// @return true on success or a clean no-op; false on an I/O failure.
+    static bool splitTimingActionCurves(const QString& jsonPath);
 
     /// Part of the v4 conversion: read every `*.json` layout in @p layoutsDir,
     /// split its embedded per-layout settings into the @p sidecarPath store

@@ -106,7 +106,7 @@ public:
      *                via @c ContextRuleBridge and persist through the store.
      *                The caller owns the store and must outlive the registry.
      * @param layoutSubdirectory XDG-relative path used for layout JSON
-     *                discovery (e.g. @c "plasmazones/layouts"). The registry
+     *                discovery (e.g. @c "phosphor-works/layouts"). The registry
      *                writes to
      *                @c QStandardPaths::writableLocation(GenericDataLocation)/\<subdir\>
      *                and reads the union of every @c GenericDataLocation
@@ -1173,8 +1173,7 @@ public:
     QJsonObject loadAutotileOverrides(const QString& algorithmId) const override;
 
     /// Seed curated default picker visibility into the sidecar, but ONLY on a
-    /// fresh install — when neither layout-settings.json nor the legacy
-    /// autotile-overrides.json exists. @p defaults is keyed exactly as the
+    /// fresh install — when layout-settings.json does not exist. @p defaults is keyed exactly as the
     /// sidecar (manual layouts by UUID, algorithms by "autotile:<id>"). Existing
     /// installs are never reseeded. Call before @ref loadLayouts so the merge
     /// picks up the seeded entries.
@@ -1256,9 +1255,6 @@ private:
     /// off the scrolling engine or clear its template. Templates are committed
     /// through @ref applyScrollingTemplateToScreen instead.
     bool applyLayoutToScreen(const QString& screenId, Layout* layout);
-    /// One-time idempotent fold of the retired autotile-overrides.json into the
-    /// unified layout-settings.json sidecar; deletes the legacy file when done.
-    void migrateLegacyAutotileOverrides();
 
     // ─── Rule-backed assignment resolution ────────────────────────────────
     // The unified RuleStore is the single source of truth for every
@@ -1642,7 +1638,7 @@ private:
     PhosphorRules::RuleStore* m_ruleStore = nullptr;
     /// Evaluator bound to m_ruleStore->ruleSet(); the one resolution model.
     std::unique_ptr<PhosphorRules::RuleEvaluator> m_evaluator;
-    QString m_layoutSubdirectory; ///< XDG-relative (e.g. "plasmazones/layouts") - drives locateAll discovery
+    QString m_layoutSubdirectory; ///< XDG-relative (e.g. "phosphor-works/layouts") - drives locateAll discovery
     QString m_layoutDirectory; ///< Absolute user-writable path derived from m_layoutSubdirectory
     QVector<Layout*> m_layouts;
     Layout* m_activeLayout = nullptr;

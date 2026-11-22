@@ -7,6 +7,8 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -357,6 +359,57 @@ private Q_SLOTS:
             g->writeString(QStringLiteral("Blob"), QStringLiteral("not an object"));
         }
         QVERIFY(store.read<QVariantMap>(QStringLiteral("G"), QStringLiteral("Blob")).isEmpty());
+    }
+
+    /// Structured keys read NATIVE JSON only. A JSON-encoded string that would
+    /// parse to the right shape is not parsed: every read path treats it as the
+    /// malformed blob it is (read<T> answers empty, readVariant and the export
+    /// answer the schema default), and a prune of it warns like any other
+    /// corrupt blob. A consumer with data stored that way converts it in its
+    /// own schema migration.
+    void read_structuredKeysIgnoreJsonEncodedStrings()
+    {
+        const QVariantMap mapDefault{{QStringLiteral("a"), 1}};
+        const QVariantList listDefault{QStringLiteral("x")};
+        Schema s;
+        s.version = 1;
+        s.groups[QStringLiteral("G")] = {
+            {QStringLiteral("Map"), QVariant(mapDefault), QMetaType::QVariantMap},
+            {QStringLiteral("List"), QVariant(listDefault), QMetaType::QVariantList},
+            {QStringLiteral("Strings"), QVariant(QStringList{QStringLiteral("y")}), QMetaType::QStringList},
+        };
+
+        JsonBackend backend(m_path);
+        Store store(&backend, s);
+        {
+            auto g = backend.group(QStringLiteral("G"));
+            g->writeString(QStringLiteral("Map"), QStringLiteral("{\"a\":2}"));
+            g->writeString(QStringLiteral("List"), QStringLiteral("[\"z\"]"));
+            g->writeString(QStringLiteral("Strings"), QStringLiteral("[\"z\"]"));
+        }
+
+        QVERIFY(store.read<QVariantMap>(QStringLiteral("G"), QStringLiteral("Map")).isEmpty());
+        QVERIFY(store.read<QVariantList>(QStringLiteral("G"), QStringLiteral("List")).isEmpty());
+        QCOMPARE(store.readVariant(QStringLiteral("G"), QStringLiteral("Map")).toMap(), mapDefault);
+        QCOMPARE(store.readVariant(QStringLiteral("G"), QStringLiteral("List")).toList(), listDefault);
+        QCOMPARE(store.readVariant(QStringLiteral("G"), QStringLiteral("Strings")).toStringList(),
+                 QStringList{QStringLiteral("y")});
+        const QJsonObject exported = store.exportToJson().value(QStringLiteral("G")).toObject();
+        QCOMPARE(exported.value(QStringLiteral("Map")).toObject(), QJsonObject::fromVariantMap(mapDefault));
+        QCOMPARE(exported.value(QStringLiteral("List")).toArray(), QJsonArray::fromVariantList(listDefault));
+
+        // Writing the default prunes the string, and says it is discarding a
+        // malformed blob: it is not a recoverable value any more.
+        QTest::ignoreMessage(QtWarningMsg,
+                             "PhosphorConfig::Store: discarding malformed stored blob for G/Map while pruning");
+        store.write(QStringLiteral("G"), QStringLiteral("Map"), QVariant(mapDefault));
+        QVERIFY(!store.hasExplicitValue(QStringLiteral("G"), QStringLiteral("Map")));
+
+        // The native form of the same value reads back as written.
+        const QVariantMap native{{QStringLiteral("a"), 2}};
+        store.write(QStringLiteral("G"), QStringLiteral("Map"), QVariant(native));
+        QCOMPARE(store.read<QVariantMap>(QStringLiteral("G"), QStringLiteral("Map")), native);
+        QCOMPARE(store.readVariant(QStringLiteral("G"), QStringLiteral("Map")).toMap(), native);
     }
 
     /// Exotic-typed keys (QDateTime here) round-trip as a QString per the

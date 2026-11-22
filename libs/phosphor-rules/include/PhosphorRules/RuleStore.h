@@ -16,7 +16,7 @@ namespace PhosphorRules {
  * @brief Persistent store for the unified Rule set.
  *
  * Owns an in-memory @ref RuleSet and persists it to a caller-supplied
- * file path (the daemon points it at @c ~/.config/plasmazones/rules.json,
+ * file path (the daemon points it at @c ~/.config/phosphor-works/plasmazones/rules.json,
  * schema v4). The daemon is the primary writer — settings / KCM normally
  * mutate the store over D-Bus — but the file is also rewritten out of
  * process (settings reset, config import, hand edits), which an owner picks

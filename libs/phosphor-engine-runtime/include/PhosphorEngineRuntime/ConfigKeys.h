@@ -6,7 +6,7 @@
 // The accessor macros. Defined in one place for the whole ConfigKeys chain,
 // undef'd again at the bottom of this file.
 #include <PhosphorEngineRuntime/ConfigKeyMacro.h>
-#include <PhosphorEngineRuntime/AppDirectoryName.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 #include <PhosphorProtocol/ServiceConstants.h>
 #include <PhosphorSurface/SurfacePackLocation.h>
@@ -1134,35 +1134,35 @@ public:
     // ═══════════════════════════════════════════════════════════════════════════
     static QString layoutsSubdir()
     {
-        return commonDataSubdir(QStringLiteral("layouts"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("layouts"));
     }
     static QString animationsSubdir()
     {
-        return commonDataSubdir(QStringLiteral("shaders/animations"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("shaders/animations"));
     }
     static QString overlaysSubdir()
     {
-        return commonDataSubdir(QStringLiteral("shaders/overlays"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("shaders/overlays"));
     }
     static QString profilesSubdir()
     {
-        return commonDataSubdir(QStringLiteral("profiles"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("profiles"));
     }
     static QString pointerSubdir()
     {
-        return commonDataSubdir(QStringLiteral("shaders/pointer"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("shaders/pointer"));
     }
     static QString curvesSubdir()
     {
-        return commonDataSubdir(QStringLiteral("curves"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("curves"));
     }
     static QString shaderPresetsSubdir()
     {
-        return commonDataSubdir(QStringLiteral("shaders/presets"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("shaders/presets"));
     }
     static QString scrollingTemplatesSubdir()
     {
-        return commonDataSubdir(QStringLiteral("scrolling-templates"));
+        return PhosphorPaths::commonDataSubdir(QStringLiteral("scrolling-templates"));
     }
     /// The surface packs' data subdirectory the host set
     /// (PhosphorSurfaceShaders::surfacePackDataSubdir). Empty until it does.

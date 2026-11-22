@@ -4,6 +4,7 @@
 #pragma once
 
 #include <PhosphorEngineRuntime/ConfigDefaultsWorkspaces.h>
+#include <PhosphorPaths/SuiteDirectories.h>
 
 namespace PhosphorAnimation {
 class CurveRegistry;
@@ -420,7 +421,7 @@ public:
     PHOSPHORENGINERUNTIME_EXPORT static QString rulesFilePath();
 
     // Returns the absolute path to the settings-profiles directory
-    // (~/.config/plasmazones/profiles). Each profile is a single <uuid>.json
+    // (~/.config/phosphor-works/plasmazones/profiles). Each profile is a single <uuid>.json
     // file holding a sparse config delta (and user-rule subset) relative to its
     // parent profile, plus an index.json sidecar tracking the active profile and
     // display order. Sits under the config dir (not the data dir) so it never
@@ -1153,7 +1154,7 @@ public:
     }
     static QString userMotionSetsSubdir()
     {
-        return QLatin1Char('/') + commonDataSubdir(QStringLiteral("motionsets"));
+        return QLatin1Char('/') + PhosphorPaths::commonDataSubdir(QStringLiteral("motionsets"));
     }
     /// Snapping overlay shader packs (the `data/overlays/` family — wallpaper
     /// drift, neon-city, cosmic-flow, etc.). Mirrors the
@@ -1169,7 +1170,7 @@ public:
     /// decoration twin of `userMotionSetsSubdir()`.
     static QString userDecorationSetsSubdir()
     {
-        return QLatin1Char('/') + commonDataSubdir(QStringLiteral("decorationsets"));
+        return QLatin1Char('/') + PhosphorPaths::commonDataSubdir(QStringLiteral("decorationsets"));
     }
 
     /// Overlay sets — named snapshots of the zone-overlay shader assignments
@@ -1177,7 +1178,7 @@ public:
     /// `userDecorationSetsSubdir()`.
     static QString userOverlaySetsSubdir()
     {
-        return QLatin1Char('/') + commonDataSubdir(QStringLiteral("overlaysets"));
+        return QLatin1Char('/') + PhosphorPaths::commonDataSubdir(QStringLiteral("overlaysets"));
     }
 
     /// Surface shader packs, shared with the other apps that draw them:

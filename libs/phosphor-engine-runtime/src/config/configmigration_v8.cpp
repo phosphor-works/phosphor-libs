@@ -280,7 +280,7 @@ void ConfigMigration::migrateV7ToV8(QJsonObject& root, bool importOverrideFiles)
 // parses, and is stamped below the current version. Three exits never get
 // there: a corrupt config with no INI to re-migrate from, a whitespace-only
 // one, and a genuine fresh install. Every one of those then lets the Store
-// stamp `_version = 8` on the file it writes, so the next launch
+// stamp the current `_version` on the file it writes, so the next launch
 // short-circuits and the chain never runs at all.
 //
 // That is harmless for a step that only rewrites config, which is every step
@@ -315,9 +315,14 @@ bool ConfigMigration::finalizeV8MotionImport(const QString& jsonPath)
     }
 
     QJsonObject root = doc.object();
-    // Only for a config already AT the current version: below it the chain will
-    // run the real step, and above it this build has no business writing.
-    if (root.value(ConfigKeys::versionKey()).toInt(0) != 8) {
+    // Only for a config that already has the v8 step behind it and is no newer
+    // than this build: below v8 the chain will run the real step, and above
+    // ConfigSchemaVersion this build has no business writing. A literal `!= 8`
+    // went dead with the v9 bump, since the Store stamps the CURRENT version on
+    // the file it writes on these exits. The tree written below is a native
+    // object, which is the v9 shape as well.
+    const int version = root.value(ConfigKeys::versionKey()).toInt(0);
+    if (version < 8 || version > ConfigSchemaVersion) {
         return true;
     }
     const QString groupName = ConfigKeys::animationsGroup();

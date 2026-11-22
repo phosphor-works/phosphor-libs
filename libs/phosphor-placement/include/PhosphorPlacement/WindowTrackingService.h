@@ -103,12 +103,8 @@ public:
      */
     void setWindowRegistry(PhosphorEngine::WindowRegistry* registry);
 
-    /// The injectable SnapState-resolver seam. Defined in its own header so
-    /// consumers can name the type without pulling in the whole service. The
-    /// alias keeps the historical `WindowTrackingService::SnapStateResolver`
-    /// spelling valid for existing call sites.
-    using SnapStateResolver = PhosphorPlacement::SnapStateResolver;
-
+    /// The injectable SnapState-resolver seam. The type is defined in its own
+    /// header so consumers can name it without pulling in the whole service.
     void setSnapStateResolver(SnapStateResolver resolver);
 
     /// Convenience wiring for a SINGLE snap store (unit tests). Every store arm routes to @p state; forgetWindow is a
@@ -799,11 +795,8 @@ public:
     /**
      * @brief Clean up all tracking data for a closed window
      * @param windowId Full window ID
-     * @param kind Structural kind of the closing window. Unused: it gated the
-     *             pending-restore queue this close used to write, which was
-     *             removed. Kept so the D-Bus close path keeps its signature.
      */
-    void windowClosed(const QString& windowId, PhosphorEngine::WindowKind kind = PhosphorEngine::WindowKind::Unknown);
+    void windowClosed(const QString& windowId);
 
     /// @c unsnapped: windows left in no zone in view (windowId, targetScreenId).
     /// @c narrowed: spans that kept some zones, as a re-statement batch.

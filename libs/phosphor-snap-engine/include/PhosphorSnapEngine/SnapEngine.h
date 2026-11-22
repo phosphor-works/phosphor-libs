@@ -247,15 +247,6 @@ public:
         m_contextModeResolver = std::move(resolver);
     }
 
-    /// INERT, kept for ABI: nothing reads it since snap no longer defers an open to another engine's reclaim (the
-    /// reopen contract), and the daemon does not wire it. Clear with {} at teardown.
-    using TilingEngineLiveResolver =
-        std::function<bool(PhosphorZones::AssignmentEntry::Mode mode, const QString& screenId)>;
-    void setTilingEngineLiveResolver(TilingEngineLiveResolver resolver)
-    {
-        m_tilingEngineLiveResolver = std::move(resolver);
-    }
-
     /**
      * @brief Predicate deciding whether an opening window should start FLOATING
      *        because a "Float this app" rule matched it. Daemon-injected,
@@ -489,14 +480,11 @@ public:
      * @param windowId Window identifier
      * @param screenId Screen where the window appeared
      * @param sticky Whether the window is on all desktops
-     * @param kind Accepted for wire compatibility and ignored: nothing sets a
-     *             placement record's kind from a live window.
      * @param reason Why this resolve runs: gates the size restore, the FIFO, a re-entry re-snap and a leaver's rule.
      * @return PhosphorEngine::SnapResult with geometry and zone info, or PhosphorEngine::SnapResult::noSnap()
      */
     PhosphorEngine::SnapResult
     resolveWindowRestore(const QString& windowId, const QString& screenId, bool sticky,
-                         PhosphorEngine::WindowKind kind = PhosphorEngine::WindowKind::Unknown,
                          PhosphorEngine::RestoreReason reason = PhosphorEngine::RestoreReason::Open);
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1324,7 +1312,6 @@ private:
     RestorePositionPredicate m_restorePositionPredicate{};
     ManagedRestorePredicate m_managedRestorePredicate{};
     LiveModeResolver m_liveModeResolver{};
-    TilingEngineLiveResolver m_tilingEngineLiveResolver{};
     FloatPredicate m_floatPredicate{};
     UnfloatFallbackPredicate m_unfloatFallbackPredicate{};
     PlacementZonesResolver m_placementZonesResolver{};
