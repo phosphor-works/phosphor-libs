@@ -14,7 +14,8 @@ public:
     {
         Q_UNUSED(paramList)
         if (key == QLatin1String("phosphorwayland")) {
-            return new PhosphorWayland::LayerShellIntegration();
+            // Never `new` here: see LayerShellIntegration::create().
+            return PhosphorWayland::LayerShellIntegration::create();
         }
         return nullptr;
     }

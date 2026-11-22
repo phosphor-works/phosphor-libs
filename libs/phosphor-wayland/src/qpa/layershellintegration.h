@@ -32,7 +32,19 @@ class PHOSPHORWAYLAND_EXPORT LayerShellIntegration : public QtWaylandClient::QWa
 public:
     Q_DISABLE_COPY_MOVE(LayerShellIntegration)
 
-    LayerShellIntegration();
+    /// A new integration, for the plugin to hand to Qt, which deletes it.
+    ///
+    /// The plugin is a separate module that links this library, and is often
+    /// installed apart from it: a system plugin and an application's own copy
+    /// of the library, under the same soname, end up in one process. Were the
+    /// plugin to call `new LayerShellIntegration`, the size of this class as
+    /// the plugin's headers had it would be built into the plugin, and this
+    /// library's constructor, which initialises the class as it is now, would
+    /// write past the end of a smaller allocation. Allocating here keeps the
+    /// size and the constructor in the same library, so the plugin knows
+    /// nothing of the layout.
+    static LayerShellIntegration* create();
+
     ~LayerShellIntegration() override;
 
     bool initialize(QtWaylandClient::QWaylandDisplay* display) override;
@@ -215,6 +227,9 @@ public:
     }
 
 private:
+    /// Only through create(), so that no other module allocates one.
+    LayerShellIntegration();
+
     /// Fallback xdg-shell integration for regular (non-layer-shell) windows.
     /// Loaded lazily on first use via Qt's shell integration factory.
     std::unique_ptr<QtWaylandClient::QWaylandShellIntegration> m_xdgShell;
@@ -274,6 +289,12 @@ private:
     // GUI-thread-only singleton. All access (initialize(), instance(), destructor)
     // happens on Qt's main thread. Do NOT access from worker threads.
     static LayerShellIntegration* s_instance;
+
+#ifdef PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH
+    // test_plugin_layout builds a copy of this library with the class this
+    // many bytes larger, to stand for a library newer than the plugin.
+    unsigned char m_testLayoutGrowth[PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH] = {};
+#endif
 };
 
 } // namespace PhosphorWayland
