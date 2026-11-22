@@ -217,18 +217,19 @@ does as it goes, and stops the moment the count passes the bound, with the
 line `- arguments: is too large for the server to check against the
 schema`. Nothing is estimated beforehand. Each step is charged by what it
 costs (a value walked, a subschema applied to a value, a keyword checked,
-a member visited, a name looked up, a name or a string read away from the
-last one read of its object or array, sixteen code units of a string or a
-name read, compared or hashed, a word of an annotation set merged, an
-error built), in units of at most about 20 ns of a release build. A sweep
-that drives each charge of the checker with the shapes that make it
-dominate, in each encoding that Qt keeps text in, with short and long
-strings and names, and with names in random order, measured at most 17 ns
-a unit for a check of a millisecond or more, and the shapes below measure
-as much. A check of less than a millisecond pays fixed costs too, such as
-the first use of the stack, and nothing that grows with the arguments. The
-bound is 40 million units, under a second whatever the schema and the
-arguments.
+a member visited, a value taken out of its array or object, a name looked
+up, a name or a string read away from the last one read of its object or
+array, sixteen code units of a string or a name read, compared or hashed,
+a word of an annotation set merged, an error built), in units of at most
+about 20 ns of a release build. A sweep that drives each charge of the
+checker with the shapes that make it dominate, in each encoding that Qt
+keeps text in, with short and long strings and names, with names in
+random order, and with strings and other values taken out of their arrays
+and objects and compared far apart, measured at most 16 ns a unit for a
+check of a millisecond or more, and the shapes below measure as much. A
+check of less than a millisecond pays fixed costs too, such as the first
+use of the stack, and nothing that grows with the arguments. The bound is
+40 million units, under a second whatever the schema and the arguments.
 
 Strings and names are read where Qt's parser keeps them, and never decoded
 to be compared, hashed or counted, not even the names that `propertyNames`
@@ -243,17 +244,22 @@ keeps the members of an object sorted by name, but their names and strings
 in the order that the arguments wrote them, so the names of a large object
 written in random order are read from all over its storage, each a miss of
 the cache. Each name or string read is charged a unit for each 64 bytes
-between it and the last one read of its object or array, up to 5, which is
-about a miss. A handler's array whose strings were inserted out of order
-is charged the same way. A name is decoded, and its `~` and `/` escaped,
-only for the JSON pointer of an error, once for all the errors at its
-place and below it while the check stays there, and again when it comes
-back. The memory the check holds beyond the arguments and the schema is
-counted too, up to 64 MiB. It holds the sets of members and items that
-`unevaluatedProperties` and `unevaluatedItems` read, the keys that
-`uniqueItems` sorts, and the index of an object's names that `required`,
-`dependentRequired` and `dependentSchemas` look names up in. The list of
-errors is capped as above.
+between it and the last one read of its object or array, up to 8, which is
+about a miss of the cache and of the TLB. A handler's array whose strings
+were inserted out of order is charged the same way. A string that Qt takes
+out of its array or object to be checked holds a reference to the
+container's storage while it is checked, and is charged for it. So is any
+value taken out of one to be compared or hashed. `uniqueItems` compares
+items in the order of their hashes, far apart in the array, and charges
+the read of each away from the last. A name is decoded, and its `~` and
+`/` escaped, only for the JSON pointer of an error, once for all the
+errors at its place and below it while the check stays there, and again
+when it comes back. The memory the check holds beyond the arguments and
+the schema is counted too, up to 64 MiB. It holds the sets of members and
+items that `unevaluatedProperties` and `unevaluatedItems` read, the keys
+that `uniqueItems` sorts, and the index of an object's names that
+`required`, `dependentRequired` and `dependentSchemas` look names up in.
+The list of errors is capped as above.
 
 A check is also stopped 3000 subschemas deep, and when its own frames
 take 4 MiB of stack, half of what a Linux thread has by default. Each
@@ -283,8 +289,8 @@ sizes that a debug build with sanitizers checks in seconds.
 | `allOf` of 50 `maxLength` | 4,000,000 CJK characters | valid | 0.003 s |
 | `allOf` of 300 `maxLength`, below the string's bytes | 5,500,000 CJK characters (16 MiB) | valid | 0.004 s |
 | `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.003 s |
-| `enum` of 3000 strings of 100 CJK characters | 50,000 such strings | valid | 0.015 s |
-| `const` of an object of 100 members | 20,000 such objects | valid | 0.18 s |
+| `enum` of 3000 strings of 100 CJK characters | 50,000 such strings | valid | 0.01 s |
+| `const` of an object of 100 members named with one or two letters | 20,000 such objects | valid | 0.18 s |
 | `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.02 s |
 | `allOf` of 300 `required` | an object of 1,000,000 members | valid | 0.12 s |
 | `dependentRequired` of 2000 triggers | 1,000,000 empty objects | valid | 0.08 s |
@@ -299,29 +305,29 @@ sizes that a debug build with sanitizers checks in seconds.
 | `contains` that no item matches | 4,000,000 integers | one line | 0.24 s |
 | `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.27 s |
 | `allOf` of 200 `properties` and `unevaluatedProperties` | 35,000 members | valid | 0.18 s |
-| `uniqueItems` | 1,000,000 distinct integers (32 MB of keys) | valid | 0.13 s |
-| `uniqueItems` | 900,000 equal objects | one line | 0.36 s |
-| `uniqueItems` | 300,000 distinct CJK strings | valid | 0.06 s |
-| `uniqueItems`, items chosen for one hash under `QT_HASH_SEED=0` | 250,000 pairs | valid | 0.39 s |
-| the same | 300,000 pairs | too large to check | 0.45 s |
+| `uniqueItems` | 1,000,000 distinct integers (32 MB of keys) | valid | 0.12 s |
+| `uniqueItems` | 750,000 equal objects | one line | 0.28 s |
+| `uniqueItems` | 300,000 distinct CJK strings | valid | 0.05 s |
+| `uniqueItems`, items chosen for one hash under `QT_HASH_SEED=0` | 175,000 pairs | valid | 0.25 s |
+| the same | 200,000 pairs | too large to check | 0.27 s |
 | `uniqueItems` | 2,100,000 items (past 64 MiB of keys) | too large to check | 0.04 s |
 | a list of lists through `items` and `$ref` | 1000 levels | valid | 0.001 s |
 | `{"type": "object"}` | 5,500,000 empty arrays (16 MiB) | valid | 0.14 s |
 
 So a valid list of 6.6 million small integers under `items: {"type":
 "integer"}` is checked, and one of 8 million, the most a 16 MiB line
-holds, is refused after 0.4 s. Each row that ends at the bound took 0.36
+holds, is refused after 0.4 s. Each row that ends at the bound took 0.27
 to 0.49 s, since the units it spent were cheaper than the dearest. A
 million members written in random order take three times as long as the
-same members in order, each a miss of the cache, and are charged so. Items
-chosen for one hash need the seed, which a model does not know. With the
-random seed of a running server their hashes differ, and 550,000 such
-pairs are valid in 0.13 s. The walk before the check charges 3 units for
-each value, and 5 for an array or an object, so the most values that a 16
-MiB line holds are walked in some 28 million units. Qt's parser takes time
-and memory for such a line too (some 130 MB for 5.5 million empty arrays),
-which the line limit bounds. An application whose tools take no long text
-lowers it with `setMaxLineBytes`.
+same members in order, each a miss of the cache, and are charged about
+twice as many units. Items chosen for one hash need the seed, which a
+model does not know. With the random seed of a running server their hashes
+differ, and 550,000 such pairs are valid in 0.13 s. The walk before the
+check charges 3 units for each value, and 5 for an array or an object, so
+the most values that a 16 MiB line holds are walked in some 28 million
+units. Qt's parser takes time and memory for such a line too (some 130 MB
+for 5.5 million empty arrays), which the line limit bounds. An application
+whose tools take no long text lowers it with `setMaxLineBytes`.
 
 Before the check, the server refuses what a handler would read
 differently from the check, or what a reply cannot carry, with a line for
@@ -673,20 +679,19 @@ deep is refused at once.
   program pulls in nothing more. The JSON Schema checker is the library's
   own, so there is nothing else to build, install or license. A build
   directory from when the library used valijson or jsoncons keeps their
-  entries in its cache, and a configure removes those that the library
-  set for itself. `PHOSPHORMCP_USE_SYSTEM_VALIJSON`,
-  `PHOSPHORMCP_VALIJSON_INCLUDE_DIR`, `VALIJSON_INCLUDE_DIR` and
-  `PHOSPHORMCP_USE_SYSTEM_JSONCONS` go with a warning when they chose
-  something (a switch on, a directory set), and the internal entries that
-  kept the checks of their headers, and the flags that a development build
-  of phosphor-fsloader set to warn once about the first two, go silently.
-  The rest stay, since other libraries of the tree set them too.
-  `JSONCONS_INCLUDE_DIR` names phosphor-fsloader's headers. The entries of
-  `cmake/PhosphorDependencies.cmake`, which fetched valijson
-  (`PHOSPHOR_DEPS_ARCHIVES`, and CPM's `CPM_PACKAGES` and
-  `CPM_PACKAGE_valijson_SOURCE_DIR`, `_BINARY_DIR` and `_VERSION`), are
-  the tree's, and stay in a build directory of the library alone too,
-  where nothing reads them.
+  entries in its cache. A configure removes
+  `PHOSPHORMCP_USE_SYSTEM_VALIJSON`, `PHOSPHORMCP_VALIJSON_INCLUDE_DIR`,
+  `VALIJSON_INCLUDE_DIR` and `PHOSPHORMCP_USE_SYSTEM_JSONCONS`, with a
+  warning when they chose something (a switch on, a directory set). It
+  removes silently the internal entries that kept the checks of their
+  headers, and the flags that a development build of phosphor-fsloader set
+  to warn once about the first two. `JSONCONS_INCLUDE_DIR` stays, since it
+  names phosphor-fsloader's headers. So do the entries that
+  `cmake/PhosphorDependencies.cmake` set when it fetched valijson
+  (`PHOSPHOR_DEPS_ARCHIVES`, and CPM's and FetchContent's entries,
+  `CPM_PACKAGE_valijson_*` among them), since the tree's other libraries
+  fetch through that file. In a build directory of the library alone
+  nothing reads them.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
