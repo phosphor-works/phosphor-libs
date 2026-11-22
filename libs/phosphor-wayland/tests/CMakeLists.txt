@@ -37,3 +37,16 @@ function(phosphorwayland_add_test _name)
 endfunction()
 
 phosphorwayland_add_test(test_backgroundeffect)
+
+# The QPA plugin against a newer build of this library: links
+# PhosphorWaylandGrownLayout (see ../CMakeLists.txt) in place of
+# PhosphorWayland, so the plugin binds to that build when it loads.
+add_executable(test_plugin_layout test_plugin_layout.cpp)
+set_target_properties(test_plugin_layout PROPERTIES AUTOMOC ON)
+target_link_libraries(test_plugin_layout PRIVATE Qt6::Test PhosphorWaylandGrownLayout)
+target_compile_definitions(test_plugin_layout PRIVATE
+    PHOSPHORWAYLAND_QPA_PLUGIN="$<TARGET_FILE:phosphorwayland-qpa>")
+add_dependencies(test_plugin_layout phosphorwayland-qpa)
+add_test(NAME test_plugin_layout COMMAND test_plugin_layout)
+phosphor_apply_test_isolation(test_plugin_layout)
+set_tests_properties(test_plugin_layout PROPERTIES LABELS "phosphorwayland")

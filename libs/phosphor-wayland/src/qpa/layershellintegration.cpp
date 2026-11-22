@@ -32,6 +32,11 @@ static const struct ext_background_effect_manager_v1_listener s_backgroundEffect
     .capabilities = LayerShellIntegration::backgroundEffectCapabilitiesHandler,
 };
 
+LayerShellIntegration* LayerShellIntegration::create()
+{
+    return new LayerShellIntegration();
+}
+
 LayerShellIntegration::LayerShellIntegration() = default;
 
 LayerShellIntegration::~LayerShellIntegration()

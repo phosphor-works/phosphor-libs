@@ -323,6 +323,45 @@ set_target_properties(PhosphorWayland PROPERTIES
 
 if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR BUILD_TESTING)
     enable_testing()
+
+    # test_plugin_layout's stand-in for a newer build of this library: the
+    # same sources and soname, with LayerShellIntegration grown by a few
+    # hundred bytes, in a directory of its own. The test links it, so it is
+    # the libPhosphorWayland.so.0 the plugin finds already loaded, as a
+    # system plugin finds an application's newer copy. Defined here, not in
+    # tests/, because the generated protocol sources belong to this directory.
+    add_library(PhosphorWaylandGrownLayout SHARED EXCLUDE_FROM_ALL
+        ${phosphorwayland_public_HDRS}
+        ${phosphorwayland_layershell_SRCS}
+    )
+    target_include_directories(PhosphorWaylandGrownLayout
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_BINARY_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${_ps_gen_dir}
+    )
+    target_compile_features(PhosphorWaylandGrownLayout PUBLIC cxx_std_20)
+    target_compile_definitions(PhosphorWaylandGrownLayout PUBLIC PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH=512)
+    target_link_libraries(PhosphorWaylandGrownLayout
+        PUBLIC
+            Qt6::Core
+            Qt6::Gui
+            Qt6::GuiPrivate
+            Qt6::WaylandClientPrivate
+            Wayland::Client
+    )
+    set_target_properties(PhosphorWaylandGrownLayout PROPERTIES
+        OUTPUT_NAME PhosphorWayland
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/grown-layout
+        DEFINE_SYMBOL PhosphorWayland_EXPORTS
+        VERSION ${PHOSPHORWAYLAND_VERSION}
+        SOVERSION 0
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        UNITY_BUILD OFF
+    )
+
     add_subdirectory(tests)
 endif()
 
