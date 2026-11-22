@@ -282,10 +282,9 @@ one. The schema sets the size of its tables, and the server does not cap
 it. A name is decoded, and its `~` and `/` escaped, only for the JSON
 pointer of an error, once for all the errors at its place and below it
 while the check stays there, and again when it comes back. The text of a
-pointer is
-charged for each whole sixteen code units, not rounded up as other text
-is, since the error and each of its tokens are charged units of their own
-besides. The memory the check holds beyond the arguments and the schema is
+pointer is charged for each whole sixteen code units, not rounded up as
+other text is, since the error and each of its tokens are charged units of
+their own besides. The memory the check holds beyond the arguments and the schema is
 counted too, up to 64 MiB. It holds the sets of members and items that
 `unevaluatedProperties` and `unevaluatedItems` read, the keys that
 `uniqueItems` sorts, the index of an object's names that `required`,
@@ -721,9 +720,9 @@ than 256 deep, is refused. A tool's schema goes to the model with every
 `tools/list`, and Afterglow's largest has some sixty. The compile keeps
 for each subschema its parent and one token, not its path, and takes time
 in proportion to the schema. In a release build, on a machine loaded with
-other work, 9999 empty `properties` compile in 8 to 15 ms, 9037
+other work, 9999 empty `properties` compile in 8 to 15 ms, some 9000
 subschemas 251 levels deep in 8 to 13 ms, and an `enum` of 100,000 strings
-(1.2 MB) in 36 to 43 ms.
+(1.1 MB) in 36 to 43 ms.
 A megabyte of schema 900 levels deep is refused at once.
 
 ## Dependencies
