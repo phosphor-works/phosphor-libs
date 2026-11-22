@@ -30,6 +30,12 @@ class Layout;
 class Zone;
 }
 
+// The meta-object of the class below has Zone* in its signatures. moc's
+// metatype for that pointer asks whether Zone is a QObject, which needs
+// the definition: without it the answer is "not complete", and a later
+// definition in the same translation unit contradicts it.
+Q_MOC_INCLUDE("PhosphorZones/Zone.h")
+
 namespace PhosphorEngineRuntime {
 
 class ISettings;

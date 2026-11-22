@@ -36,6 +36,12 @@ namespace PhosphorZones {
 class Layout;
 }
 
+// The meta-object of the class below has Layout* in its signatures. moc's
+// metatype for that pointer asks whether Layout is a QObject, which needs
+// the definition: without it the answer is "not complete", and a later
+// definition in the same translation unit contradicts it.
+Q_MOC_INCLUDE("PhosphorZones/Layout.h")
+
 namespace PhosphorZones {
 class LayoutRegistry;
 }

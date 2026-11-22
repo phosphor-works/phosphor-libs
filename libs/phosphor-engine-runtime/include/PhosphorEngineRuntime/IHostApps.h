@@ -22,12 +22,15 @@ public:
     /// particular: an all-empty request opens the editor as it is.
     struct EditorRequest
     {
+        // Each member has an initialiser, so a request names only the
+        // members it sets ({.screenId = id}) and -Wmissing-field-initializers
+        // has nothing to report about the rest.
         /// The screen to edit layouts for.
-        QString screenId;
+        QString screenId = {};
         /// A layout to open, on screenId when one is given.
-        QString layoutId;
+        QString layoutId = {};
         /// A scrolling template to open, by id.
-        QString scrollingTemplateId;
+        QString scrollingTemplateId = {};
         /// Open a new scrolling template.
         bool newScrollingTemplate = false;
     };
