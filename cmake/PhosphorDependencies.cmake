@@ -51,9 +51,8 @@
 #   PHOSPHOR_LIBS_DIR=<this checkout> scripts/check-conventions.py
 # (without the variable, the check reads the phosphor-libs commit PlasmaZones
 # pins now). Its dep-pins rule names every packaging recipe there that does
-# not carry the new pin. It does not name a recipe that still fetches an
-# archive no longer pinned at all, as after replacing one dependency with
-# another, so remove those by hand.
+# not carry the new pin, and every recipe that still fetches an archive no
+# pin names, as after replacing one dependency with another.
 
 include_guard(GLOBAL)
 
