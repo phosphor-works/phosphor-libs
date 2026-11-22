@@ -122,10 +122,10 @@ While a call runs, and when its request had a `progressToken`, each
 ```
 
 `instructions` is left out when the application gives none. `ttlMs` and
-`cacheScope` are always there, since clients need both.
-`capabilities.tools` is there only when the server has tools, and `start()`
-warns when it has none. `tools/list` sends the whole list, in the order the
-tools were added, and has no pages.
+`cacheScope` are always there, since clients need both. `capabilities.tools`
+is there only when the server has tools, and `start()` warns when it has
+none. `tools/list` sends the whole list, in the order the tools were added,
+and has no pages.
 
 Without `setServerInfo`, the server takes the application's name, which
 `QCoreApplication` sets to the executable's name unless the application
@@ -250,49 +250,48 @@ to be compared, hashed or counted, not even the names that `propertyNames`
 checks as strings. The parser keeps ASCII text in Latin-1, other text in
 UTF-8, and text with an escape (`\n`, `\u00e9`) in UTF-16. A code unit of
 UTF-8 is a byte, so a string of CJK characters in UTF-8 is charged three
-times what the same string in UTF-16 is. Text checked for equality with
-text in another encoding, where one of the two is UTF-8, is charged four
-times as much, since Qt decodes the UTF-8 as it compares. The length of a
-string is counted once for all the subschemas applied to it in place. Qt
-keeps the members of an object sorted by name, but their names and strings
-in the order that the arguments wrote them, so the names of a large object
-written in random order are read from all over its storage, each a miss of
-the cache. Each name or string read is charged a unit for each 64 bytes
-between it and the last one read of its object or array, up to 8, which is
-about a miss of the cache and of the TLB. A handler's array whose strings
-were inserted out of order is charged the same way. A string that Qt takes
-out of its array or object to be checked holds a reference to the
-container's storage while it is checked, and is charged for it. So is any
-value taken out of one to be compared or hashed. `uniqueItems` compares
-items in the order of their hashes, far apart in the array, and charges
-the read of each away from the last one read of its run of one hash, and
-the first of each run as far as can be, since the runs come in an order
-that the seed decides. A subschema applied through `allOf`, `anyOf`,
-`oneOf`, `not`, `if`, `then`, `else`, `$ref` or `dependentSchemas` costs a
-unit more than one applied to a member or an item. Each subschema applied
-costs a unit more again once the schema's subschemas and the check's own
-frames (a kilobyte for each subschema it is in) come to 256 KiB, and one
-more at each fourfold, up to 3, since the caches no longer hold them. A
-string looked up in an `enum` of more than eight strings, and a name
-looked up in `properties` or in the triggers of `dependentRequired`, cost
-4 units more once the tables of the whole schema come to 256 KiB, and
-twice as many at each fourfold, up to 16, since each lookup then misses
-the caches. So does each trigger of `dependentRequired` that an object
-has, once for its entry and once more for its list of names when it has
-one. The schema sets the size of its tables, and the server does not cap
-it. A name is decoded, and its `~` and `/` escaped, only for the JSON
-pointer of an error, once for all the errors at its place and below it
-while the check stays there, and again when it comes back. The text of a
-pointer is charged for each whole sixteen code units, not rounded up as
-other text is, since the error and each of its tokens are charged units of
-their own besides. The memory the check holds beyond the arguments and the
-schema is counted too, up to 64 MiB. It holds the sets of members and items that
-`unevaluatedProperties` and `unevaluatedItems` read, the keys that
-`uniqueItems` sorts, the index of an object's names that `required`,
-`dependentRequired` and `dependentSchemas` look names up in, the members
-of an object sorted by name to be compared, and the list of the triggers
-of `dependentRequired` that an object has. The list of errors is capped
-as above.
+times what the same string in UTF-16 is. Text checked for equality with text
+in another encoding, where one of the two is UTF-8, is charged four times as
+much, since Qt decodes the UTF-8 as it compares. The length of a string is
+counted once for all the subschemas applied to it in place. Qt keeps the
+members of an object sorted by name, but their names and strings in the
+order that the arguments wrote them, so the names of a large object written
+in random order are read from all over its storage, each a miss of the
+cache. Each name or string read is charged a unit for each 64 bytes between
+it and the last one read of its object or array, up to 8, which is about a
+miss of the cache and of the TLB. A handler's array whose strings were
+inserted out of order is charged the same way. A string that Qt takes out of
+its array or object to be checked holds a reference to the container's
+storage while it is checked, and is charged for it. So is any value taken
+out of one to be compared or hashed. `uniqueItems` compares items in the
+order of their hashes, far apart in the array, and charges the read of each
+away from the last one read of its run of one hash, and the first of each
+run as far as can be, since the runs come in an order that the seed decides.
+A subschema applied through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`,
+`else`, `$ref` or `dependentSchemas` costs a unit more than one applied to a
+member or an item. Each subschema applied costs a unit more again once the
+schema's subschemas and the check's own frames (a kilobyte for each
+subschema it is in) come to 256 KiB, and one more at each fourfold, up to 3,
+since the caches no longer hold them. A string looked up in an `enum` of
+more than eight strings, and a name looked up in `properties` or in the
+triggers of `dependentRequired`, cost 4 units more once the tables of the
+whole schema come to 256 KiB, and twice as many at each fourfold, up to 16,
+since each lookup then misses the caches. So does each trigger of
+`dependentRequired` that an object has, once for its entry and once more for
+its list of names when it has one. The schema sets the size of its tables,
+and the server does not cap it. A name is decoded, and its `~` and `/`
+escaped, only for the JSON pointer of an error, once for all the errors at
+its place and below it while the check stays there, and again when it comes
+back. The text of a pointer is charged for each whole sixteen code units,
+not rounded up as other text is, since the error and each of its tokens are
+charged units of their own besides. The memory the check holds beyond the
+arguments and the schema is counted too, up to 64 MiB. It holds the sets of
+members and items that `unevaluatedProperties` and `unevaluatedItems` read,
+the keys that `uniqueItems` sorts, the index of an object's names that
+`required`, `dependentRequired` and `dependentSchemas` look names up in, the
+members of an object sorted by name to be compared, and the list of the
+triggers of `dependentRequired` that an object has. The list of errors is
+capped as above.
 
 A check is also stopped 3000 subschemas deep, and when its own frames
 take 4 MiB of stack, half of what a Linux thread has by default. Each
@@ -301,13 +300,13 @@ there the depth stops a check first. A list nested 1000 levels deep
 through `items` and `$ref` is checked in a release build, and one whose
 levels each pass through three more `$ref` is refused at 600 levels.
 
-Measured in a release build (CPU time of `validate()`, the walk before
-the check included), on arguments parsed from a request line as the
-server parses them, for the largest arguments in a line of 16 MiB, or as
-many as the bound lets through. `test_phosphor_mcp_checkwork` counts
-exactly the units that each step is charged, and
-`test_phosphor_mcp_bounds` checks many of them through the server, at
-sizes that a debug build with sanitizers checks in seconds.
+Measured in a release build (CPU time of `validate()`, the walk before the
+check included), on arguments parsed from a request line as the server
+parses them, for the largest arguments in a line of 16 MiB, or as many as
+the bound lets through. `test_phosphor_mcp_checkwork` counts exactly the
+units that each step is charged, and `test_phosphor_mcp_bounds` checks many
+of them through the server, at sizes that a debug build with sanitizers
+checks in seconds.
 
 | Schema and arguments | Arguments | Result | Time |
 |---|---|---|---|
@@ -365,21 +364,20 @@ units. Qt's parser takes time and memory for such a line too (some 130 MB
 for 5.5 million empty arrays), which the line limit bounds. An application
 whose tools take no long text lowers it with `setMaxLineBytes`.
 
-Before the check, the server refuses what a handler would read
-differently from the check, or what a reply cannot carry, with a line for
-each place: a string or a member name with an unpaired UTF-16 surrogate
-(the reply writes it as U+FFFD), a number that is not finite (only a
-handler can build one, in structured content), and a value nested more
-than 1024 levels deep (only a handler can build one too). A number
-without a fraction outside the range of a 64-bit integer (1e19, 2^63,
-1e300) is an integer in JSON Schema, but `QJsonValue::toInteger()` gives a
-handler 0 for it, so `"type": "integer"` refuses it with `must be from
--9223372036854775808 to 9223372036854775807`. Where the schema allows a
-`number`, it passes, and the handler reads it with `toDouble()`. So
-`{"not": {"type": "integer"}}` lets 1e19 through, where a client that
-reads 2020-12 refuses it. Qt's parser reads a number outside the range of
-qint64, and one written with a fraction or an exponent, as the nearest
-double, and the check sees what the handler sees. So
+Before the check, the server refuses what a handler would read differently
+from the check, or what a reply cannot carry, with a line for each place: a
+string or a member name with an unpaired UTF-16 surrogate (the reply writes
+it as U+FFFD), a number that is not finite (only a handler can build one, in
+structured content), and a value nested more than 1024 levels deep (only a
+handler can build one too). A number without a fraction outside the range of
+a 64-bit integer (1e19, 2^63, 1e300) is an integer in JSON Schema, but
+`QJsonValue::toInteger()` gives a handler 0 for it, so `"type": "integer"`
+refuses it with `must be from -9223372036854775808 to 9223372036854775807`.
+Where the schema allows a `number`, it passes, and the handler reads it with
+`toDouble()`. So `{"not": {"type": "integer"}}` lets 1e19 through, where a
+client that reads 2020-12 refuses it. Qt's parser reads a number outside the
+range of qint64, and one written with a fraction or an exponent, as the
+nearest double, and the check sees what the handler sees. So
 -9223372036854775809, down to -9223372036854776832, passes as
 -9223372036854775808, 9223372036854775807.0 is refused as 2^63, and
 9223372036854775809 is 2^63 against a `maximum` of 9223372036854775807.
@@ -610,15 +608,14 @@ depends on what stdout is.
 
 MCP schemas are JSON Schema 2020-12 unless they name another dialect, and
 clients read them that way. The library checks arguments and structured
-content in 2020-12 with a checker of its own (`src/mcpschema*.cpp`), on
-Qt's JSON as the handler reads it. Names and strings are compared
-character by character, U+0000 included, and numbers by their value. A client
-must read 2020-12 and need not read another dialect, so `addTool` refuses
-a `$schema` other than `https://json-schema.org/draft/2020-12/schema`
-(with or without an empty fragment), and a `$schema` anywhere but at the
-root. It refuses as well the keywords that the server does not check,
-each with the reason and the JSON pointer of the place (`error`
-argument, and a warning).
+content in 2020-12 with a checker of its own (`src/mcpschema*.cpp`), on Qt's
+JSON as the handler reads it. Names and strings are compared character by
+character, U+0000 included, and numbers by their value. A client must read
+2020-12 and need not read another dialect, so `addTool` refuses a `$schema`
+other than `https://json-schema.org/draft/2020-12/schema` (with or without
+an empty fragment), and a `$schema` anywhere but at the root. It refuses as
+well the keywords that the server does not check, each with the reason and
+the JSON pointer of the place (`error` argument, and a warning).
 
 | | Keywords |
 |---|---|
@@ -640,16 +637,16 @@ when it holds.
 
 A `$ref` is `#` (the whole schema), `#` and a JSON pointer, or `#` and an
 `$anchor`. A pointer is percent-decoded and must then be UTF-8, its
-characters percent-encoded where a URI cannot hold them
-(`#/$defs/a%20b`), with no `~` but in `~0` and `~1`. It must lead to a
-subschema through the keywords that hold subschemas, so `#/required` and
-`#/properties/a/enum/0` are refused. An anchor (letters, digits, `-`, `_`
-and `.`, starting with a letter or `_`, as 2020-12 has it) is compared as
-it is written, so `#%66oo` does not name the anchor `foo`. A `$ref` may
-lead to a boolean schema, and into `items` beside `prefixItems`. A `$ref`
-may recurse through a keyword that descends into the value (`properties`,
-`items`, `additionalProperties`, and so on), and the bound of the check
-keeps a schema that doubles its work at each level from going on.
+characters percent-encoded where a URI cannot hold them (`#/$defs/a%20b`),
+with no `~` but in `~0` and `~1`. It must lead to a subschema through the
+keywords that hold subschemas, so `#/required` and `#/properties/a/enum/0`
+are refused. An anchor (letters, digits, `-`, `_` and `.`, starting with a
+letter or `_`, as 2020-12 has it) is compared as it is written, so `#%66oo`
+does not name the anchor `foo`. A `$ref` may lead to a boolean schema, and
+into `items` beside `prefixItems`. A `$ref` may recurse through a keyword
+that descends into the value (`properties`, `items`, `additionalProperties`,
+and so on), and the bound of the check keeps a schema that doubles its work
+at each level from going on.
 
 Numbers compare exactly. An integral number of the schema or the arguments
 that fits a 64-bit integer is held as one, any other as a double, and an
@@ -694,27 +691,27 @@ Only the root of an input schema must have `"type": "object"`. The root of
 an output schema may be any type, since structured content may be any JSON
 value. Keyword values are checked too, everywhere below the root. Lengths
 and counts are integers from 0 to 9007199254740991, and `multipleOf` is
-greater than 0. `required` and each list of `dependentRequired` may not
-name a property twice. Names in `properties`, `required`,
-`dependentRequired`, `dependentSchemas` and `$defs`, and the strings and
-member names in `enum` and `const`, may not hold an unpaired UTF-16
-surrogate. No argument that holds one gets to the check, and no URI
-reaches such a name. A number in `enum`, `const`, a bound or `multipleOf`
-must be finite. A whole number there is refused when `tools/list` would
-send it rounded to another integer, as Qt writes it, so that a client
-compares with the number the server does. Qt writes a double in its
-shortest form, so 2^63 is sent as 9223372036854776000, and a client that
-reads integers exactly, as Python does, reads that integer. A whole number
-within the range of a 64-bit integer that an application built in C++ as a
-double is sent the same way, so `QJsonValue(4611686018427387904.0)`, which
-is 2^62, is sent as 4611686018427388000. Parsed from JSON, or built as an
-integer, it is sent with all its digits. 1e19 and 1e300 are sent with an
-exponent, and read as the same double. A Draft 4 boolean
-`exclusiveMinimum` and an unknown type name are refused as well. Names
-inside `properties`, `$defs`, `dependentRequired` and `dependentSchemas`,
-and values inside `enum`, `const`, `default` and `examples`, are data, not
-keywords. A tool without an input schema takes no arguments, as with
-`{"type": "object", "additionalProperties": false}`.
+greater than 0. `required` and each list of `dependentRequired` may not name
+a property twice. Names in `properties`, `required`, `dependentRequired`,
+`dependentSchemas` and `$defs`, and the strings and member names in `enum`
+and `const`, may not hold an unpaired UTF-16 surrogate. No argument that
+holds one gets to the check, and no URI reaches such a name. A number in
+`enum`, `const`, a bound or `multipleOf` must be finite. A whole number
+there is refused when `tools/list` would send it rounded to another integer,
+as Qt writes it, so that a client compares with the number the server does.
+Qt writes a double in its shortest form, so 2^63 is sent as
+9223372036854776000, and a client that reads integers exactly, as Python
+does, reads that integer. A whole number within the range of a 64-bit
+integer that an application built in C++ as a double is sent the same way,
+so `QJsonValue(4611686018427387904.0)`, which is 2^62, is sent as
+4611686018427388000. Parsed from JSON, or built as an integer, it is sent
+with all its digits. 1e19 and 1e300 are sent with an exponent, and read as
+the same double. A Draft 4 boolean `exclusiveMinimum` and an unknown type
+name are refused as well. Names inside `properties`, `$defs`,
+`dependentRequired` and `dependentSchemas`, and values inside `enum`,
+`const`, `default` and `examples`, are data, not keywords. A tool without an
+input schema takes no arguments, as with `{"type": "object",
+"additionalProperties": false}`.
 
 A schema of more than 10000 subschemas, or with subschemas nested more
 than 256 deep, is refused. A tool's schema goes to the model with every
