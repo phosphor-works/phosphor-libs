@@ -76,6 +76,10 @@ public:
     ///       populated value) from "blob is corrupt" (returns empty —
     ///       caller substitutes library/project defaults instead of
     ///       stamping the schema default back over corrupt user data).
+    ///       Only a native JSON object/array counts as parseable here: a
+    ///       JSON-ENCODED STRING is not parsed, so it reads as corrupt. A
+    ///       consumer whose stored data predates native structured values
+    ///       converts it in its own schema migration.
     /// - Undeclared keys always return @c QVariant() — effectively @c T{}.
     ///
     /// The primary template is intentionally a static_assert trap:
@@ -95,7 +99,9 @@ public:
 
     /// Read as @c QVariant. Dispatches on the declared @c expectedType for
     /// the known kinds (bool, the integer widths, double, QString, QColor,
-    /// QStringList, QVariantMap/List). Any OTHER type round-trips as a
+    /// QStringList, QVariantMap/List). The structured kinds read native JSON
+    /// arrays/objects only; anything else stored there reads as the schema
+    /// default (see @c read). Any OTHER type round-trips as a
     /// QString: the write side stringifies it and this read returns the
     /// string, so an exotic-typed key (QDateTime, QPoint, …) changes type
     /// across the round trip. Undeclared keys return @c QVariant().

@@ -104,7 +104,13 @@ namespace PhosphorEngineRuntime {
 ///     the sidecar lift needs filesystem access, so it runs from
 ///     ensureJsonConfig's finalize pass (see relocateOverlayShaderAssignments),
 ///     mirroring how the v4 layout-settings relocation runs outside the chain.
-inline constexpr int ConfigSchemaVersion = 8;
+/// v9: every key the v8 schema types as a JSON object or array holds the native
+///     value. A JSON-ENCODED STRING that parses to the right shape (what
+///     migrateV1ToV2 wrote for Animations.Profile, and what older builds wrote
+///     before the store went native) is rewritten as the object or array it
+///     encodes, so PhosphorConfig::Store reads structured keys natively only
+///     (see migrateV8ToV9).
+inline constexpr int ConfigSchemaVersion = 9;
 
 class PHOSPHORENGINERUNTIME_EXPORT ConfigMigration
 {
@@ -206,7 +212,8 @@ public:
     /// Recover pre-v8 per-event timing files on the ensureJsonConfig exits the
     /// version chain never reaches (corrupt-with-no-INI, whitespace-only, fresh
     /// install). Idempotent, and a no-op unless the config is already stamped
-    /// v8 and carries no MotionProfileTree. Mirrors finalizeV4Conversion, which
+    /// v8 or later (up to ConfigSchemaVersion) and carries no
+    /// MotionProfileTree. Mirrors finalizeV4Conversion, which
     /// exists on the same exits for the same reason.
     static bool finalizeV8MotionImport(const QString& jsonPath);
 
@@ -403,6 +410,17 @@ public:
     /// always wins over the sidecar copy (a retry after a partial run must not
     /// clobber a since-edited assignment).
     static bool relocateOverlayShaderAssignments(const QString& jsonPath);
+
+    /// v8 → v9: structured keys hold native JSON.
+    ///
+    /// For each (group, key) the v8 schema types as a JSON object or array
+    /// (frozen in configmigration_v9.cpp), a STRING value that parses to that
+    /// shape is replaced by the parsed object or array. Anything else is left
+    /// exactly as found: an absent key, a value already native, and a string
+    /// that does not parse to the expected shape (the store then treats it as
+    /// the malformed blob it is). Pure config → config, so it is correct for a
+    /// sparse profile delta too. Stamps `_version = 9`.
+    static void migrateV8ToV9(QJsonObject& root);
 
     /// Prune the retired provider-default catch-all assignment rule from
     /// rules.json. Runs from @ref finalizeV4Conversion's idempotent cleanup

@@ -8,7 +8,6 @@
 
 #include <QDebug>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonValue>
 #include <QMetaType>
 
@@ -95,8 +94,10 @@ void writeVariantTo(IGroup& g, const QString& key, const QVariant& value)
         break;
     case QMetaType::QVariantList:
         // Native-JSON write: the backend (JsonBackend) stores the array
-        // directly in the JSON document, no string round-trip. QSettings-
-        // backed storage falls back to the stringified default impl.
+        // directly in the JSON document, no string round-trip. A backend
+        // without native JSON nodes inherits IGroup's default writeJson,
+        // which stores compact JSON text that its default readJson parses
+        // back, so the read side below still sees a native array.
         g.writeJson(key, QJsonArray::fromVariantList(value.toList()));
         break;
     case QMetaType::QStringList:
@@ -198,17 +199,11 @@ QVariant readVariantAs(const IGroup& g, const QString& key, const QVariant& defa
         if (v.isArray()) {
             return QVariant(v.toArray().toVariantList());
         }
-        // Legacy-string fallback: data written before the native-JSON path
-        // landed (e.g. from a custom pre-refactor migration) may still sit
-        // on disk as a JSON-encoded string. Try to parse before giving up.
-        const QString raw = g.readString(key);
-        if (!raw.isEmpty()) {
-            QJsonParseError err;
-            const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
-            if (err.error == QJsonParseError::NoError && doc.isArray()) {
-                return QVariant(doc.array().toVariantList());
-            }
-        }
+        // Native only. Anything else, a JSON-ENCODED STRING included, is
+        // malformed: a consumer whose data predates the native-JSON path
+        // brings it up to date in its own schema migration rather than
+        // leaning on the read path to parse strings.
+        //
         // Absent or malformed → schema default. Some consumers
         // (settings/validation tests) explicitly assert default-on-corrupt
         // for trigger lists, so this stays default-eager. The typed
@@ -231,10 +226,7 @@ QVariant readVariantAs(const IGroup& g, const QString& key, const QVariant& defa
             }
             return QVariant(out);
         }
-        // No legacy-string fallback here (unlike QVariantList above): before
-        // this branch existed, a QStringList write fell to the string branch
-        // and stored an empty string, so there is no parseable legacy data to
-        // recover.
+        // Native only, as for QVariantList above.
         return defaultValue;
     }
     case QMetaType::QVariantMap: {
@@ -242,14 +234,7 @@ QVariant readVariantAs(const IGroup& g, const QString& key, const QVariant& defa
         if (v.isObject()) {
             return QVariant(v.toObject().toVariantMap());
         }
-        const QString raw = g.readString(key);
-        if (!raw.isEmpty()) {
-            QJsonParseError err;
-            const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
-            if (err.error == QJsonParseError::NoError && doc.isObject()) {
-                return QVariant(doc.object().toVariantMap());
-            }
-        }
+        // Native only, as for QVariantList above.
         return defaultValue;
     }
     case QMetaType::QString:
@@ -259,23 +244,13 @@ QVariant readVariantAs(const IGroup& g, const QString& key, const QVariant& defa
 }
 
 /// Whether a stored QVariantMap/QVariantList key holds a value the read
-/// path can recover: a native JSON object/array, or the legacy
-/// string-encoded form that still parses to the right shape (which
-/// readVariantAs deliberately accepts). Anything else is the corrupt case
-/// the absent-vs-malformed contract exists for.
+/// path can recover: a native JSON object/array, exactly what readVariantAs
+/// accepts. Anything else, a JSON-encoded string included, is the corrupt
+/// case the absent-vs-malformed contract exists for.
 bool storedBlobIsWellFormed(const IGroup& g, const QString& key, QMetaType::Type expectedType)
 {
     const QJsonValue rawJson = g.readJson(key);
-    const bool wantsObject = expectedType == QMetaType::QVariantMap;
-    if (wantsObject ? rawJson.isObject() : rawJson.isArray()) {
-        return true;
-    }
-    const QString rawString = g.readString(key);
-    if (rawString.isEmpty()) {
-        return false;
-    }
-    const QJsonDocument parsed = QJsonDocument::fromJson(rawString.toUtf8());
-    return wantsObject ? parsed.isObject() : parsed.isArray();
+    return expectedType == QMetaType::QVariantMap ? rawJson.isObject() : rawJson.isArray();
 }
 
 } // namespace
@@ -497,9 +472,8 @@ void Store::write(const QString& group, const QString& key, const QVariant& valu
             // A present-but-MALFORMED structured blob also reads back as the
             // default, so this delete destroys the corrupt bytes. That is a
             // legitimate repair, but never a silent one. "Malformed" matches
-            // the read path's recovery exactly: a legacy JSON-ENCODED STRING
-            // that still parses to the right shape is recovered by
-            // readVariantAs and is not corrupt, so it must not warn.
+            // the read path exactly: anything but a native object/array,
+            // which is also what reads back as the default.
             if (def->expectedType == QMetaType::QVariantMap || def->expectedType == QMetaType::QVariantList) {
                 if (!storedBlobIsWellFormed(*g, key, def->expectedType)) {
                     qWarning("PhosphorConfig::Store: discarding malformed stored blob for %s/%s while pruning",
@@ -856,27 +830,18 @@ QVariantMap readTyped<QVariantMap>(IGroup& g, const KeyDef& def)
     if (!g.hasKey(def.key)) {
         return def.defaultValue.toMap();
     }
-    // Native-JSON read first; fall back to parsing a legacy stringified
-    // JSON value (the old QString-backed storage shape) so existing configs
-    // keep working without an explicit migration step.
+    // Native JSON only, as in readVariantAs: a JSON-encoded string is not
+    // parsed. A consumer whose data predates the native-JSON path converts
+    // it in its own schema migration.
     const QJsonValue v = g.readJson(def.key);
     if (v.isObject()) {
         return v.toObject().toVariantMap();
     }
-    const QString raw = g.readString(def.key);
-    if (!raw.isEmpty()) {
-        QJsonParseError err;
-        const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
-        if (err.error == QJsonParseError::NoError && doc.isObject()) {
-            return doc.object().toVariantMap();
-        }
-    }
-    // Key is present but unreadable as a map (malformed legacy string,
-    // wrong JSON type, etc.). Return an empty map rather than the schema
-    // default — the caller can then decide whether to substitute project
-    // defaults or library defaults, matching the pre-QVariantMap-storage
-    // behaviour where an unreadable QString blob propagated as an empty
-    // parse result.
+    // Key is present but not a JSON object (a string, a number, an array,
+    // and so on). Return an empty map rather than the schema default — the
+    // caller can then decide whether to substitute project defaults or
+    // library defaults instead of having the schema default stamped back
+    // over the user's data.
     return QVariantMap{};
 }
 template<>
@@ -890,17 +855,10 @@ QVariantList readTyped<QVariantList>(IGroup& g, const KeyDef& def)
     if (!g.hasKey(def.key)) {
         return def.defaultValue.toList();
     }
+    // Native JSON only, as in readTyped<QVariantMap> above.
     const QJsonValue v = g.readJson(def.key);
     if (v.isArray()) {
         return v.toArray().toVariantList();
-    }
-    const QString raw = g.readString(def.key);
-    if (!raw.isEmpty()) {
-        QJsonParseError err;
-        const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &err);
-        if (err.error == QJsonParseError::NoError && doc.isArray()) {
-            return doc.array().toVariantList();
-        }
     }
     return QVariantList{};
 }
