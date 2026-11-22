@@ -546,17 +546,22 @@ private Q_SLOTS:
              "dependentSchemas member by its pointer, which jsoncons files under another name and does not resolve "
              "(an $anchor there resolves)"},
             // jsoncons percent-decodes a location to read it as a JSON
-            // pointer, and a "~" followed by neither "0" nor "1" makes it read
-            // as an anchor's name instead. It then compiled the member apart
+            // pointer, and a "~" followed by neither "0" nor "1" that a "%7E"
+            // decodes to makes it read as an anchor's name instead. It then compiled the member apart
             // from the schema, where a $ref named another subschema than
             // here, and the first row's recursed until the stack overflowed
             // at validate(). Such a name is refused wherever it is.
             {"{\"properties\": {\"a%7E2\": {\"properties\": {\"x\": {\"$ref\": \"#\"}}}}}",
-             "/properties/a%7E2: \"a%7E2\" percent-decodes to a \"~\" followed by neither \"0\" nor \"1\", which "
-             "jsoncons cannot file as a JSON pointer"},
+             "/properties/a%7E2: \"a%7E2\" is a name whose location jsoncons reads as an anchor's name, not a JSON "
+             "pointer, since it decodes to a \"~\" followed by neither \"0\" nor \"1\""},
             {"{\"$defs\": {\"d%7e\": {}}, \"properties\": {\"y\": {\"type\": \"integer\"}}}",
-             "/$defs/d%7e: \"d%7e\" percent-decodes to a \"~\" followed by neither \"0\" nor \"1\", which jsoncons "
-             "cannot file as a JSON pointer"},
+             "/$defs/d%7e: \"d%7e\" is a name whose location jsoncons reads as an anchor's name, not a JSON "
+             "pointer, since it decodes to a \"~\" followed by neither \"0\" nor \"1\""},
+            // jsoncons writes a byte below 0x10 among the last two characters
+            // with one hex digit, so U+0007 then "E" becomes "%7E".
+            {"{\"properties\": {\"\\u0007E\": {\"properties\": {\"x\": {\"$ref\": \"#\"}}}}}",
+             "/properties/\\u0007E: \"\\u0007E\" is a name whose location jsoncons reads as an anchor's name, not "
+             "a JSON pointer, since it decodes to a \"~\" followed by neither \"0\" nor \"1\""},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
@@ -590,12 +595,17 @@ private Q_SLOTS:
         QVERIFY(memberErrors.has_value());
         QCOMPARE(memberErrors->size(), 2);
 
-        // A name that percent-decodes to "~0" or "~1" reads as a pointer, and
-        // is kept.
+        // A name whose "%7E" decodes to "~0" or "~1" reads as a pointer, and
+        // is kept. So does a literal "~", which jsoncons escapes to "~0"
+        // first, before a "%32".
         const SchemaValidator tilde(
             QByteArrayLiteral("{\"properties\": {\"a%7E0\": {\"properties\": {\"x\": {\"type\": \"integer\"}}}}}"));
         QVERIFY(tilde.isValid());
         QVERIFY(tilde.validate(parse(R"({"a%7E0": {"x": "s"}})")).has_value());
+        const SchemaValidator literal(
+            QByteArrayLiteral("{\"properties\": {\"~%32\": {\"properties\": {\"x\": {\"type\": \"integer\"}}}}}"));
+        QVERIFY(literal.isValid());
+        QVERIFY(literal.validate(parse(R"({"~%32": {"x": "s"}})")).has_value());
 
         // An $id at the root is allowed, and a $ref by pointer or by anchor
         // resolves within the schema.
