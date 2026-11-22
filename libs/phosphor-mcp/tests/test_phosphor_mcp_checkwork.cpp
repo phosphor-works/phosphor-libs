@@ -1082,6 +1082,31 @@ private Q_SLOTS:
         }
     }
 
+    void releasedMemoryIsCountedOnce()
+    {
+        // Memory released is taken off the count once: the keys of
+        // uniqueItems of one array, released, and then those of an array
+        // whose keys alone pass the bound of the memory, by 32 bytes. The
+        // second array, of integers, is built in C++.
+        constexpr qint64 Items = MaxMemory / UniqueBytes + 1;
+        QJsonArray large;
+        for (qint64 i = 0; i < Items; ++i) {
+            large.append(i);
+        }
+        const Counts counts = count(parse("{'prefixItems': [{'uniqueItems': true}, {'uniqueItems': true}]}").toObject(),
+                                    QJsonArray{QJsonArray{0, 1}, large});
+        QCOMPARE(counts.lines,
+                 QStringList{QStringLiteral(": is too large for the server to check against the schema")});
+        QCOMPARE(counts.memory, Items * UniqueBytes);
+        // The value walked: the root and the arrays (3 + 2 each), and their
+        // integers (3 each). The root applied to (2 + 2 + 1), and each array
+        // as an item of prefixItems (2 + 2 + 1); the first's two keys, each
+        // integer hashed (1), taken out of the array (1) and its share of
+        // the sort (1, and 1 for half the bits of 2). The check stops when
+        // the second's keys are counted, before it hashes any.
+        QCOMPARE(counts.work, 3 * (3 + 2) + (2 + Items) * 3 + (2 + 2 + 1) + 2 * (2 + 2 + 1) + 2 * (1 + 1 + (1 + 1)));
+    }
+
     void objectsCompareWhateverTheirOrder()
     {
         // An object built in C++ keeps its members in the order of their
