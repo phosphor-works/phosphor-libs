@@ -375,6 +375,21 @@ unread. It gets no id, `connectionOpened` and `connectionClosed` do not
 come for it, and `connectionRefused()` does. Lowering the cap closes no
 open connection. The default, 0, sets no limit.
 
+`IpcRouter::hasSubscribers(target, signal)` tells whether a connection
+subscribes to the pair now, so whether `broadcastEvent` has anyone to
+write to. A target whose events cost work to build (it merges them, or
+runs a timer for them) asks first and skips the work while nobody
+listens. A subscription counts from the subscribe that the router
+accepted until its unsubscribe, the close of its connection, the end of
+the target's subscriptions or `stop()`. The router keeps a count for
+each pair, so the call is one hash lookup.
+`IpcRouter::subscribersChanged(target, signal)` comes when that answer
+changes: the first subscriber to the pair came, or the last one went. It
+is sent from the event loop, as `connectionClosed` is, and only when the
+answer differs from the one that the previous signal for the pair told,
+so a subscriber that comes and goes before the event loop runs sends
+none. The router's destructor sends none.
+
 `stop()` closes each connection at once and drops what is still
 unwritten to it, so answers written just before it never arrive.
 `stop(IpcRouter::StopMode::Flush)` delivers them first: the router stops
