@@ -663,6 +663,37 @@ private Q_SLOTS:
         QVERIFY2(apart.work < collided.work, qPrintable(QString::number(apart.work)));
     }
 
+    void verdictsCompareEachRun()
+    {
+        // With the key 0, the integer collides with 0.5 (see
+        // collisionsAreSorted): a run of four, 0.5 and three times the
+        // integer, sorted since its first two differ, and its group of three
+        // equal items compared to its end, where 0.5 comes after it. A pair
+        // of equal strings whose hash comes first is a repeat found before
+        // that run. Inside not, where the first repeat decides, the run is
+        // sorted and compared all the same: the same work but for the error
+        // (24) and not applied in place (2 + 1, and 2 + 1 for the array and
+        // its keywords again).
+        Budget budget;
+        const quint64 runHash = hashValue(QJsonValue(0.5), 0, budget);
+        QByteArray pair;
+        for (int i = 0; pair.isEmpty(); ++i) {
+            const QByteArray candidate = "p" + QByteArray::number(i);
+            if (hashValue(QJsonValue(QString::fromLatin1(candidate)), 0, budget) < runHash) {
+                pair = candidate;
+            }
+        }
+        const QJsonValue value = parse("[0.5, -173880412977153776, -173880412977153776, -173880412977153776, '" + pair
+                                       + "', '" + pair + "']");
+        QHashSeed::setDeterministicGlobalSeed();
+        const Counts errors = count(parse("{'uniqueItems': true}").toObject(), value);
+        const Counts verdict = count(parse("{'not': {'uniqueItems': true}}").toObject(), value);
+        QHashSeed::resetRandomGlobalSeed();
+        QCOMPARE(errors.lines, QStringList{QStringLiteral(": must have unique items, and items 1 and 2 are equal")});
+        QCOMPARE(verdict.lines, QStringList());
+        QCOMPARE(verdict.work, errors.work - 24 + (2 + 1 + 2 + 1));
+    }
+
     void checksUseTheKeyOfTheCompile()
     {
         // The names of the schema are hashed when it compiles, with Qt's
