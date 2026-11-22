@@ -161,9 +161,10 @@ inline constexpr QLatin1StringView OverrideDecorationChain{"overrideDecorationCh
 inline constexpr QLatin1StringView OverrideAnimationTiming{"overrideAnimationTiming"};
 /// Curve-only animation override — separate slot from timing so a user can
 /// override the easing/spring curve for an event without committing to a
-/// duration (and vice versa). `OverrideAnimationTiming` still carries both
-/// for backward compatibility with legacy rules; `resolveAnimationMotionProfile`
-/// checks the curve slot first.
+/// duration (and vice versa). The curve lives on this action alone:
+/// `OverrideAnimationTiming` carries only the duration, and a stored timing
+/// action that still carries a `curve` is split onto this action by the
+/// rules.json fix-up `ConfigMigration::splitTimingActionCurves`.
 inline constexpr QLatin1StringView OverrideAnimationCurve{"overrideAnimationCurve"};
 inline constexpr QLatin1StringView SetOpacity{"setOpacity"};
 /// Context-domain override of one node of the zone-overlay shader tree, the

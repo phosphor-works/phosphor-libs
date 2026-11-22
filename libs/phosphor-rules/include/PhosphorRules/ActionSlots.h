@@ -261,8 +261,8 @@ inline constexpr QLatin1StringView OverlayBorderRadius{"overlay-border-radius"};
 inline constexpr QLatin1StringView OverlayShowZoneNumbers{"overlay-show-zone-numbers"};
 // Animation slots are event-scoped: "anim-shader:<event>" / "anim-timing:<event>"
 // / "anim-curve:<event>". Curve and timing are split so they can be overridden
-// independently per event — `resolveAnimationMotionProfile` reads the curve
-// slot first and falls back to the timing slot's curve field for legacy rules.
+// independently per event: the curve comes only from the curve slot and the
+// duration only from the timing slot.
 inline constexpr QLatin1StringView AnimShaderPrefix{"anim-shader:"};
 inline constexpr QLatin1StringView AnimTimingPrefix{"anim-timing:"};
 inline constexpr QLatin1StringView AnimCurvePrefix{"anim-curve:"};

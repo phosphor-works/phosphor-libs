@@ -773,6 +773,33 @@ private Q_SLOTS:
         QCOMPARE(*duration->max, MaxAnimationDurationMs);
     }
 
+    void testAnimationTimingAndCurve_curveOnlyOnTheCurveAction()
+    {
+        // The timing action carries the duration and nothing else. A `curve`
+        // key on it is a stray key and refuses the action, while the same
+        // curve on OverrideAnimationCurve loads. Stored rules written before
+        // the split are moved over by the rules.json fix-up in the config
+        // migration, so nothing on disk is expected to reach this refusal.
+        QJsonObject timing;
+        timing.insert(QStringLiteral("type"), QString(ActionType::OverrideAnimationTiming));
+        timing.insert(QStringLiteral("event"), QStringLiteral("window.appearance.open"));
+        timing.insert(QStringLiteral("durationMs"), 200);
+        QVERIFY(RuleAction::fromJson(timing).has_value());
+        timing.insert(QStringLiteral("curve"), QStringLiteral("0.25,0.10,0.25,1.00"));
+        QVERIFY(!RuleAction::fromJson(timing).has_value());
+
+        const auto timingDescriptor =
+            ActionRegistry::instance().descriptor(QString(ActionType::OverrideAnimationTiming));
+        QVERIFY(timingDescriptor.has_value());
+        QVERIFY(!timingDescriptor->allowedKeys.contains(QStringLiteral("curve")));
+
+        QJsonObject curve;
+        curve.insert(QStringLiteral("type"), QString(ActionType::OverrideAnimationCurve));
+        curve.insert(QStringLiteral("event"), QStringLiteral("window.appearance.open"));
+        curve.insert(QStringLiteral("curve"), QStringLiteral("0.25,0.10,0.25,1.00"));
+        QVERIFY(RuleAction::fromJson(curve).has_value());
+    }
+
     void testOverlayDimensionActions_range()
     {
         // The overlay border width and radius each carry a number. The ceiling

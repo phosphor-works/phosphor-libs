@@ -158,8 +158,9 @@ void ConfigMigration::migrateV3ToV4(QJsonObject& root)
 
     // Animation App Rule stash: v4 folds per-window animation overrides into
     // the unified rules.json store as `OverrideAnimationShader` /
-    // `OverrideAnimationTiming` actions on a `WindowClass Contains <pattern>`
-    // matcher. finalizeV4Conversion ports the bridge logic against the
+    // `OverrideAnimationTiming` actions (a timing entry's curve becoming an
+    // `OverrideAnimationCurve` action beside it) on a
+    // `WindowClass Contains <pattern>` matcher. finalizeV4Conversion ports the bridge logic against the
     // stashed JSON and appends the resulting Rules to the same rule
     // set assignments/disable lists feed.
     QJsonObject animations = root.value(ConfigKeys::Legacy::v4AnimationsGroup()).toObject();
