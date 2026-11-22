@@ -7,6 +7,8 @@
 
 #include "mcpschemacheck.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLatin1StringView>
 #include <QSet>
@@ -50,6 +52,36 @@ bool isCount(const QJsonValue& value)
     }
     const Number number = numberOf(value);
     return number.isInteger && number.integer >= 0 && double(number.integer) < TwoTo53;
+}
+
+// Why a number of the schema is refused, or an empty string. A whole
+// number past the range of qint64 is a double for Qt, and tools/list sends
+// it as QJsonDocument writes it, in its shortest form that reads back as the
+// same double. With an exponent (1e+19), a client reads that double too.
+// Written whole, the shortest form may end in zeros where the double has
+// other digits (9223372036854775808 as 9223372036854776000), and a client
+// that reads integers exactly, as Python does, would compare the
+// arguments with another number than the check does.
+QString numberProblem(const Number& number, const QString& place)
+{
+    if (number.isInteger || !isIntegral(number)) {
+        return QString();
+    }
+    QByteArray sent = QJsonDocument(QJsonArray{number.real}).toJson(QJsonDocument::Compact);
+    sent = sent.mid(1, sent.size() - 2);
+    if (sent.contains('e')) {
+        return QString();
+    }
+    // All the digits of the double (Qt writes doubles whole up to some
+    // 5e21).
+    const QString exact = QString::number(number.real, 'f', 0);
+    if (QLatin1StringView(sent) == exact) {
+        return QString();
+    }
+    return QStringLiteral(
+               "%1: %2 is not supported, since tools/list sends it as %3, which a client reads as "
+               "another integer")
+        .arg(place, exact, QString::fromLatin1(sent));
 }
 
 // A plain-name fragment, as 2020-12 defines $anchor:
@@ -377,7 +409,8 @@ bool SchemaBuilder::childObject(int parent, const QString& keyword, const QJsonV
 
 // A value that a schema compares arguments with (enum, const): no string or
 // member name with an unpaired surrogate, which no argument has, and no
-// number that is not finite, which JSON has no form for.
+// number that is not finite, which JSON has no form for, or that a client
+// would read as another (see numberProblem()).
 QString SchemaBuilder::checkLiteral(const QJsonValue& value, int depth)
 {
     if (depth > MaxNestingDepth) {
@@ -389,6 +422,9 @@ QString SchemaBuilder::checkLiteral(const QJsonValue& value, int depth)
     }
     if (value.isDouble() && !std::isfinite(value.toDouble())) {
         return QStringLiteral("%1: a number that is not finite is not supported").arg(here());
+    }
+    if (value.isDouble()) {
+        return numberProblem(numberOf(value), here());
     }
     if (value.isArray()) {
         const QJsonArray array = value.toArray();
@@ -661,6 +697,9 @@ QString SchemaBuilder::keyword(int index, const QString& key, const QJsonValue& 
         const Number number = numberOf(value);
         if (bound.bit == Node::MultipleOf && !(value.toDouble() > 0)) {
             return QStringLiteral("%1: must be a number greater than 0").arg(here());
+        }
+        if (const QString problem = numberProblem(number, here()); !problem.isEmpty()) {
+            return problem;
         }
         node().numberKeywords |= bound.bit;
         node().*(bound.slot) = number;

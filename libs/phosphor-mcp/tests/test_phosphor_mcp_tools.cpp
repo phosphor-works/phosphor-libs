@@ -562,6 +562,21 @@ private Q_SLOTS:
             QStringLiteral("/properties/a/minContains") + CountRefusal);
         row("minProperties a boolean", "{'type': 'object', 'minProperties': true}",
             QStringLiteral("/minProperties") + CountRefusal);
+        // A whole number past qint64 that tools/list would send rounded, as
+        // another integer: in a bound, multipleOf, enum and const, nested
+        // too. 1e19 and 1e300 are sent with an exponent, the same double.
+        row("maximum 2^63", "{'type': 'object', 'properties': {'a': {'maximum': 9223372036854775808}}}",
+            QStringLiteral("/properties/a/maximum: 9223372036854775808 is not supported, since tools/list sends it as "
+                           "9223372036854776000, which a client reads as another integer"));
+        row("multipleOf 2^64", "{'type': 'object', 'properties': {'a': {'multipleOf': 18446744073709551616}}}",
+            QStringLiteral("/properties/a/multipleOf: 18446744073709551616 is not supported, since tools/list sends it "
+                           "as 18446744073709552000, which a client reads as another integer"));
+        row("enum below qint64 min", "{'type': 'object', 'properties': {'a': {'enum': [1, [-9223372036854777856]]}}}",
+            QStringLiteral("/properties/a/enum/1/0: -9223372036854777856 is not supported, since tools/list sends it "
+                           "as -9223372036854778000, which a client reads as another integer"));
+        row("const of 2^63 in an object", "{'type': 'object', 'const': {'a': 9223372036854775808}}",
+            QStringLiteral("/const/a: 9223372036854775808 is not supported, since tools/list sends it as "
+                           "9223372036854776000, which a client reads as another integer"));
         row("description a number", "{'type': 'object', 'properties': {'a': {'description': 3}}}",
             QStringLiteral("/properties/a/description: must be a string"));
         row("title an object", "{'type': 'object', 'title': {}}", QStringLiteral("/title: must be a string"));
@@ -671,8 +686,8 @@ private Q_SLOTS:
             "'toContains': {'$ref': '#/properties/tuple/contains'}, "
             "'toBranch': {'$ref': '#/properties/u/oneOf/1'}, "
             "'toDependent': {'$ref': '#/properties/card/dependentSchemas/card'}, "
-            "'edge': {'maximum': 9223372036854775808, 'minimum': -9223372036854775808, 'enum': [9223372036854775807, "
-            "9223372036854775808]}, "
+            "'edge': {'maximum': 1e19, 'minimum': -9223372036854775808, 'enum': [9223372036854775807, 1e19, "
+            "-1e19]}, "
             "'v2': {'if': {'type': 'string'}, 'else': {'type': 'integer'}} "
             "}, "
             "'required': ['$ref', 'a/b~c'], "
@@ -1154,15 +1169,15 @@ private Q_SLOTS:
         row("const null", "{'const': null}", "null", true);
         // Exactly: the largest qint64 is not 2^63, whatever a double says.
         row("const qint64 max and 2^63", "{'const': 9223372036854775807}", "9223372036854775808", false);
-        row("maximum 2^63", "{'maximum': 9223372036854775808}", "9223372036854775807", true);
-        row("exclusiveMaximum 2^63", "{'exclusiveMaximum': 9223372036854775808}", "9223372036854775807", true);
+        row("maximum qint64 max", "{'maximum': 9223372036854775807}", "9223372036854775808", false);
+        row("maximum 1e19", "{'maximum': 1e19}", "9223372036854775807", true);
+        row("exclusiveMaximum 1e19", "{'exclusiveMaximum': 1e19}", "9223372036854775807", true);
         row("exclusiveMaximum qint64 max", "{'exclusiveMaximum': 9223372036854775807}", "9223372036854775806", true);
         row("exclusiveMaximum qint64 max refuses", "{'exclusiveMaximum': 9223372036854775807}", "9223372036854775807",
             false);
         row("minimum qint64 min", "{'minimum': -9223372036854775808}", "-9223372036854775808", true);
         row("exclusiveMinimum qint64 min", "{'exclusiveMinimum': -9223372036854775808}", "-9223372036854775808", false);
-        row("exclusiveMinimum below qint64 min", "{'exclusiveMinimum': -9223372036854777856}", "-9223372036854775808",
-            true);
+        row("exclusiveMinimum below qint64 min", "{'exclusiveMinimum': -1e19}", "-9223372036854775808", true);
         row("minimum 2^53 + 1", "{'minimum': 9007199254740993}", "9007199254740992", false);
         row("minimum 2^53 + 1 accepts", "{'minimum': 9007199254740993}", "9007199254740993", true);
         row("maximum 2^53 as a double", "{'maximum': 9007199254740992.0}", "9007199254740993", false);
@@ -1192,6 +1207,12 @@ private Q_SLOTS:
         // is not a multiple of 2^53 + 1.
         row("multipleOf past 2^53 of 2^63", "{'type': 'number', 'multipleOf': 9007199254740993}", "9223372036854775808",
             false);
+        // A whole divisor past qint64, which a schema writes with an
+        // exponent, divides exactly too: the quotient of 5e-324 by 1e19
+        // underflows to 0 as doubles. Departure: Python reads 1e19 as a
+        // float, divides as floats, and lets it pass.
+        row("multipleOf 1e19 of 5e-324", "{'type': 'number', 'multipleOf': 1e19}", "5e-324", false);
+        row("multipleOf 1e19 of 2e19", "{'type': 'number', 'multipleOf': 1e19}", "2e19", true);
         // Departure: Python rounds the divisor to 2^53 against a value
         // written with a fraction, which Qt's parser and Python read as
         // 18014398509481984, and lets it pass.
@@ -1645,9 +1666,9 @@ private Q_SLOTS:
         row("2^63 bound", "{'type': 'object', 'properties': {'v': {'type': 'number', 'maximum': 9223372036854775807}}}",
             "{'v': 9223372036854775808}", "- arguments/v: must be at most 9223372036854775807");
         // A bound past qint64 with all its digits, not 9223372036854776000.
-        row("2^63 written whole",
-            "{'type': 'object', 'properties': {'v': {'type': 'number', 'exclusiveMinimum': 9223372036854775808}}}",
-            "{'v': 9223372036854775808}", "- arguments/v: must be greater than 9223372036854775808");
+        row("1e19 written whole",
+            "{'type': 'object', 'properties': {'v': {'type': 'number', 'exclusiveMinimum': 1e19}}}", "{'v': 1e19}",
+            "- arguments/v: must be greater than 10000000000000000000");
         row("1e300 written short", "{'type': 'object', 'properties': {'v': {'maximum': -1e300}}}", "{'v': 0}",
             "- arguments/v: must be at most -1e+300");
         row("exclusiveMinimum", "{'type': 'object', 'properties': {'v': {'exclusiveMinimum': 0.5}}}", "{'v': 0.5}",

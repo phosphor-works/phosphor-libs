@@ -346,19 +346,19 @@ bool isIntegral(const Number& number)
     return number.isInteger || number.real == std::trunc(number.real);
 }
 
-// An integer divisor divides exactly, whatever the value. A divisor with a
-// fraction (or past qint64) divides as doubles, as Python's jsonschema and
-// JavaScript validators do, the quotient a whole number. Only when that
-// quotient overflows is the test made exactly on the binary values.
+// An integral divisor divides exactly, whatever the value. A divisor with a
+// fraction divides as doubles, as Python's jsonschema and JavaScript
+// validators do, the quotient a whole number. Only when that quotient
+// overflows is the test made exactly on the binary values.
 bool isMultipleOf(const Number& value, const Number& divisor)
 {
-    if (divisor.isInteger) {
-        if (value.isInteger) {
+    if (isIntegral(divisor)) {
+        if (value.isInteger && divisor.isInteger) {
             return value.integer % divisor.integer == 0;
         }
-        // A double, tested on its binary value rather than by std::fmod(),
-        // which takes a step for each bit between the exponents (some 90 ns
-        // for 1e308 by 3).
+        // A double, or a divisor past qint64, tested on the binary values
+        // rather than by std::fmod(), which takes a step for each bit
+        // between the exponents (some 90 ns for 1e308 by 3).
         return isExactMultiple(value, divisor);
     }
     const double quotient = value.toDouble() / divisor.real;
