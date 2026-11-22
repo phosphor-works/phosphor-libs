@@ -23,7 +23,12 @@
 # config, so it still configures alone from its own directory. Add new
 # libraries under libs/ following the phosphor-<name> convention.
 
-cmake_minimum_required(VERSION 3.16)
+# 3.23: phosphor-identity, which this file always adds, declares its headers
+# with target_sources(FILE_SET), new in 3.23. The pinned archives need 3.18
+# (file(ARCHIVE_EXTRACT) in cmake/PhosphorDependencies.cmake) and
+# phosphor-control 3.21 (PROJECT_IS_TOP_LEVEL). The presets (CMakePresets.json)
+# need 3.25, and so do the CMake packages of Qt 6.12, which check it themselves.
+cmake_minimum_required(VERSION 3.23)
 
 project(PhosphorLibs VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -130,7 +135,7 @@ foreach(_phosphor_private GuiPrivate ShaderToolsPrivate QuickPrivate WaylandClie
     endif()
 endforeach()
 
-# The pinned archives (Luau, valijson, the test suite's surface packs) and the
+# The pinned archives (Luau, jsoncons, the test suite's surface packs) and the
 # CPM.cmake that downloads them. Included here, at this tree's top scope, and
 # not from the libraries that use them: the pins and CPM's state are ordinary
 # variables, and a module first included in one library's directory would leave
@@ -200,7 +205,7 @@ add_subdirectory(libs/phosphor-layer)       # wlr-layer-shell surface lifecycle 
 add_subdirectory(libs/phosphor-shell-patterns) # UI-pattern recipes (axis 2) built on PhosphorLayer::Role
 add_subdirectory(libs/phosphor-shortcuts)   # global shortcut backends + domain-free Registry
 add_subdirectory(libs/phosphor-ipc)         # JSON-over-Unix-socket IpcRouter + IpcTarget QML type
-add_subdirectory(libs/phosphor-mcp)         # Model Context Protocol server over stdio (tools, argument checks with valijson) - Core-only
+add_subdirectory(libs/phosphor-mcp)         # Model Context Protocol server over stdio (tools, its own JSON Schema 2020-12 argument checks) - Core-only
 # The org.phosphor.animation QML module is built with the rest of this tree,
 # and its plugin's QtQuickClockManager constructs QtQuickClock directly.
 # QtQuickClock is gated behind PHOSPHOR_ANIMATION_QUICK in phosphor-animation's

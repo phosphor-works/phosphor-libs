@@ -23,13 +23,13 @@
 #      a configure works offline once it is filled. CPM's own overrides apply,
 #      so -DCPM_luau_SOURCE=<dir> builds a local Luau checkout instead.
 #
-# A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU,
-# PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON, PHOSPHORMCP_USE_SYSTEM_VALIJSON, whose
-# default AUTO follows phosphor-fsloader's option) checks that option before calling in
-# here, so it fetches no archive for a system copy. A standalone configure of
-# such a library with its system option on never includes this file. The
-# tree's root includes it on every configure, though, and CPM.cmake is loaded
-# (and downloaded, the first time) when this file is included. So an offline
+# A library that offers a system copy (PHOSPHOR_SYSTEM_LUAU in
+# phosphor-scripting, PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS in phosphor-fsloader)
+# checks that option before calling in here, so it fetches no archive for a
+# system copy. A standalone configure of such a library with its system option
+# on never includes this file. The tree's root includes it on every configure,
+# though, and CPM.cmake is loaded (and downloaded, the first time) when this
+# file is included. So an offline
 # configure of the whole tree sets PHOSPHOR_DEPS_ARCHIVES, or has a filled
 # CPM_SOURCE_CACHE, even when every library uses a system copy. The directory
 # then needs only the archives of the test suite (PHOSPHOR_TEST_DEPS), when
@@ -47,15 +47,20 @@
 #
 # Bumping a pin: change its VERSION, URL, FILE and SHA256 together, with the
 # hash taken from a download you checked, never from whatever the next
-# configure fetched. Then run check-conventions.py, which names every recipe
-# still carrying the old pin.
+# configure fetched. Then, in PlasmaZones, run
+#   PHOSPHOR_LIBS_DIR=<this checkout> scripts/check-conventions.py
+# (without the variable, the check reads the phosphor-libs commit PlasmaZones
+# pins now). Its dep-pins rule names every packaging recipe there that does
+# not carry the new pin. It does not name a recipe that still fetches an
+# archive no longer pinned at all, as after replacing one dependency with
+# another, so remove those by hand.
 
 include_guard(GLOBAL)
 
 # ─── Pins ────────────────────────────────────────────────────────────────────
 # Source archives: built into the tree. PHOSPHOR_DEPS lists them for the fetch
 # script and for the dep-pins rule.
-set(PHOSPHOR_DEPS luau valijson)
+set(PHOSPHOR_DEPS luau jsoncons)
 
 # Luau (MIT, Roblox), the tiling algorithms' runtime (phosphor-scripting).
 set(PHOSPHOR_DEP_luau_VERSION "0.745")
@@ -63,12 +68,12 @@ set(PHOSPHOR_DEP_luau_URL "https://github.com/luau-lang/luau/archive/refs/tags/0
 set(PHOSPHOR_DEP_luau_FILE "luau-0.745.tar.gz")
 set(PHOSPHOR_DEP_luau_SHA256 "53c22773bace6cabbabaead576fbc08d11a0317fce11a3dbf9d027dda6849248")
 
-# valijson (BSD-2-Clause, Tristan Penman), header-only JSON Schema validation
-# (phosphor-fsloader, phosphor-mcp).
-set(PHOSPHOR_DEP_valijson_VERSION "1.1.3")
-set(PHOSPHOR_DEP_valijson_URL "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz")
-set(PHOSPHOR_DEP_valijson_FILE "valijson-1.1.3.tar.gz")
-set(PHOSPHOR_DEP_valijson_SHA256 "887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029")
+# jsoncons (BSL-1.0, Daniel Parker), header-only JSON with JSON Schema
+# validation, 2020-12 among its drafts (phosphor-fsloader).
+set(PHOSPHOR_DEP_jsoncons_VERSION "1.10.0")
+set(PHOSPHOR_DEP_jsoncons_URL "https://github.com/danielaparker/jsoncons/archive/refs/tags/v1.10.0.tar.gz")
+set(PHOSPHOR_DEP_jsoncons_FILE "jsoncons-1.10.0.tar.gz")
+set(PHOSPHOR_DEP_jsoncons_SHA256 "c829350a2eece662beb378143e2ab1c1cbb07d703687bf168626665a8a7d8bc1")
 
 # Test data: read by the test suite and by nothing that is built or installed,
 # so fetched only when BUILD_TESTING is on, and not part of PHOSPHOR_DEPS. A

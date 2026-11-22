@@ -11,13 +11,11 @@
 
 namespace PhosphorMcp {
 
-// A tool's input or output schema, compiled for valijson's Draft 7
-// validator. Only schemas that mean the same under Draft 7 and under JSON
-// Schema 2020-12, the dialect that MCP clients read, compile: see
-// compile() and the README, "Schemas".
-//
-// valijson is confined to mcpschema.cpp, the one translation unit built with
-// exceptions, because its parser throws.
+// A tool's input or output schema, in JSON Schema 2020-12, the dialect that
+// MCP clients read. Only the keywords that the server checks the way the
+// dialect says compile: see compile() and the README, "Schemas". The checker
+// is the library's own (mcpschemacompile.cpp, mcpschemacheck.cpp), on Qt's
+// JSON as the handler reads it.
 class McpSchema
 {
 public:
@@ -34,37 +32,35 @@ public:
         Any,
     };
 
-    // Checks `schema` (a root as `root` asks, and only the keywords that both
-    // dialects share) and compiles it. Returns an empty string on success,
-    // else why the schema is refused as "<pointer>: <reason>", the pointer
-    // being "" for the root itself.
+    // Checks `schema` (a root as `root` asks, and only the keywords the
+    // server supports, within the sizes it states) and compiles it. Returns
+    // an empty string on success, else why the schema is refused as
+    // "<pointer>: <reason>", the pointer being "" for the root itself.
     QString compile(const QJsonObject& schema, Root root = Root::Object);
 
     // The errors of `value` against the compiled schema, one
     // "<pointer>: <description>" for each, the pointer relative to the
     // value's root ("" for the root itself). Empty when `value` matches.
     //
-    // A value that valijson would read differently from a handler is
-    // refused before valijson sees it. That is a string or member name with
-    // an unpaired UTF-16 surrogate, or an integral number outside the range
-    // of qint64 as Qt's JSON parser left it. The parser rounds a number
-    // outside qint64, and one written with a fraction or an exponent, to the
-    // nearest double. So -9223372036854775809, down to -9223372036854776832,
-    // passes as -9223372036854775808, which the handler reads too, and
-    // 9223372036854775807.0 is refused as 2^63.
+    // Before the check, a value is refused that a handler would misread or
+    // a reply could not carry, with a line for each place: a string or a
+    // member name with an unpaired UTF-16 surrogate, a number that is not
+    // finite, and a value nested more than 1024 levels deep. Where the
+    // schema asks for an integer, a number without a fraction outside the
+    // range of qint64 (1e19) is refused, since QJsonValue::toInteger() reads
+    // 0 for it.
     //
-    // The list is short whatever the size of `value`, with at most ten
-    // errors and a last line that counts the rest. A value too large to list
-    // its errors cheaply gets one line that says so. The schema counts as
-    // well as the value. Each subschema adds work for each part of the value
-    // that it applies to, and more inside an anyOf or a oneOf, so a schema
-    // with many of them nested lists the errors of small values only.
+    // The work is bounded. The check counts what it does and the memory it
+    // holds as it goes, and stops with one line that says the value is too
+    // large to check the moment either passes its bound (about a second of
+    // a release build). The list of errors is short whatever the size of
+    // `value`: at most ten errors and a last line that counts the rest, and
+    // one line that says so for a value with more than a thousand.
+    //
+    // Thread-safe: a check keeps nothing in the compiled schema.
     [[nodiscard]] QStringList validate(const QJsonValue& value) const;
 
 private:
-    // Compiles a schema that checkSchema has accepted.
-    QString compileChecked(const QJsonObject& schema);
-
     struct Private;
     std::unique_ptr<Private> d;
 };

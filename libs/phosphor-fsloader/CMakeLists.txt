@@ -25,8 +25,8 @@
 #
 # Depends on Qt6::Core only. No Gui / Qml / DBus coupling.
 
-# 3.18 floor: the vendored-valijson acquisition below uses file(ARCHIVE_EXTRACT),
-# introduced in CMake 3.18.
+# 3.18 floor: the pinned-jsoncons acquisition below unpacks with
+# file(ARCHIVE_EXTRACT), introduced in CMake 3.18.
 cmake_minimum_required(VERSION 3.18)
 
 set(PHOSPHORFSLOADER_VERSION "0.1.0")
@@ -55,30 +55,122 @@ include(GenerateExportHeader)
 find_package(Qt6 ${PHOSPHORFSLOADER_QT_MIN} REQUIRED COMPONENTS Core)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# valijson acquisition — header-only JSON Schema (Draft 7) validator.
+# jsoncons: header-only JSON with JSON Schema validation (2020-12 by default).
 #
 # The archive cmake/PhosphorDependencies.cmake pins by default (from the
 # PHOSPHOR_DEPS_ARCHIVES directory in an offline packaging build, downloaded
-# with CPM otherwise); system headers opt-in. valijson is header-only and used
-# only inside src/schemavalidator.cpp, so it is exposed as a PRIVATE SYSTEM
-# include (its warnings stay out of our -Wall/-Wextra build, and it never leaks
-# into the public ABI). No add_subdirectory: we want the headers, not
-# valijson's own install/export rules.
+# with CPM otherwise). PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS uses the system's
+# headers instead, found through JSONCONS_INCLUDE_DIR and checked here, the
+# one place in the tree that does: phosphor-fsloader is jsoncons' only user.
+# jsoncons is used only inside src/schemavalidator.cpp, so it is a PRIVATE
+# SYSTEM include, which keeps its warnings out of the -Wall/-Wextra build, and
+# the library's symbols are hidden but for its exports (below), so none of
+# jsoncons' reaches the library's ABI. No add_subdirectory: the headers are
+# wanted, not jsoncons' own install and export rules.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-option(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON
-    "Use system-provided valijson headers instead of the archive cmake/PhosphorDependencies.cmake pins" OFF)
+option(PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS
+    "Use system-provided jsoncons headers (1.7.0 or later) instead of the archive cmake/PhosphorDependencies.cmake pins" OFF)
 
-if(PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-    find_path(VALIJSON_INCLUDE_DIR
-        NAMES valijson/validator.hpp
-        DOC "Directory containing valijson/validator.hpp")
-    if(NOT VALIJSON_INCLUDE_DIR)
-        message(FATAL_ERROR
-            "PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON=ON but valijson headers "
-            "(valijson/validator.hpp) were not found. Install valijson dev files "
-            "or unset the option to use the pinned archive.")
+# phosphor-fsloader used valijson once. A build directory from then keeps its
+# two cache entries, which nothing reads any more. Each is removed from the
+# cache, with a warning when it held something other than its default (the
+# option turned on, a directory found or set), so that a packager does not
+# believe it still chooses anything. phosphor-mcp removes its own old entries
+# in its own CMakeLists.
+foreach(_phosphorfsloader_old PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON VALIJSON_INCLUDE_DIR)
+    if(DEFINED CACHE{${_phosphorfsloader_old}})
+        if(${_phosphorfsloader_old})
+            message(WARNING
+                "${_phosphorfsloader_old} is set in this build directory's cache, but nothing reads it, "
+                "because phosphor-fsloader no longer uses valijson. Its schema validator is jsoncons, and "
+                "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS and JSONCONS_INCLUDE_DIR choose its headers. It is "
+                "removed from the cache.")
+        endif()
+        unset(${_phosphorfsloader_old} CACHE)
     endif()
+    # The flag an earlier version kept to warn only once.
+    unset(_PHOSPHORFSLOADER_WARNED_${_phosphorfsloader_old} CACHE)
+endforeach()
+
+if(PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
+    find_path(JSONCONS_INCLUDE_DIR
+        NAMES jsoncons_ext/jsonschema/jsonschema.hpp
+        DOC "Directory containing jsoncons_ext/jsonschema/jsonschema.hpp")
+    if(NOT JSONCONS_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON but jsoncons' headers "
+            "(jsoncons_ext/jsonschema/jsonschema.hpp) were not found. Install jsoncons' "
+            "development files (1.7.0 or later), point JSONCONS_INCLUDE_DIR at them, or unset "
+            "the option to use the pinned archive.")
+    endif()
+    # find_path keeps a directory set by hand without looking in it.
+    if(NOT EXISTS "${JSONCONS_INCLUDE_DIR}/jsoncons_ext/jsonschema/jsonschema.hpp")
+        message(FATAL_ERROR
+            "JSONCONS_INCLUDE_DIR is ${JSONCONS_INCLUDE_DIR}, which has no "
+            "jsoncons_ext/jsonschema/jsonschema.hpp. Point it at the directory that holds "
+            "jsoncons/ and jsoncons_ext/.")
+    endif()
+    # The floor is jsoncons 1.7.0, the first release whose JSON Schema API the
+    # validator compiles against: checked by compiling a use of each part of
+    # it against the headers found, so an older jsoncons fails here and not
+    # in the middle of the build. The result is cached for the directory it
+    # was found for: a new JSONCONS_INCLUDE_DIR is checked again, and so is
+    # the same one after a failure, whose result is not kept.
+    if(NOT "${JSONCONS_INCLUDE_DIR}" STREQUAL "${_PHOSPHORFSLOADER_JSONCONS_CHECKED_DIR}")
+        unset(PHOSPHORFSLOADER_SYSTEM_JSONCONS_WORKS CACHE)
+    endif()
+    include(CheckCXXSourceCompiles)
+    include(CMakePushCheckState)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_INCLUDES "${JSONCONS_INCLUDE_DIR}")
+    # schemavalidator.cpp is built with exceptions; so is the check, whatever
+    # KDECompilerSettings put in CMAKE_CXX_FLAGS.
+    if(MSVC)
+        set(CMAKE_REQUIRED_FLAGS "/EHsc")
+    else()
+        set(CMAKE_REQUIRED_FLAGS "-fexceptions")
+    endif()
+    check_cxx_source_compiles([=[
+        #include <jsoncons/json.hpp>
+        #include <jsoncons_ext/jsonschema/jsonschema.hpp>
+        #include <string>
+        #include <utility>
+        namespace js = jsoncons::jsonschema;
+        #if JSONCONS_VERSION_MAJOR < 1 || (JSONCONS_VERSION_MAJOR == 1 && JSONCONS_VERSION_MINOR < 7)
+        #error "jsoncons older than 1.7.0"
+        #endif
+        int main()
+        {
+            const auto options = js::evaluation_options{}
+                .default_version(js::schema_version::draft202012())
+                .require_format_validation(true);
+            const auto meta = js::make_json_schema(js::draft202012::schema_draft202012<jsoncons::json>::get_schema(), options);
+            jsoncons::json object(jsoncons::json_object_arg);
+            object.reserve(1);
+            object.insert_or_assign(std::string("a"), jsoncons::json(jsoncons::json_array_arg));
+            auto schema = js::make_json_schema(std::move(object), options);
+            meta.validate(jsoncons::json(), [](const js::validation_message& m) {
+                return m.details().empty() && m.keyword().empty() && m.eval_path().to_string().empty()
+                    ? js::walk_state::advance : js::walk_state::abort;
+            });
+            schema.validate(jsoncons::json(), [](const js::validation_message& m) {
+                return m.instance_location().to_string().empty() ? js::walk_state::advance : js::walk_state::abort;
+            });
+            return 0;
+        }
+    ]=] PHOSPHORFSLOADER_SYSTEM_JSONCONS_WORKS)
+    cmake_pop_check_state()
+    if(NOT PHOSPHORFSLOADER_SYSTEM_JSONCONS_WORKS)
+        unset(PHOSPHORFSLOADER_SYSTEM_JSONCONS_WORKS CACHE)
+        message(FATAL_ERROR
+            "The jsoncons headers in ${JSONCONS_INCLUDE_DIR} do not compile against the JSON Schema "
+            "API that phosphor-fsloader uses, which needs jsoncons 1.7.0 or later (CMakeConfigureLog.yaml "
+            "has the compiler's output). Install 1.7.0 or later, or unset "
+            "PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS to use the pinned archive.")
+    endif()
+    set(_PHOSPHORFSLOADER_JSONCONS_CHECKED_DIR "${JSONCONS_INCLUDE_DIR}" CACHE INTERNAL "")
+    set(_phosphorfsloader_jsoncons_include "${JSONCONS_INCLUDE_DIR}")
 else()
     # In-tree the root CMakeLists has already included the module at the top
     # scope, which is where it has to be (it explains why). A standalone
@@ -86,9 +178,8 @@ else()
     if(NOT COMMAND phosphor_fetch_dependency)
         include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/PhosphorDependencies.cmake")
     endif()
-    phosphor_fetch_dependency(valijson)
-    set(_pz_valijson_root "${valijson_SOURCE_DIR}")
-    set(VALIJSON_INCLUDE_DIR "${_pz_valijson_root}/include")
+    phosphor_fetch_dependency(jsoncons)
+    set(_phosphorfsloader_jsoncons_include "${jsoncons_SOURCE_DIR}/include")
 endif()
 
 set(phosphorfsloader_SRCS
@@ -155,22 +246,35 @@ target_include_directories(PhosphorFsLoader
 
 target_compile_features(PhosphorFsLoader PUBLIC cxx_std_20)
 
-# valijson headers are a PRIVATE implementation detail of schemavalidator.cpp.
+# jsoncons' headers are a PRIVATE implementation detail of schemavalidator.cpp.
 # SYSTEM keeps the project's -Wall/-Wextra/-Wpedantic from flagging the
 # third-party headers.
-target_include_directories(PhosphorFsLoader SYSTEM PRIVATE "${VALIJSON_INCLUDE_DIR}")
+target_include_directories(PhosphorFsLoader SYSTEM PRIVATE "${_phosphorfsloader_jsoncons_include}")
 
-# valijson's schema parser throws on a malformed schema; schemavalidator.cpp
-# catches it to fail closed. KDECompilerSettings disables exceptions by
-# default (see the -fexceptions override on vendored Luau), so re-enable them
-# on just this translation unit. The VALIJSON_USE_EXCEPTIONS define (which tells
-# valijson to `throw` rather than abort) is scoped to the SAME TU so the
-# throwing macro and the exceptions flag always travel together — a future TU
-# that includes a valijson header without this scope compiles under
-# -fno-exceptions and would be unable to build the throwing code.
-set_source_files_properties(src/schemavalidator.cpp PROPERTIES
-    COMPILE_OPTIONS "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fexceptions>"
-    COMPILE_DEFINITIONS "VALIJSON_USE_EXCEPTIONS=1")
+# Only what PHOSPHORFSLOADER_EXPORT marks leaves the library. In-tree
+# KDECompilerSettings sets this for every target; set here, it holds for a
+# standalone build too, where the jsoncons templates compiled into
+# schemavalidator.cpp would otherwise be exported by the thousand.
+set_target_properties(PhosphorFsLoader PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
+
+# jsoncons throws on a schema that does not compile, and schemavalidator.cpp
+# catches it to fail closed. KDECompilerSettings disables exceptions for every
+# compiler it knows; its kde_source_files_enable_exceptions() turns them back
+# on for this one translation unit, with each compiler's flag. Without
+# KDECompilerSettings (a standalone build) nothing disabled them. The file is
+# kept out of unity builds, so its flag and its jsoncons headers stay its own.
+#
+# No other file may include a jsoncons header. It would still compile without
+# exceptions, as jsoncons then calls std::terminate() where it would throw, so
+# a schema error would end the process: a rule kept by review, which the build
+# cannot enforce. (This file cannot be built that way: its try/catch would not
+# compile.)
+if(COMMAND kde_source_files_enable_exceptions)
+    kde_source_files_enable_exceptions(src/schemavalidator.cpp)
+endif()
+set_source_files_properties(src/schemavalidator.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
 target_link_libraries(PhosphorFsLoader
     PUBLIC
@@ -192,20 +296,20 @@ if(NOT DEFINED KDE_INSTALL_DATADIR)
     set(KDE_INSTALL_DATADIR ${CMAKE_INSTALL_DATAROOTDIR})
 endif()
 
-# valijson is BSD-2-Clause (Tristan Penman) and, in the default vendored build,
-# its headers are compiled into this library — so its licence notice must
-# accompany the distribution. Ship it in this tree's own licence directory, next
-# to the vendored Luau notice phosphor-scripting installs. The system-valijson
-# build uses separately-installed headers that carry their own licence, so skip
-# it there. Guarded on the file existing for the same reason as the Luau rule:
-# a scope that skips the extraction must not leave an install rule pointing at
-# a path that was never created.
-if(NOT PHOSPHORFSLOADER_USE_SYSTEM_VALIJSON)
-    set(_pz_valijson_license "${_pz_valijson_root}/LICENSE")
-    if(EXISTS "${_pz_valijson_license}")
-        install(FILES ${_pz_valijson_license}
+# jsoncons is BSL-1.0 (Daniel Parker) and, in the default pinned build, its
+# headers are compiled into this library, so its licence goes with the
+# distribution: in this tree's own licence directory, next to the vendored
+# Luau notice phosphor-scripting installs. The system-jsoncons build uses
+# separately installed headers that carry their own licence, so it is skipped
+# there. Guarded on the file existing for the same reason as the Luau rule: a
+# scope that skips the extraction must not leave an install rule pointing at a
+# path that was never created.
+if(NOT PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
+    set(_phosphorfsloader_jsoncons_license "${jsoncons_SOURCE_DIR}/LICENSE")
+    if(EXISTS "${_phosphorfsloader_jsoncons_license}")
+        install(FILES ${_phosphorfsloader_jsoncons_license}
             DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
-            RENAME LICENSE.valijson)
+            RENAME LICENSE.jsoncons)
     endif()
 endif()
 

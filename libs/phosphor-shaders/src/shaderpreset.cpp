@@ -78,9 +78,12 @@ bool ShaderPreset::isUsableId(const QString& id)
         return false;
     }
     // Other_Control subsumes the embedded NUL this used to test for separately, so
-    // the separator test below is all that is left of the original three.
-    for (const QChar ch : id) {
-        if (ch.category() == QChar::Other_Control || ch.category() == QChar::Other_Format) {
+    // the separator test below is all that is left of the original three. Read by
+    // code point: a formatting character past U+FFFF (a language tag, U+E0001)
+    // arrives as two surrogate halves, and a half's category is Other_Surrogate.
+    for (const char32_t codePoint : id.toUcs4()) {
+        const QChar::Category category = QChar::category(codePoint);
+        if (category == QChar::Other_Control || category == QChar::Other_Format) {
             return false;
         }
     }

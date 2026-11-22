@@ -24,7 +24,7 @@
 }:
 
 let
-  # Luau and valijson, pinned (version, URL, SHA-256) in
+  # Luau and jsoncons, pinned (version, URL, SHA-256) in
   # cmake/PhosphorDependencies.cmake, and with the tests the surface packs the
   # tests load (PHOSPHOR_TEST_DEPS there). The sandbox has no network, so they
   # are fetched here as fixed-output derivations and handed to CMake as one
@@ -42,11 +42,11 @@ let
         };
       }
       {
-        name = "valijson-1.1.3.tar.gz";
+        name = "jsoncons-1.10.0.tar.gz";
         path = fetchurl {
-          url = "https://github.com/tristanpenman/valijson/archive/refs/tags/v1.1.3.tar.gz";
-          # sha256 887b53b1a924f6fe0b35fa3bbc9bbbe5ae8c72097b7f0f7c17b45f4cfa646029
-          hash = "sha256-iHtTsakk9v4LNfo7vJu75a6Mcgl7fw98F7RfTPpkYCk=";
+          url = "https://github.com/danielaparker/jsoncons/archive/refs/tags/v1.10.0.tar.gz";
+          # sha256 c829350a2eece662beb378143e2ab1c1cbb07d703687bf168626665a8a7d8bc1
+          hash = "sha256-yCk1Ci7s5mK+s3gUPiqxwcuwfXA2h78WhiZmWop9i8E=";
         };
       }
     ]
@@ -141,7 +141,7 @@ stdenv.mkDerivation {
     license = with lib.licenses; [
       lgpl21Plus
       mit
-      bsd2
+      boost
     ];
     platforms = [
       "x86_64-linux"

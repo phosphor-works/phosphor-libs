@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "urn:phosphor-works:schema:host-descriptor",
     "title": "Settings API host descriptor",
     "description": "One host of a settings API, installed as <datadir>/phosphor-works/<api>-hosts/*.json and read by PhosphorConfig::HostDirectory, which keys descriptors by the Id inside the file and does not check the file name. This schema is the author-time gate on the descriptors the tree ships, and it is stricter than the run-time parser. It refuses an unknown key, which the parser ignores. It requires BusName to be a D-Bus well-known name, where the parser only requires a non-empty string. The parser also checks something a schema cannot, that the variable starting ConfigPath resolves to an absolute path for the user running it.",

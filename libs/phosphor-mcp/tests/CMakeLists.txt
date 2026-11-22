@@ -43,6 +43,28 @@ phosphormcp_add_test(test_phosphor_mcp_protocol)
 phosphormcp_add_test(test_phosphor_mcp_tools)
 phosphormcp_add_test(test_phosphor_mcp_calls)
 phosphormcp_add_test(test_phosphor_mcp_signals)
+# The bound of the argument check: each row that passes it spends the whole
+# bound, half a second of a release build and several seconds of a debug
+# build with sanitizers.
+phosphormcp_add_test(test_phosphor_mcp_bounds)
+set_tests_properties(test_phosphor_mcp_bounds PROPERTIES TIMEOUT 900)
+
+# The work and the memory that the checker charges for each step, counted
+# exactly. The checker is private to the library, whose symbols are hidden,
+# so its objects are linked into the test.
+add_executable(test_phosphor_mcp_checkwork test_phosphor_mcp_checkwork.cpp)
+target_link_libraries(test_phosphor_mcp_checkwork PRIVATE PhosphorMcpSchemaChecker Qt6::Test)
+set_target_properties(test_phosphor_mcp_checkwork PROPERTIES UNITY_BUILD OFF)
+add_test(NAME test_phosphor_mcp_checkwork COMMAND test_phosphor_mcp_checkwork
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+phosphor_apply_test_isolation(test_phosphor_mcp_checkwork)
+# Two of its rows walk a value to the bound, some 40 million units each:
+# a few seconds of a release build, and some twenty seconds of a debug build
+# with sanitizers on a busy machine.
+set_tests_properties(test_phosphor_mcp_checkwork PROPERTIES
+    TIMEOUT 300
+    LABELS "phosphormcp"
+)
 
 # The example server, driven as a client would drive it. The example is built
 # whenever the tests are, unless BUILD_PHOSPHOR_MCP_EXAMPLES was turned off.

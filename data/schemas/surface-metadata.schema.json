@@ -1,10 +1,10 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "urn:plasmazones:schema:surface-metadata",
     "title": "PlasmaZones Surface Shader Metadata",
-    "description": "metadata.json for a bundled or user surface (decoration) shader pack. Core identity and the parameter contract are required. The optional compositing and multipass keys (providesBorder, providesOpacityTint, needsBackdrop, interiorOpaque, multipass, bufferShaders, bufferScale, bufferScales, bufferFeedback, bufferWrap, bufferWraps, bufferFilter, bufferFilters, depthBuffer, halfFloatBuffers, animated, audio, paddingParam, vertexShader and textures), the named parameter presets and the descriptive metadata (description, author, version, category, preview) are type-checked and bounded here, not merely tolerated, and an unknown top-level key is rejected. The per-pass bufferScales list is surface-only, because the overlay and animation families carry a single bufferScale for the whole chain.",
+    "description": "metadata.json for a bundled or user surface (decoration) shader pack. Core identity and the parameter contract are enforced. A pack may declare no parameters, and SurfaceShaderEffect::toJson leaves the key out then. The optional compositing and multipass keys (providesBorder, providesOpacityTint, needsBackdrop, interiorOpaque, multipass, bufferShaders, bufferScale, bufferScales, bufferFeedback, bufferWrap, bufferWraps, bufferFilter, bufferFilters, depthBuffer, halfFloatBuffers, animated, audio, paddingParam, vertexShader and textures), the named parameter presets and the descriptive metadata (description, author, version, category, preview) are type-checked and bounded here, not merely tolerated, and an unknown top-level key is rejected. The per-pass bufferScales list is surface-only, because the overlay and animation families carry a single bufferScale for the whole chain.",
     "type": "object",
-    "required": ["id", "name", "fragmentShader", "parameters"],
+    "required": ["id", "name", "fragmentShader"],
     "additionalProperties": false,
     "properties": {
         "id": { "type": "string", "minLength": 1 },
@@ -40,18 +40,20 @@
         "bufferWrap": { "type": "string", "enum": ["clamp", "repeat", "mirror"] },
         "bufferWraps": {
             "type": "array",
-            "items": { "type": "string", "enum": ["clamp", "repeat", "mirror"] },
+            "items": { "type": "string", "enum": ["clamp", "repeat", "mirror", ""] },
+            "description": "Per-buffer wrap, aligned with bufferShaders. An empty string is the default of that buffer, and the loader keeps it in place so later entries stay aligned.",
             "maxItems": 8
         },
         "bufferFilter": { "type": "string", "enum": ["linear", "nearest", "mipmap"] },
         "bufferFilters": {
             "type": "array",
-            "items": { "type": "string", "enum": ["linear", "nearest", "mipmap"] },
+            "items": { "type": "string", "enum": ["linear", "nearest", "mipmap", ""] },
+            "description": "Per-buffer filter, aligned with bufferShaders. An empty string is the default of that buffer, and the loader keeps it in place so later entries stay aligned.",
             "maxItems": 8
         },
         "depthBuffer": {
             "type": "boolean",
-            "description": "Allocate a depth attachment alongside the colour FBO so a pass can sample window depth. DAEMON-ONLY, and that matters more here than in the other families: the compositor implements no depth buffer for surface packs, and the compositor is where a decoration lives on a real window, so a pack that samples depth looks one way in the settings preview and another on screen. The surface family also ships no depth module to include, unlike data/overlays/shared/depth.glsl, so declare `layout(binding = 16) uniform sampler2D uDepthBuffer;` yourself. Setting it also makes every pass render at the single bufferScale on the daemon, because the depth attachment is sized from bufferScale and a render target's colour and depth attachments must agree in size, so no bufferScales entry is consulted there. That holds on a one-pass chain too. plasmazones-shader-validate reports all of this."
+            "description": "Allocate a depth attachment alongside the colour FBO so a pass can sample window depth. DAEMON-ONLY, and that matters more here than in the other families. The compositor implements no depth buffer for surface packs, and the compositor is where a decoration lives on a real window, so a pack that samples depth looks one way in the settings preview and another on screen. The surface family also ships no depth module to include, unlike data/overlays/shared/depth.glsl, so declare `layout(binding = 16) uniform sampler2D uDepthBuffer;` yourself. Setting it also makes every pass render at the single bufferScale on the daemon, because the depth attachment is sized from bufferScale and a render target's colour and depth attachments must agree in size, so no bufferScales entry is consulted there. That holds on a one-pass chain too. plasmazones-shader-validate reports all of this."
         },
         "halfFloatBuffers": { "type": "boolean" },
         "paddingParam": { "type": "string" },
@@ -71,7 +73,7 @@
         "presets": {
             "type": "object",
             "maxProperties": 64,
-            "description": "Named parameter presets. Each value is a map of parameter id to value, naming a subset of the pack's declared parameters. A preset id is its key here, and it is also the label the picker shows, so it has to read as a name. That rules out control and bidi-formatting characters, and anything longer than a label can show. Unlike a user preset id it never becomes a filename, because duplicating a pack preset mints a fresh UUID. A null value is allowed and means the preset says nothing about that parameter, so it keeps the pack's default, and the loader drops the entry. Those rules are checked by plasmazones-shader-validate rather than here, because the vendored JSON-schema validator rejects every name under a propertyNames rule, legitimate ones included.",
+            "description": "Named parameter presets. Each value is a map of parameter id to value, naming a subset of the pack's declared parameters. A preset id is its key here, and it is also the label the picker shows, so it has to read as a name. That rules out control and bidi-formatting characters, and anything longer than a label can show. Unlike a user preset id it never becomes a filename, because duplicating a pack preset mints a fresh UUID. A null value is allowed and means the preset says nothing about that parameter, so it keeps the pack's default, and the loader drops the entry. Those rules are checked by plasmazones-shader-validate rather than here, with ShaderPreset::isUsableId, the predicate the picker relies on. It refuses every control and formatting character, path separators, a leading dot and a blank id, and it measures length in UTF-16 units. A pattern could state some of these, but not the whole set of control and formatting characters, since neither Python nor the runtime validator matches character categories. And maxLength counts code points where the picker counts UTF-16 units.",
             "additionalProperties": {
                 "type": "object",
                 "maxProperties": 48,
@@ -81,7 +83,7 @@
         "parameters": {
             "type": "array",
             "maxItems": 48,
-            "items": { "$ref": "#/definitions/parameter" }
+            "items": { "$ref": "#/$defs/parameter" }
         }
     },
     "if": {
@@ -94,7 +96,7 @@
             "bufferShaders": { "minItems": 1 }
         }
     },
-    "definitions": {
+    "$defs": {
         "parameter": {
             "type": "object",
             "required": ["id", "name", "type", "default"],

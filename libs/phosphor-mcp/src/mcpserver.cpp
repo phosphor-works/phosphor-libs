@@ -175,7 +175,7 @@ void findNonFinite(const QJsonValue& value, const QString& pointer, QStringList&
     }
     if (value.isDouble()) {
         if (!std::isfinite(value.toDouble())) {
-            found.append(pointer + QStringLiteral(": a number that is not finite, which JSON cannot carry"));
+            found.append(pointer + QStringLiteral(": is a number that is not finite, which JSON cannot carry"));
         }
         return;
     }
@@ -639,7 +639,8 @@ void McpServer::onLine(const QByteArray& line)
     const QJsonValue document = QJsonValue::fromJson(line, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
         sendError(NoId, ErrorCode::ParseError,
-                  QStringLiteral("Parse error: %1 at offset %2").arg(parseError.errorString()).arg(parseError.offset));
+                  QStringLiteral("Parse error: %1 at offset %2")
+                      .arg(parseError.errorString(), QString::number(parseError.offset)));
         return;
     }
     if (document.isArray()) {
@@ -1121,9 +1122,12 @@ bool McpServer::finishCall(quint64 token, const McpResult& result)
 
     QStringList errors;
     if (result.hasStructuredContent()) {
-        findNonFinite(result.structuredContent(), QString(), errors);
         if (entry.output) {
-            errors += entry.output->validate(result.structuredContent());
+            // The check refuses a number that is not finite itself, at its
+            // place, before it checks anything else.
+            errors = entry.output->validate(result.structuredContent());
+        } else {
+            findNonFinite(result.structuredContent(), QString(), errors);
         }
     } else if (entry.output && !result.isError()) {
         errors.append(QStringLiteral(": no structured content"));
