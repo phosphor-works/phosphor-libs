@@ -30,6 +30,69 @@
 
 using namespace PhosphorMcp::Schema;
 
+namespace PhosphorMcp::Schema {
+
+// The friend that NameTable names, for tablesCompareTheText: it reads the
+// slots, and makes two names collide in a slot's tag and place whatever
+// Qt's hash gives the names.
+struct NameTableProbe
+{
+    using Slot = NameTable::Slot;
+
+    static constexpr quint32 tagOf(std::size_t hash)
+    {
+        return NameTable::tagOf(hash);
+    }
+    // The slot of the one name of `table` moved to the place of the one
+    // name of `other`, and given that name's tag, in both encodings: as if
+    // the two names' hashes had the same tag and place. False unless each
+    // table holds one name, in as many slots, under the same seed.
+    static bool collide(NameTable& table, const NameTable& other)
+    {
+        return table.m_tables->seed == other.m_tables->seed
+            && collide(table.m_tables->utf8.entries, other.m_tables->utf8.entries)
+            && collide(table.m_tables->utf16.entries, other.m_tables->utf16.entries);
+    }
+    // The place, tag and value of each name's slot: in UTF-8, then UTF-16.
+    static QList<std::tuple<std::size_t, quint32, int>> taken(const NameTable& table)
+    {
+        QList<std::tuple<std::size_t, quint32, int>> found;
+        for (const std::vector<Slot>* entries : {&table.m_tables->utf8.entries, &table.m_tables->utf16.entries}) {
+            for (std::size_t i = 0; i < entries->size(); ++i) {
+                if ((*entries)[i].value >= 0) {
+                    found.append({i, (*entries)[i].tag, (*entries)[i].value});
+                }
+            }
+        }
+        return found;
+    }
+
+private:
+    static bool collide(std::vector<Slot>& entries, const std::vector<Slot>& other)
+    {
+        const auto place = [](const std::vector<Slot>& table) {
+            const auto used = [](const Slot& slot) {
+                return slot.value >= 0;
+            };
+            return std::count_if(table.begin(), table.end(), used) == 1
+                ? std::size_t(std::find_if(table.begin(), table.end(), used) - table.begin())
+                : table.size();
+        };
+        const std::size_t from = place(entries);
+        const std::size_t to = place(other);
+        if (entries.size() != other.size() || from == entries.size() || to == other.size()) {
+            return false;
+        }
+        Slot slot = entries[from];
+        slot.tag = other[to].tag;
+        entries[from] = Slot();
+        entries[to] = slot;
+        return true;
+    }
+};
+
+} // namespace PhosphorMcp::Schema
+
 namespace {
 
 // JSON with single quotes for double ones.
@@ -1263,101 +1326,83 @@ private Q_SLOTS:
         QCOMPARE(table.value(QLatin1StringView("x")), 2);
         QCOMPARE(table.value(QStringView(u"x")), 2);
 
-        // A slot keeps a part of its name's hash, and a name of the same
-        // size whose hash has that part, and the same place in a table of
-        // eight slots, is found only when the texts are the same. Under the
-        // seed 0, with Qt's hash of this build, two such names are found
-        // among a few hundred thousand.
-        QHash<quint64, QByteArray> seen;
-        QByteArray first;
-        QByteArray second;
-        for (int i = 0; i < 4000000 && first.isEmpty(); ++i) {
-            const QByteArray name = QByteArray::number(i).rightJustified(8, 'n');
-            const quint64 hash = qHash(QByteArrayView(name), 0);
-            const quint64 key = (quint64(quint32(hash >> 32) ^ quint32(hash)) << 3) | (hash & 7);
-            const auto it = seen.constFind(key);
-            if (it != seen.constEnd()) {
-                first = *it;
-                second = name;
-            } else {
-                seen.insert(key, name);
-            }
+        // A slot keeps a part of its name's hash, its tag, beside the bits
+        // of its place: bits of the whole hash, in a 64-bit build of its
+        // high half too, which no table's place reads.
+        const std::size_t hash = std::size_t(0x9e3779b97f4a7c15U);
+        QVERIFY(NameTableProbe::tagOf(hash) != NameTableProbe::tagOf(hash ^ 0x100));
+        if constexpr (sizeof(std::size_t) == 8) {
+            QVERIFY(NameTableProbe::tagOf(hash) != NameTableProbe::tagOf(hash ^ (std::size_t(1) << 40)));
         }
-        QVERIFY(!first.isEmpty());
-        // The table takes the seed when its first name is inserted. Each
-        // name keeps its own value when both are inserted.
-        QHashSeed::setDeterministicGlobalSeed();
+
+        // A name is found only in a slot whose tag, size and text are the
+        // name's. In each table below, of eight slots, the slot of a name
+        // is moved to the place of another's, with that name's tag, as if
+        // the hashes of the two collided there. valueOf gives a name's
+        // value, the same in both encodings, or -2 when they differ; values
+        // gives the values of the slots of both encodings, sorted.
+        const auto valueOf = [](const NameTable& table, const QString& name) {
+            const QByteArray utf8 = name.toUtf8();
+            const int value = table.value(QUtf8StringView(utf8));
+            return table.value(QStringView(name)) == value ? value : -2;
+        };
+        const auto values = [](const NameTable& table) {
+            QList<int> taken;
+            for (const auto& slot : NameTableProbe::taken(table)) {
+                taken.append(std::get<2>(slot));
+            }
+            std::sort(taken.begin(), taken.end());
+            return taken;
+        };
+        // A name of the same size is not found in that slot, and once
+        // inserted, it is put past it: each name keeps its own value.
+        const QString first = QStringLiteral("name1");
+        const QString second = QStringLiteral("name2");
         NameTable collided;
-        collided.insert(QString::fromLatin1(first), 5);
-        NameTable both;
-        both.insert(QString::fromLatin1(first), 5);
-        both.insert(QString::fromLatin1(second), 6);
-        QHashSeed::resetRandomGlobalSeed();
-        QCOMPARE(collided.value(QLatin1StringView(first)), 5);
-        QCOMPARE(collided.value(QLatin1StringView(second)), -1);
-        QCOMPARE(both.value(QLatin1StringView(first)), 5);
-        QCOMPARE(both.value(QLatin1StringView(second)), 6);
+        collided.insert(first, 5);
+        NameTable other;
+        other.insert(second, 6);
+        QVERIFY(NameTableProbe::collide(collided, other));
+        QCOMPARE(valueOf(collided, second), -1);
+        collided.insert(second, 6);
+        QCOMPARE(valueOf(collided, second), 6);
+        QCOMPARE(values(collided), QList<int>({5, 5, 6, 6}));
 
         // Nor is a name found in the slot of a longer one that begins with
-        // it and whose hash has the same part. Two such names are prefixes
-        // of a text of random letters, found among some 2^32 pairs of
-        // prefixes, as many bytes hashed, on average. Under the seed 0,
-        // with Qt's hash of this build, these random letters give two in
-        // some 1.3 gigabytes.
-        const auto placeOf = [](QByteArrayView name) {
-            return qHash(name, 0) & 7;
-        };
-        const auto tagOf = [](QByteArrayView name) {
-            const quint64 hash = qHash(name, 0);
-            return quint32(hash >> 32) ^ quint32(hash);
-        };
-        std::mt19937 random(6);
-        QByteArray text(8192, 'a');
-        qsizetype shorter = 0;
-        qsizetype longer = 0;
-        for (int i = 0; i < 20000 && longer == 0; ++i) {
-            for (char& c : text) {
-                c = char('a' + random() % 26);
-            }
-            QHash<quint32, qsizetype> tags;
-            for (qsizetype size = 1; size <= text.size() && longer == 0; ++size) {
-                const QByteArrayView name(text.constData(), size);
-                const auto it = tags.constFind(tagOf(name));
-                if (it == tags.constEnd()) {
-                    tags.insert(tagOf(name), size);
-                } else if (((placeOf(name) - placeOf(QByteArrayView(text).first(*it))) & 7) != 4) {
-                    shorter = *it;
-                    longer = size;
-                }
-            }
-        }
-        QVERIFY(longer > 0);
-        // The slots from the shorter name's place up to that of the longer
-        // one are taken first, or those from the longer one's place up to
-        // the shorter one's, which the longer one then takes: either way a
-        // table of eight slots holds the longer name where the search for
-        // the shorter one passes, and stops at the empty slot after it.
-        const QByteArrayView shortName = QByteArrayView(text).first(shorter);
-        const QByteArrayView longName = QByteArrayView(text).first(longer);
-        const std::size_t distance = (placeOf(longName) - placeOf(shortName)) & 7;
-        std::size_t from = distance < 4 ? placeOf(shortName) : placeOf(longName);
-        QByteArrayList fillers;
-        for (int i = 0; fillers.size() < qsizetype(distance < 4 ? distance : 8 - distance); ++i) {
-            const QByteArray filler = "f" + QByteArray::number(i);
-            if (placeOf(filler) == from && tagOf(filler) != tagOf(shortName)) {
-                fillers.append(filler);
-                from = (from + 1) & 7;
-            }
-        }
-        QHashSeed::setDeterministicGlobalSeed();
+        // it, nor does it take that slot when it is inserted after it.
+        const QString longName = QStringLiteral("prefixed");
+        const QString shortName = QStringLiteral("prefix");
         NameTable prefixed;
-        for (const QByteArray& filler : std::as_const(fillers)) {
-            prefixed.insert(QString::fromLatin1(filler), 1);
+        prefixed.insert(longName, 7);
+        NameTable shorter;
+        shorter.insert(shortName, 8);
+        QVERIFY(NameTableProbe::collide(prefixed, shorter));
+        QCOMPARE(valueOf(prefixed, shortName), -1);
+        prefixed.insert(shortName, 8);
+        QCOMPARE(valueOf(prefixed, shortName), 8);
+        QCOMPARE(values(prefixed), QList<int>({7, 7, 8, 8}));
+
+        // The hashes are keyed by Qt's global seed when the table's first
+        // name was inserted, which the table keeps: under another seed the
+        // same names take other places or tags.
+        const QStringList names{QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c"), QStringLiteral("d")};
+        QHashSeed::setDeterministicGlobalSeed();
+        NameTable fixed;
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            fixed.insert(names.at(i), int(i));
         }
-        prefixed.insert(QString::fromLatin1(longName), 7);
+        // A random seed again, also under QT_HASH_SEED=0.
         QHashSeed::resetRandomGlobalSeed();
-        QCOMPARE(prefixed.value(QLatin1StringView(longName)), 7);
-        QCOMPARE(prefixed.value(QLatin1StringView(shortName)), -1);
+        QVERIFY(QHashSeed::globalSeed() != 0);
+        NameTable random;
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            random.insert(names.at(i), int(i));
+        }
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            QCOMPARE(valueOf(fixed, names.at(i)), int(i));
+            QCOMPARE(valueOf(random, names.at(i)), int(i));
+        }
+        QVERIFY(NameTableProbe::taken(fixed) != NameTableProbe::taken(random));
     }
 
     void textIsTheSameInEveryEncoding()
