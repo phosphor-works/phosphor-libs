@@ -984,7 +984,7 @@ QString SchemaBuilder::resolveReference(int index)
 // subschemas applied to the same value, or more of them than the bound of
 // the work lets the check apply. The count takes every branch of allOf,
 // anyOf, oneOf and dependentSchemas, not and if, and the larger of then and
-// else, since a value takes one of the two.
+// else beside an if, since a value takes one of the two.
 QString SchemaBuilder::findCycle()
 {
     enum class Mark : quint8 {
@@ -1043,7 +1043,8 @@ QString SchemaBuilder::findCycle()
                 const auto count = [&](int child) -> qint64 {
                     return child >= 0 ? applied[std::size_t(child)] : 0;
                 };
-                // Those of inPlace(), but only the larger of then and else.
+                // Those of inPlace(), but only the larger of then and else
+                // beside an if.
                 forEachInPlace(
                     node,
                     [&](int child) {

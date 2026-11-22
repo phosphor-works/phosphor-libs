@@ -62,9 +62,9 @@ find_package(Qt6 ${PHOSPHORMCP_QT_MIN} REQUIRED COMPONENTS Core)
 # phosphor-fsloader reads in the tree, and those that
 # cmake/PhosphorDependencies.cmake set when it fetched valijson
 # (PHOSPHOR_DEPS_ARCHIVES, and CPM's and FetchContent's entries,
-# CPM_PACKAGE_valijson_* among them), since the tree's other libraries fetch
-# through that file. In a build directory of the library alone nothing reads
-# them.
+# CPM_PACKAGE_valijson_* among them, which nothing reads now), since the
+# tree's other libraries fetch through that file. In a build directory of the
+# library alone nothing reads them.
 foreach(_phosphormcp_old PHOSPHORMCP_USE_SYSTEM_VALIJSON PHOSPHORMCP_VALIJSON_INCLUDE_DIR VALIJSON_INCLUDE_DIR
         PHOSPHORMCP_USE_SYSTEM_JSONCONS)
     if(DEFINED CACHE{${_phosphormcp_old}})

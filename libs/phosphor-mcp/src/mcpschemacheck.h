@@ -19,13 +19,17 @@ namespace PhosphorMcp::Schema {
 //
 // Work is counted in units, at most about 20 ns each of a release build,
 // whatever the schema and the value. The checker charges each step it takes
-// (a value walked, a subschema applied to a value, a keyword checked, a
-// member or an item visited, a value taken out of its array or object, a
-// name looked up, a name or a string read away from the last one read of
-// its object or array, sixteen code units of a string or a name read,
-// compared or hashed, a word of an annotation set merged, an error built),
-// weighted by what it costs as a sweep of each charge measured it. The check stops the moment the count passes MaxWork,
-// under a second. The README has the measured times.
+// (a value walked, a subschema applied to a value, and more in place or in
+// a large schema, a keyword checked, a member or an item visited, a value
+// taken out of its array or object, a name looked up, a name or a string
+// read away from the last one read of its object or array, sixteen code
+// units of a string or a name, or fewer, read, compared or hashed, a word
+// of an annotation set merged, an error built), weighted by what it costs.
+// A sweep of each charge, with short and long text in each encoding,
+// numbers of each kind, and large and deep schemas, measured at most 16 ns
+// a unit, some 1.35 times the 12 ns a unit of a list of integers checked
+// for their type. The check stops the moment the count passes MaxWork, in
+// some 0.6 s at the most measured. The README has the measured times.
 constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
 // goes: the sets of the members and items that subschemas evaluated (for

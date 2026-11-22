@@ -178,9 +178,9 @@ property`, `must be at most 5 characters long`, `must be one of the values
 of enum`, `is required when "card" is present`, `must have an item that
 matches contains`, `must have unique items, and items 1 and 3 are equal`,
 and so on. A number in a line is written the same in every locale: an
-integer with all its digits (9223372036854775808 too, below 10^21), any
-other number in its shortest form that reads back as the same double
-(`0.1`, `1e-07`, `1e+300`).
+integer with all its digits (10000000000000000000 for 1e19 too, below
+10^21), any other number in its shortest form that reads back as the same
+double (`0.1`, `1e-07`, `1e+300`).
 
 The errors of a subschema come in the order of its keywords. First those
 that apply no subschema (`type`, `const`, `enum`, and the keywords of
@@ -216,20 +216,24 @@ The check itself has a bound, and it is exact. The checker counts what it
 does as it goes, and stops the moment the count passes the bound, with the
 line `- arguments: is too large for the server to check against the
 schema`. Nothing is estimated beforehand. Each step is charged by what it
-costs (a value walked, a subschema applied to a value, a keyword checked,
-a member visited, a value taken out of its array or object, a name looked
-up, a name or a string read away from the last one read of its object or
-array, sixteen code units of a string or a name read, compared or hashed,
-a word of an annotation set merged, an error built), in units of at most
-about 20 ns of a release build. A sweep that drives each charge of the
-checker with the shapes that make it dominate, in each encoding that Qt
-keeps text in, with short and long strings and names, with names in
-random order, and with strings and other values taken out of their arrays
-and objects and compared far apart, measured at most 16 ns a unit for a
-check of a millisecond or more, and the shapes below measure as much. A
-check of less than a millisecond pays fixed costs too, such as the first
-use of the stack, and nothing that grows with the arguments. The bound is
-40 million units, under a second whatever the schema and the arguments.
+costs (a value walked, a subschema applied to a value, and more in place
+or in a large schema, a keyword checked, a member visited, a value taken
+out of its array or object, a name looked up, a name or a string read away
+from the last one read of its object or array, sixteen code units of a
+string or a name, or fewer, read, compared or hashed, a word of an
+annotation set merged, an error built), in units of at most about 20 ns of
+a release build. A sweep that drives each charge of the checker with the
+shapes that make it dominate, in each encoding that Qt keeps text in, with
+short and long strings and names (around each sixteen code units), with
+numbers of each kind, with large schemas and checks deep in them, with
+names in random order, and with strings and other values taken out of
+their arrays and objects and compared far apart, measured at most 16 ns a
+unit for a check of a millisecond or more, some 1.35 times what a list of
+integers checked for their type measures beside it (12 ns a unit on a
+loaded machine), and the shapes below measure as much. A check of less
+than a millisecond pays fixed costs too, such as the first use of the
+stack, and nothing that grows with the arguments. The bound is 40 million
+units, under a second whatever the schema and the arguments.
 
 Strings and names are read where Qt's parser keeps them, and never decoded
 to be compared, hashed or counted, not even the names that `propertyNames`
@@ -251,15 +255,23 @@ out of its array or object to be checked holds a reference to the
 container's storage while it is checked, and is charged for it. So is any
 value taken out of one to be compared or hashed. `uniqueItems` compares
 items in the order of their hashes, far apart in the array, and charges
-the read of each away from the last. A name is decoded, and its `~` and
-`/` escaped, only for the JSON pointer of an error, once for all the
-errors at its place and below it while the check stays there, and again
-when it comes back. The memory the check holds beyond the arguments and
-the schema is counted too, up to 64 MiB. It holds the sets of members and
-items that `unevaluatedProperties` and `unevaluatedItems` read, the keys
-that `uniqueItems` sorts, and the index of an object's names that
-`required`, `dependentRequired` and `dependentSchemas` look names up in.
-The list of errors is capped as above.
+the read of each away from the last one read of its run of one hash, and
+the first of each run as far as can be, since the runs come in an order
+that the seed decides. A subschema applied through `allOf`, `anyOf`,
+`oneOf`, `not`, `if`, `then`, `else`, `$ref` or `dependentSchemas` costs a
+unit more than one applied to a member or an item. Each subschema applied
+costs a unit more again once the schema's subschemas and the check's own
+frames (a kilobyte for each subschema it is in) come to 256 KiB, and one
+more at each fourfold, up to 3, since the caches no longer hold them. A
+name is decoded, and its `~` and `/` escaped, only for the JSON pointer of
+an error, once for all the errors at its place and below it while the
+check stays there, and again when it comes back. The memory the check
+holds beyond the arguments and the schema is counted too, up to 64 MiB. It
+holds the sets of members and items that `unevaluatedProperties` and
+`unevaluatedItems` read, the keys that `uniqueItems` sorts, and the index
+of an object's names that `required`, `dependentRequired` and
+`dependentSchemas` look names up in. The list of errors is capped as
+above.
 
 A check is also stopped 3000 subschemas deep, and when its own frames
 take 4 MiB of stack, half of what a Linux thread has by default. Each
@@ -278,51 +290,51 @@ sizes that a debug build with sanitizers checks in seconds.
 
 | Schema and arguments | Arguments | Result | Time |
 |---|---|---|---|
-| `items: {"type": "integer"}` | 6,600,000 integers | valid | 0.44 s |
-| the same | 6,700,000 integers | too large to check | 0.45 s |
-| the same | 8,000,000 integers (16 MiB) | too large to check | 0.41 s |
-| `items` with `type`, `minimum`, `maximum`, `multipleOf` | 4,000,000 integers | valid | 0.36 s |
-| `items: {"type": "string"}` | 8,000,000 integers, every one wrong | too large to list | 0.15 s |
-| two `properties` | 1,000,000 objects | valid | 0.36 s |
-| two `$ref` to the schema at each level (2^depth subschemas) | 40 levels | too large to check | 0.38 s |
-| `anyOf` in `anyOf` 50 deep, the last branch matching | 100,000 integers | valid | 0.30 s |
+| `items: {"type": "integer"}` | 6,600,000 integers | valid | 0.39 s |
+| the same | 6,700,000 integers | too large to check | 0.40 s |
+| the same | 8,000,000 integers (16 MiB) | too large to check | 0.36 s |
+| `items` with `type`, `minimum`, `maximum`, `multipleOf` | 4,000,000 integers | valid | 0.32 s |
+| `items: {"type": "string"}` | 8,000,000 integers, every one wrong | too large to list | 0.14 s |
+| two `properties` | 1,000,000 objects | valid | 0.37 s |
+| two `$ref` to the schema at each level (2^depth subschemas) | 40 levels | too large to check | 0.32 s |
+| `anyOf` in `anyOf` 50 deep, the last branch matching | 100,000 integers | valid | 0.23 s |
 | `allOf` of 50 `maxLength` | 4,000,000 CJK characters | valid | 0.003 s |
 | `allOf` of 300 `maxLength`, below the string's bytes | 5,500,000 CJK characters (16 MiB) | valid | 0.004 s |
-| `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.003 s |
+| `enum` of 3000 strings | 5,000,000 CJK characters | one line | 0.002 s |
 | `enum` of 3000 strings of 100 CJK characters | 50,000 such strings | valid | 0.01 s |
-| `const` of an object of 100 members named with one or two letters | 20,000 such objects | valid | 0.18 s |
+| `const` of an object of 100 members named with one or two letters | 20,000 such objects | valid | 0.19 s |
 | `required` of 1000 names inside `not` | 200,000 empty objects | valid | 0.02 s |
 | `allOf` of 300 `required` | an object of 1,000,000 members | valid | 0.12 s |
 | `dependentRequired` of 2000 triggers | 1,000,000 empty objects | valid | 0.08 s |
-| `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.09 s |
-| the same | 1,000,000 members written in random order | valid | 0.28 s |
-| `allOf` of 50 `additionalProperties` | 300,000 members named with CJK characters | too large to check | 0.36 s |
-| the same | 300,000 such members written in random order | too large to check | 0.49 s |
-| `propertyNames: {"maxLength": 20}` | 1,000,000 members | valid | 0.08 s |
-| the same | 1,000,000 members written in random order | valid | 0.32 s |
-| `propertyNames: {"maxLength": 50}` | 134,000 members of 40 CJK characters (16 MiB) | valid | 0.02 s |
+| `additionalProperties: {"type": "integer"}` | 1,000,000 members | valid | 0.08 s |
+| the same | 1,000,000 members written in random order | valid | 0.25 s |
+| `allOf` of 50 `additionalProperties` | 300,000 members named with CJK characters | too large to check | 0.34 s |
+| the same | 300,000 such members written in random order | too large to check | 0.44 s |
+| `propertyNames: {"maxLength": 20}` | 1,000,000 members | valid | 0.07 s |
+| the same | 1,000,000 members written in random order | valid | 0.25 s |
+| `propertyNames: {"maxLength": 50}` | 134,000 members of 40 CJK characters (16 MiB) | valid | 0.01 s |
 | Afterglow's `env` without its `maxProperties` (`additionalProperties` with `anyOf`, `propertyNames`) | 300,000 members | valid | 0.05 s |
-| `contains` that no item matches | 4,000,000 integers | one line | 0.24 s |
-| `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.27 s |
-| `allOf` of 200 `properties` and `unevaluatedProperties` | 35,000 members | valid | 0.18 s |
-| `uniqueItems` | 1,000,000 distinct integers (32 MB of keys) | valid | 0.12 s |
-| `uniqueItems` | 750,000 equal objects | one line | 0.28 s |
-| `uniqueItems` | 300,000 distinct CJK strings | valid | 0.05 s |
-| `uniqueItems`, items chosen for one hash under `QT_HASH_SEED=0` | 175,000 pairs | valid | 0.25 s |
-| the same | 200,000 pairs | too large to check | 0.27 s |
+| `contains` that no item matches | 4,000,000 integers | one line | 0.23 s |
+| `prefixItems`, `items` and `unevaluatedItems` | 4,000,000 integers | valid | 0.24 s |
+| `allOf` of 200 `properties` and `unevaluatedProperties` | 30,000 members | valid | 0.14 s |
+| `uniqueItems` | 1,000,000 distinct integers (32 MB of keys) | valid | 0.13 s |
+| `uniqueItems` | 750,000 equal objects | one line | 0.27 s |
+| `uniqueItems` | 300,000 distinct CJK strings | valid | 0.06 s |
+| `uniqueItems`, items chosen for one hash under `QT_HASH_SEED=0` | 175,000 pairs | valid | 0.26 s |
+| the same | 200,000 pairs | too large to check | 0.29 s |
 | `uniqueItems` | 2,100,000 items (past 64 MiB of keys) | too large to check | 0.04 s |
 | a list of lists through `items` and `$ref` | 1000 levels | valid | 0.001 s |
-| `{"type": "object"}` | 5,500,000 empty arrays (16 MiB) | valid | 0.14 s |
+| `{"type": "object"}` | 5,500,000 empty arrays (16 MiB) | valid | 0.13 s |
 
 So a valid list of 6.6 million small integers under `items: {"type":
 "integer"}` is checked, and one of 8 million, the most a 16 MiB line
-holds, is refused after 0.4 s. Each row that ends at the bound took 0.27
-to 0.49 s, since the units it spent were cheaper than the dearest. A
+holds, is refused after 0.4 s. Each row that ends at the bound took 0.29
+to 0.44 s, since the units it spent were cheaper than the dearest. A
 million members written in random order take three times as long as the
 same members in order, each a miss of the cache, and are charged about
 twice as many units. Items chosen for one hash need the seed, which a
 model does not know. With the random seed of a running server their hashes
-differ, and 550,000 such pairs are valid in 0.13 s. The walk before the
+differ, and 550,000 such pairs are valid in 0.14 s. The walk before the
 check charges 3 units for each value, and 5 for an array or an object, so
 the most values that a 16 MiB line holds are walked in some 28 million
 units. Qt's parser takes time and memory for such a line too (some 130 MB
@@ -346,7 +358,7 @@ qint64, and one written with a fraction or an exponent, as the nearest
 double, and the check sees what the handler sees. So
 -9223372036854775809, down to -9223372036854776832, passes as
 -9223372036854775808, 9223372036854775807.0 is refused as 2^63, and
-9223372036854775809 is 2^63 against an `exclusiveMinimum` of 2^63.
+9223372036854775809 is 2^63 against a `maximum` of 9223372036854775807.
 
 A notification (a message with a method and no id) is never answered, not
 even when its params are wrong. The server ignores every notification but
@@ -615,37 +627,44 @@ may recurse through a keyword that descends into the value (`properties`,
 `items`, `additionalProperties`, and so on), and the bound of the check
 keeps a schema that doubles its work at each level from going on.
 
-Numbers compare exactly. An integral number of the schema or the
-arguments that fits a 64-bit integer is held as one, any other as a
-double, and an integer and a double compare exactly too. So
-`"maximum": 9007199254740993` refuses 9007199254740994, and
-9223372036854775807 is below an `exclusiveMaximum` of 2^63. `const`,
-`enum` and `uniqueItems` take 1 and 1.0 for the same value, never `true`
-and 1, and objects with the same members in any order, whatever the order
-in which Qt keeps them. An object built in C++ keeps its members in the
-order of their UTF-16 code units, and a parsed one in that of their code
-points, which differ for U+E000 to U+FFFF and the characters past U+FFFF.
-`required`, `dependentRequired` and `dependentSchemas` look names up in an
-index of their own as well, since `QJsonObject::contains()` misses names
-in an object that a handler built from a parsed one and then added to.
-`uniqueItems` sorts the items by a hash and then by value, so it takes
-O(n log n) whatever their number, and its line names the first item that
-repeats an earlier one. The hash is keyed by Qt's global seed, random in
-each process unless `QT_HASH_SEED` is 0, so a model cannot choose items
-whose hashes are the same. `multipleOf` divides exactly when it is an
-integer, whatever the value, so 10^17 is not a multiple of 3, and
-9223372036854775807 is one of 7. A value written with a fraction or an
-exponent, or past the range of qint64, is the double that Qt's parser
-reads, and is divided exactly too. Python's `jsonschema` rounds an integer
-divisor past 2^53 to the nearest double against a value written with a
-fraction or an exponent. So for it 18014398509481986.0 (the double
-18014398509481984) is a multiple of 9007199254740993, and for the server
-it is not. A `multipleOf` with a fraction divides as doubles, as Python's
-`jsonschema` and JavaScript validators do, and the value passes when the
-quotient is a whole number. So 0.5 is a multiple of 0.1 (0.5 / 0.1 is 5),
-and 0.3 is not (0.3 / 0.1 is 2.9999999999999996), though both are in
-decimal. Only when the quotient overflows (1e308 against 0.5) is the test
-made exactly on the binary values, as Python does too.
+Numbers compare exactly. An integral number of the schema or the arguments
+that fits a 64-bit integer is held as one, any other as a double, and an
+integer and a double compare exactly too. So `"maximum": 9007199254740993`
+refuses 9007199254740994, and 9223372036854775807 is below an
+`exclusiveMaximum` of 1e19. `const`, `enum` and `uniqueItems` take 1 and
+1.0 for the same value, never `true` and 1, and objects with the same
+members in any order, whatever the order in which Qt keeps them. An object
+built in C++ keeps its members in the order of their UTF-16 code units,
+and a parsed one in that of their code points, which differ for U+E000 to
+U+FFFF and the characters past U+FFFF. `required`, `dependentRequired` and
+`dependentSchemas` look names up in an index of their own as well, since
+`QJsonObject::contains()` misses names in an object that a handler built
+from a parsed one and then added to. `uniqueItems` sorts the items by a
+hash and then by value, so it takes O(n log n) whatever their number, and
+its line names the first item that repeats an earlier one. The hash is
+keyed by Qt's global seed when the schema compiled, random in each process
+unless `QT_HASH_SEED` is 0, so a model cannot choose items whose hashes
+are the same. The work of the check is the same whatever the seed, but for
+distinct items or names whose hashes are the same by chance, about one
+pair in 2^64. `multipleOf` divides exactly when it is a whole number,
+whatever the value, so 10^17 is not a multiple of 3, 9223372036854775807
+is one of 7, and 5e-324 is not one of 1e19. A value written with a
+fraction or an exponent, or past the range of qint64, is the double that
+Qt's parser reads, and is divided exactly too. Python's `jsonschema`
+departs from this in three ways. It rounds an integer divisor past 2^53 to
+the nearest double against a value written with a fraction or an exponent,
+so for it 18014398509481986.0 (the double 18014398509481984) is a multiple
+of 9007199254740993. It keeps an integer of the arguments past the range
+of qint64 exact, so for it 9223372036854775809 is a multiple of 3, where
+the server divides the double 2^63. And it reads a divisor written with an
+exponent as a float and divides as floats, so for it 5e-324 is a multiple
+of 1e19, since the quotient underflows to 0. For the server none of the
+three is a multiple. A `multipleOf` with a fraction divides as doubles, as
+Python's `jsonschema` and JavaScript validators do, and the value passes
+when the quotient is a whole number. So 0.5 is a multiple of 0.1 (0.5 /
+0.1 is 5), and 0.3 is not (0.3 / 0.1 is 2.9999999999999996), though both
+are in decimal. Only when the quotient overflows (1e308 against 0.5) is
+the test made exactly on the binary values, as Python does too.
 
 Only the root of an input schema must have `"type": "object"`. The root of
 an output schema may be any type, since structured content may be any JSON
@@ -656,13 +675,18 @@ name a property twice. Names in `properties`, `required`,
 `dependentRequired`, `dependentSchemas` and `$defs`, and the strings and
 member names in `enum` and `const`, may not hold an unpaired UTF-16
 surrogate. No argument that holds one gets to the check, and no URI
-reaches such a name. A number
-in `enum`, `const` or a bound must be finite. A Draft 4 boolean
-`exclusiveMinimum` and an unknown type name are refused as well. Names
-inside `properties`, `$defs`, `dependentRequired` and `dependentSchemas`,
-and values inside `enum`, `const`, `default` and `examples`, are data, not
-keywords. A tool without an input schema takes no arguments, as with
-`{"type": "object", "additionalProperties": false}`.
+reaches such a name. A number in `enum`, `const` or a bound must be
+finite. A whole number there past the range of a 64-bit integer is refused
+when `tools/list` would send it rounded to another integer, as Qt writes
+it, so that a client compares with the number the server does. 2^63 is
+sent as 9223372036854776000, and a client that reads integers exactly, as
+Python does, reads that integer. 1e19 and 1e300 are sent with an exponent,
+and read as the same double. A Draft 4 boolean `exclusiveMinimum` and an
+unknown type name are refused as well. Names inside `properties`, `$defs`,
+`dependentRequired` and `dependentSchemas`, and values inside `enum`,
+`const`, `default` and `examples`, are data, not keywords. A tool without
+an input schema takes no arguments, as with `{"type": "object",
+"additionalProperties": false}`.
 
 A schema of more than 10000 subschemas, or with subschemas nested more
 than 256 deep, is refused. A tool's schema goes to the model with every
@@ -689,9 +713,9 @@ deep is refused at once.
   names phosphor-fsloader's headers. So do the entries that
   `cmake/PhosphorDependencies.cmake` set when it fetched valijson
   (`PHOSPHOR_DEPS_ARCHIVES`, and CPM's and FetchContent's entries,
-  `CPM_PACKAGE_valijson_*` among them), since the tree's other libraries
-  fetch through that file. In a build directory of the library alone
-  nothing reads them.
+  `CPM_PACKAGE_valijson_*` among them, which nothing reads now), since the
+  tree's other libraries fetch through that file. In a build directory of
+  the library alone nothing reads them.
 - Linux, for `pipe2`, `sigtimedwait`, `MSG_NOSIGNAL` and `/proc/self/fd`.
 
 ## See also
