@@ -5,8 +5,9 @@
 // fast, with their errors while they are few, one line once there are too
 // many to list, and one line that says so when the check would take too
 // long or hold too much. Each shape that the audits of the checker found
-// costly has a row. The rows that pass the bound burn all of its work, about
-// half a second of a release build, so they are a test of their own.
+// costly has a row, large tables of the schema among them. The rows that
+// pass the bound burn all of its work, about half a second of a release
+// build, so they are a test of their own.
 // test_phosphor_mcp_checkwork counts what each step is charged.
 
 #include "mcptesthelpers.h"
@@ -357,6 +358,94 @@ private Q_SLOTS:
         QTest::newRow("contains, 2000000 integers")
             << withV(parse("{'contains': {'type': 'string'}}")) << "{'v': [" + repeat("1", 2000000) + "]}"
             << QStringLiteral("- arguments/v: must have an item that matches contains");
+        // Tables of the schema larger than the caches: an enum of 100,000
+        // strings and a million strings looked up in it, the same strings in
+        // eight such enums, and dependentRequired of 100,000 triggers that
+        // each require themselves, with objects of one of them.
+        const auto names = [](const char* tag, int count, int table = 0) {
+            QJsonArray array;
+            for (int i = 0; i < count; ++i) {
+                QString name = QStringLiteral("%1%2").arg(QLatin1StringView(tag)).arg(i, 6, 10, QLatin1Char('0'));
+                if (table && i % 2) {
+                    name += QString::number(table);
+                }
+                array.append(name);
+            }
+            return array;
+        };
+        // Strings of `count` names, the nth of each `step`, in some order.
+        const auto hits = [](const char* before, int count, int range, int step, const char* after) -> QByteArray {
+            QByteArray list = "{'v': [";
+            for (int i = 0; i < count; ++i) {
+                list += (i ? "," : "") + QByteArray(before)
+                    + QByteArray::number(qint64(i) * 7919 % range * step).rightJustified(6, '0') + after;
+            }
+            return list + "]}";
+        };
+        QTest::newRow("enum of 100000 strings, 1000000 strings") << withV(
+            QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("enum"), names("s", 100000)}}}})
+                                                                 << hits("'s", 1000000, 100000, 1, "'") << QString();
+        QJsonArray enums;
+        for (int table = 1; table <= 8; ++table) {
+            enums.append(QJsonObject{{QLatin1StringView("enum"), names("s", 100000, table)}});
+        }
+        QTest::newRow("8 enums of 100000 strings, 600000 strings")
+            << withV(QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("allOf"), enums}}}})
+            << hits("'s", 600000, 50000, 2, "'") << TooLargeToCheck;
+        QJsonObject selves;
+        for (const QJsonValue& name : names("t", 100000)) {
+            selves.insert(name.toString(), QJsonArray{name});
+        }
+        QTest::newRow("dependentRequired of 100000 triggers, 900000 objects") << withV(
+            QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("dependentRequired"), selves}}}})
+                                                                              << hits("{'t", 900000, 100000, 1, "': 1}")
+                                                                              << TooLargeToCheck;
+        // dependentSchemas of 9990 triggers that no object has, each looked
+        // up in each object.
+        QJsonObject absent;
+        for (const QJsonValue& name : names("t", 9990)) {
+            absent.insert(name.toString(), true);
+        }
+        QTest::newRow("dependentSchemas of 9990 triggers, 4000 objects") << withV(
+            QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("dependentSchemas"), absent}}}})
+                                                                         << "{'v': [" + repeat("{'z': 1}", 4000) + "]}"
+                                                                         << TooLargeToCheck;
+        // An enum of a million numbers inside not, tried one by one.
+        QJsonArray numbers;
+        for (int i = 0; i < 1000000; ++i) {
+            numbers.append(i + 0.5);
+        }
+        QTest::newRow("not enum of 1000000 numbers, 60 integers") << withV(
+            QJsonObject{{QLatin1StringView("items"),
+                         QJsonObject{{QLatin1StringView("not"), QJsonObject{{QLatin1StringView("enum"), numbers}}}}}})
+                                                                  << "{'v': [" + repeat("7", 60) + "]}"
+                                                                  << TooLargeToCheck;
+        // 9000 empty branches of allOf, past 4 MiB of nodes, for each item.
+        QJsonArray branches;
+        for (int i = 0; i < 9000; ++i) {
+            branches.append(QJsonObject());
+        }
+        QTest::newRow("allOf of 9000 empty branches, 2000 items")
+            << withV(QJsonObject{{QLatin1StringView("items"), QJsonObject{{QLatin1StringView("allOf"), branches}}}})
+            << "{'v': [" + repeat("1", 2000) + "]}" << TooLargeToCheck;
+        // A chain of 250 $ref through anyOf, for each item.
+        QJsonObject chain;
+        for (int i = 0; i < 250; ++i) {
+            chain.insert(QStringLiteral("c%1").arg(i),
+                         QJsonObject{{QLatin1StringView("anyOf"),
+                                      QJsonArray{QJsonObject{
+                                          {QLatin1StringView("$ref"), QStringLiteral("#/$defs/c%1").arg(i + 1)}}}}});
+        }
+        chain.insert(QStringLiteral("c250"), QJsonObject{{QLatin1StringView("type"), QStringLiteral("integer")}});
+        QTest::newRow("$ref chain of 250 through anyOf, 40000 items")
+            << QJsonObject{{QLatin1StringView("type"), QStringLiteral("object")},
+                           {QLatin1StringView("$defs"), chain},
+                           {QLatin1StringView("properties"),
+                            QJsonObject{{QLatin1StringView("v"),
+                                         QJsonObject{{QLatin1StringView("items"),
+                                                      QJsonObject{{QLatin1StringView("$ref"),
+                                                                   QStringLiteral("#/$defs/c0")}}}}}}}}
+            << "{'v': [" + repeat("1", 40000) + "]}" << TooLargeToCheck;
         // Many small objects, which jsoncons' conversion made costly.
         QTest::newRow("2000000 empty objects")
             << withV(parse("{'items': {'type': 'object'}}")) << "{'v': [" + repeat("{}", 2000000) + "]}" << QString();
