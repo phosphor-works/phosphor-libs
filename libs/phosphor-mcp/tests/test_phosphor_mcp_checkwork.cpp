@@ -53,21 +53,27 @@ struct NameTableProbe
             && collide(table.m_tables->utf8.entries, other.m_tables->utf8.entries)
             && collide(table.m_tables->utf16.entries, other.m_tables->utf16.entries);
     }
-    // The place, tag and value of each name's slot: in UTF-8, then UTF-16.
-    static QList<std::tuple<std::size_t, quint32, int>> taken(const NameTable& table)
+    // The place, tag and value of each name's slot, in UTF-8 or in UTF-16.
+    static QList<std::tuple<std::size_t, quint32, int>> takenUtf8(const NameTable& table)
+    {
+        return taken(table.m_tables->utf8.entries);
+    }
+    static QList<std::tuple<std::size_t, quint32, int>> takenUtf16(const NameTable& table)
+    {
+        return taken(table.m_tables->utf16.entries);
+    }
+
+private:
+    static QList<std::tuple<std::size_t, quint32, int>> taken(const std::vector<Slot>& entries)
     {
         QList<std::tuple<std::size_t, quint32, int>> found;
-        for (const std::vector<Slot>* entries : {&table.m_tables->utf8.entries, &table.m_tables->utf16.entries}) {
-            for (std::size_t i = 0; i < entries->size(); ++i) {
-                if ((*entries)[i].value >= 0) {
-                    found.append({i, (*entries)[i].tag, (*entries)[i].value});
-                }
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            if (entries[i].value >= 0) {
+                found.append({i, entries[i].tag, entries[i].value});
             }
         }
         return found;
     }
-
-private:
     static bool collide(std::vector<Slot>& entries, const std::vector<Slot>& other)
     {
         const auto place = [](const std::vector<Slot>& table) {
@@ -1412,7 +1418,7 @@ private Q_SLOTS:
         };
         const auto values = [](const NameTable& table) {
             QList<int> taken;
-            for (const auto& slot : NameTableProbe::taken(table)) {
+            for (const auto& slot : NameTableProbe::takenUtf8(table) + NameTableProbe::takenUtf16(table)) {
                 taken.append(std::get<2>(slot));
             }
             std::sort(taken.begin(), taken.end());
@@ -1466,7 +1472,8 @@ private Q_SLOTS:
             QCOMPARE(valueOf(fixed, names.at(i)), int(i));
             QCOMPARE(valueOf(random, names.at(i)), int(i));
         }
-        QVERIFY(NameTableProbe::taken(fixed) != NameTableProbe::taken(random));
+        QVERIFY(NameTableProbe::takenUtf8(fixed) != NameTableProbe::takenUtf8(random));
+        QVERIFY(NameTableProbe::takenUtf16(fixed) != NameTableProbe::takenUtf16(random));
     }
 
     void textIsTheSameInEveryEncoding()
