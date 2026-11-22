@@ -216,7 +216,8 @@ class Budget
 {
 public:
     // Counts `units` of work. False once the budget is spent: the work
-    // past MaxWork, or the memory past MaxMemory.
+    // past MaxWork, the memory past MaxMemory, or the check stopped by
+    // exceed() at its depth or stack bound.
     bool charge(qint64 units)
     {
         m_work += units;
@@ -225,8 +226,8 @@ public:
         }
         return !m_exceeded;
     }
-    // Counts `bytes` more of memory held. False once the budget is spent:
-    // the memory past MaxMemory, or the work past MaxWork.
+    // Counts `bytes` more of memory held. False once the budget is spent,
+    // as for charge().
     bool allocate(qint64 bytes)
     {
         m_memory += bytes;
@@ -242,6 +243,8 @@ public:
     {
         m_memory -= bytes;
     }
+    // Spends the budget whatever the count: the check is past its depth or
+    // stack bound.
     void exceed()
     {
         m_exceeded = true;
