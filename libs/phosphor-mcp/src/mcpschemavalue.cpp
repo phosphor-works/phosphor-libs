@@ -428,20 +428,26 @@ int compareText(QAnyStringView a, QAnyStringView b)
         return b.visit([&](auto y) {
             using X = decltype(x);
             using Y = decltype(y);
-            if constexpr (std::is_same_v<X, QStringView> && std::is_same_v<Y, QStringView>) {
-                // UTF-16 in order is code points in order, but for the
-                // surrogates.
-                const qsizetype n = std::min(x.size(), y.size());
-                for (qsizetype i = 0; i < n; ++i) {
-                    if (x.utf16()[i] != y.utf16()[i]) {
-                        return compareCodeUnits(x.utf16()[i], y.utf16()[i]);
+            // x.utf16() sits under a test of X alone, which a compiler
+            // settles for each X before it knows Y (clang checks the
+            // branches that wait on Y with X known).
+            if constexpr (std::is_same_v<X, Y>) {
+                if constexpr (std::is_same_v<X, QStringView>) {
+                    // UTF-16 in order is code points in order, but for the
+                    // surrogates.
+                    const qsizetype n = std::min(x.size(), y.size());
+                    for (qsizetype i = 0; i < n; ++i) {
+                        if (x.utf16()[i] != y.utf16()[i]) {
+                            return compareCodeUnits(x.utf16()[i], y.utf16()[i]);
+                        }
                     }
+                    return x.size() < y.size() ? -1 : (x.size() > y.size() ? 1 : 0);
+                } else {
+                    // Latin-1 or UTF-8: bytes in order are code points in
+                    // order.
+                    return compareBytes(reinterpret_cast<const char*>(x.data()), x.size(),
+                                        reinterpret_cast<const char*>(y.data()), y.size());
                 }
-                return x.size() < y.size() ? -1 : (x.size() > y.size() ? 1 : 0);
-            } else if constexpr (std::is_same_v<X, Y>) {
-                // Latin-1 or UTF-8: bytes in order are code points in order.
-                return compareBytes(reinterpret_cast<const char*>(x.data()), x.size(),
-                                    reinterpret_cast<const char*>(y.data()), y.size());
             } else {
                 CodePointReader<X> first(x);
                 CodePointReader<Y> second(y);
