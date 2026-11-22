@@ -1187,12 +1187,15 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
         return mode == Mode::Verdict || stopped();
     };
     const qsizetype size = object.size();
+    // Each loop below stops the moment the work is spent, since the schema
+    // sets the length of its lists and tables.
     for (qsizetype k = 0; k < node.required.size(); ++k) {
         const QString& name = node.required.at(k);
-        if (!shared.contains(object, name, node.requiredHashes[std::size_t(k)])) {
-            if (stopped()) {
-                return false;
-            }
+        const bool found = shared.contains(object, name, node.requiredHashes[std::size_t(k)]);
+        if (stopped()) {
+            return false;
+        }
+        if (!found) {
             if (mode == Mode::Errors) {
                 m_place.pushName(name);
                 error(QStringLiteral("is required"));
@@ -1209,7 +1212,12 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
     if (!node.dependentRequired.empty()) {
         if (qsizetype(node.dependentRequired.size()) <= size) {
             for (std::size_t i = 0; i < node.dependentRequired.size(); ++i) {
-                if (shared.contains(object, node.dependentRequired[i].first, node.dependentRequiredHashes[i].first)) {
+                const bool found =
+                    shared.contains(object, node.dependentRequired[i].first, node.dependentRequiredHashes[i].first);
+                if (stopped()) {
+                    return false;
+                }
+                if (found) {
                     triggered.push_back(int(i));
                 }
             }
@@ -1218,7 +1226,9 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
             for (auto it = object.begin(); it != object.end(); ++it) {
                 const QAnyStringView name = it.keyView();
                 // A hash of the name, and a comparison with the entry.
-                charge(reads.next(name) + lookupUnits(name) + m_tableUnits);
+                if (!charge(reads.next(name) + lookupUnits(name) + m_tableUnits)) {
+                    return false;
+                }
                 const int i = node.dependentRequiredIndex.value(name);
                 if (i >= 0) {
                     triggered.push_back(i);
@@ -1234,13 +1244,16 @@ bool Checker::checkRequired(const Node& node, const QJsonObject& object, Mode mo
         // their own.
         const auto& [trigger, names] = node.dependentRequired[std::size_t(i)];
         const std::vector<quint64>& hashes = node.dependentRequiredHashes[std::size_t(i)].second;
-        charge(m_tableUnits * (names.isEmpty() ? 1 : 2));
+        if (!charge(m_tableUnits * (names.isEmpty() ? 1 : 2))) {
+            return false;
+        }
         for (qsizetype k = 0; k < names.size(); ++k) {
             const QString& name = names.at(k);
-            if (!shared.contains(object, name, hashes[std::size_t(k)])) {
-                if (stopped()) {
-                    return false;
-                }
+            const bool found = shared.contains(object, name, hashes[std::size_t(k)]);
+            if (stopped()) {
+                return false;
+            }
+            if (!found) {
                 if (mode == Mode::Errors) {
                     m_place.pushName(name);
                     error(QStringLiteral("is required when \"%1\" is present").arg(shownName(trigger)));
