@@ -72,8 +72,8 @@ stderr itself is a terminal, or when the environment sets
 support, they go to the systemd journal. A server that an MCP client starts
 often has no terminal (a desktop client or a service does not pass one on),
 so a client that keeps the server's stderr as its log gets nothing unless
-the variable is set. `examples/wordcount.cpp` sets it before
-it creates its `QCoreApplication`, unless the environment already has it.
+the variable is set. `examples/wordcount.cpp` sets it before it creates its
+`QCoreApplication`, unless the environment already has it.
 
 ### Requests
 
@@ -85,6 +85,7 @@ Every request carries `params._meta` with
 A string id or token must be valid UTF-16. One with an unpaired surrogate
 would come back as U+FFFD and match nothing the client sent, so it is
 refused.
+
 A session with the example server, one request on each line:
 
 ```json
@@ -284,8 +285,8 @@ pointer of an error, once for all the errors at its place and below it
 while the check stays there, and again when it comes back. The text of a
 pointer is charged for each whole sixteen code units, not rounded up as
 other text is, since the error and each of its tokens are charged units of
-their own besides. The memory the check holds beyond the arguments and the schema is
-counted too, up to 64 MiB. It holds the sets of members and items that
+their own besides. The memory the check holds beyond the arguments and the
+schema is counted too, up to 64 MiB. It holds the sets of members and items that
 `unevaluatedProperties` and `unevaluatedItems` read, the keys that
 `uniqueItems` sorts, the index of an object's names that `required`,
 `dependentRequired` and `dependentSchemas` look names up in, the members
@@ -599,9 +600,9 @@ depends on what stdout is.
   with the server keeps its flags, even when the server is killed. When the
   terminal cannot be opened again (a pty that another user owns, after
   `su`, or no `/proc`), opens as another device or as one the server cannot
-  identify, or is a pty master, the server warns and treats it as
-  a pipe, as below. Its shared description is then non-blocking until the
-  server ends.
+  identify, or is a pty master, the server warns and treats it as a pipe,
+  as below. Its shared description is then non-blocking until the server
+  ends.
 - Anything else, such as the pipe an MCP client gives, gets `O_NONBLOCK`. At
   the end only that bit is cleared, and only when the server set it.
 
@@ -723,6 +724,7 @@ in proportion to the schema. In a release build, on a machine loaded with
 other work, 9999 empty `properties` compile in 8 to 15 ms, some 9000
 subschemas 251 levels deep in 8 to 13 ms, and an `enum` of 100,000 strings
 (1.1 MB) in 36 to 43 ms.
+
 A megabyte of schema 900 levels deep is refused at once.
 
 ## Dependencies

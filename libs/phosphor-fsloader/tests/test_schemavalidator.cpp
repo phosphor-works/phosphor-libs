@@ -512,8 +512,8 @@ private Q_SLOTS:
             // member's name, so nothing below those can be named by its
             // pointer. jsoncons threw on the first four, and resolved the
             // last three to another subschema: a wrong verdict, and for the
-            // last two a $ref to the `not` that holds it, which recursed until the
-            // stack overflowed at validate().
+            // last two a $ref to the `not` that holds it, which recursed
+            // until the stack overflowed at validate().
             {"{\"prefixItems\": [{}], \"items\": {\"properties\": {\"a\": {}}}, \"properties\": {\"x\": "
              "{\"$ref\": \"#/items/properties/a\"}}}",
              "/properties/x/$ref: $ref \"#/items/properties/a\" names a subschema below items beside prefixItems by "
