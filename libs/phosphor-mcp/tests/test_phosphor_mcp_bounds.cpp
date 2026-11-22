@@ -29,8 +29,8 @@ namespace {
 
 // AddressSanitizer grows each frame of the check's recursion, more when it
 // is optimized: GCC's build at -O1 refuses lists 500 levels deep at the
-// bound of the check's own stack. A build with AddressSanitizer checks lists half as
-// deep, which pass in every build.
+// bound of the check's own stack. A build with AddressSanitizer checks
+// lists half as deep, which pass in every build.
 #if defined(__SANITIZE_ADDRESS__)
 constexpr bool Sanitized = true;
 #elif defined(__has_feature)
