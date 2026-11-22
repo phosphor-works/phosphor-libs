@@ -360,6 +360,8 @@ private Q_SLOTS:
             QStringLiteral("/$ref: refers to no schema in the tool's schema"));
         row("$ref into a boolean schema", "{'type': 'object', '$defs': {'f': false}, '$ref': '#/$defs/f/items'}",
             QStringLiteral("/$ref: refers to no schema in the tool's schema"));
+        row("$ref into properties that the schema does not have", "{'type': 'object', '$ref': '#/properties/x'}",
+            QStringLiteral("/$ref: refers to no schema in the tool's schema"));
         // contentSchema is checked as a subschema is, but never applied.
         const QString intoContent = QStringLiteral(
             ": refers to a schema inside \"contentSchema\", which is an annotation that the server never applies");

@@ -869,14 +869,16 @@ private Q_SLOTS:
         // So with a large enum anywhere in the schema, each lookup in any
         // of its tables costs 4 more: a string of the enum of nine strings,
         // a member in properties, a member in the triggers of
-        // dependentRequired (with more triggers than members), and the
-        // names of each trigger that an object has, 4 for its entry and 4
-        // for a list that is not empty, whichever way it was found.
+        // dependentRequired (with more triggers than members), and each
+        // trigger that an object has, 4 for its entry and 4 for its list of
+        // names when it has one, whatever its length, whichever way it was
+        // found.
         const QByteArray nine = "{'items': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '" + A32 + "']}";
         const QByteArray properties = "{'items': {'properties': {'a': {'type': 'integer'}}}";
         const QByteArray triggers = "{'items': {'dependentRequired': {'a': ['a'], 'x': [], 'y': []}}";
         const QByteArray empty = "{'items': {'dependentRequired': {'a': [], 'x': [], 'y': []}}";
         const QByteArray found = "{'items': {'dependentRequired': {'a': ['b']}}";
+        const QByteArray two = "{'items': {'dependentRequired': {'a': ['b', 'c']}}";
         const QList<std::tuple<QByteArray, QByteArray, qint64>> rows{
             {nine, repeat("'" + A32 + "'", 256), 256 * 4},
             {nine, repeat("'zz'", 256), 256 * 4},
@@ -885,6 +887,7 @@ private Q_SLOTS:
             {triggers, repeat("{'b': 1}", 256), 256 * 4},
             {empty, repeat("{'a': 1}", 256), 256 * (4 + 4)},
             {found, repeat("{'a': 1, 'b': 2}", 256), 256 * (4 + 4)},
+            {two, repeat("{'a': 1, 'b': 2, 'c': 3}", 256), 256 * (4 + 4)},
         };
         for (const auto& [schema, value, more] : rows) {
             const Counts small = count(parse(schema + "}").toObject(), parse(value));
@@ -1281,13 +1284,80 @@ private Q_SLOTS:
             }
         }
         QVERIFY(!first.isEmpty());
-        // The table takes the seed when its first name is inserted.
+        // The table takes the seed when its first name is inserted. Each
+        // name keeps its own value when both are inserted.
         QHashSeed::setDeterministicGlobalSeed();
         NameTable collided;
         collided.insert(QString::fromLatin1(first), 5);
+        NameTable both;
+        both.insert(QString::fromLatin1(first), 5);
+        both.insert(QString::fromLatin1(second), 6);
         QHashSeed::resetRandomGlobalSeed();
         QCOMPARE(collided.value(QLatin1StringView(first)), 5);
         QCOMPARE(collided.value(QLatin1StringView(second)), -1);
+        QCOMPARE(both.value(QLatin1StringView(first)), 5);
+        QCOMPARE(both.value(QLatin1StringView(second)), 6);
+
+        // Nor is a name found in the slot of a longer one that begins with
+        // it and whose hash has the same part. Two such names are prefixes
+        // of a text of random letters, found among some 2^32 pairs of
+        // prefixes, as many bytes hashed, on average. Under the seed 0,
+        // with Qt's hash of this build, these random letters give two in
+        // some 1.3 gigabytes.
+        const auto placeOf = [](QByteArrayView name) {
+            return qHash(name, 0) & 7;
+        };
+        const auto tagOf = [](QByteArrayView name) {
+            const quint64 hash = qHash(name, 0);
+            return quint32(hash >> 32) ^ quint32(hash);
+        };
+        std::mt19937 random(6);
+        QByteArray text(8192, 'a');
+        qsizetype shorter = 0;
+        qsizetype longer = 0;
+        for (int i = 0; i < 20000 && longer == 0; ++i) {
+            for (char& c : text) {
+                c = char('a' + random() % 26);
+            }
+            QHash<quint32, qsizetype> tags;
+            for (qsizetype size = 1; size <= text.size() && longer == 0; ++size) {
+                const QByteArrayView name(text.constData(), size);
+                const auto it = tags.constFind(tagOf(name));
+                if (it == tags.constEnd()) {
+                    tags.insert(tagOf(name), size);
+                } else if (((placeOf(name) - placeOf(QByteArrayView(text).first(*it))) & 7) != 4) {
+                    shorter = *it;
+                    longer = size;
+                }
+            }
+        }
+        QVERIFY(longer > 0);
+        // The slots from the shorter name's place up to that of the longer
+        // one are taken first, or those from the longer one's place up to
+        // the shorter one's, which the longer one then takes: either way a
+        // table of eight slots holds the longer name where the search for
+        // the shorter one passes, and stops at the empty slot after it.
+        const QByteArrayView shortName = QByteArrayView(text).first(shorter);
+        const QByteArrayView longName = QByteArrayView(text).first(longer);
+        const std::size_t distance = (placeOf(longName) - placeOf(shortName)) & 7;
+        std::size_t from = distance < 4 ? placeOf(shortName) : placeOf(longName);
+        QByteArrayList fillers;
+        for (int i = 0; fillers.size() < qsizetype(distance < 4 ? distance : 8 - distance); ++i) {
+            const QByteArray filler = "f" + QByteArray::number(i);
+            if (placeOf(filler) == from && tagOf(filler) != tagOf(shortName)) {
+                fillers.append(filler);
+                from = (from + 1) & 7;
+            }
+        }
+        QHashSeed::setDeterministicGlobalSeed();
+        NameTable prefixed;
+        for (const QByteArray& filler : std::as_const(fillers)) {
+            prefixed.insert(QString::fromLatin1(filler), 1);
+        }
+        prefixed.insert(QString::fromLatin1(longName), 7);
+        QHashSeed::resetRandomGlobalSeed();
+        QCOMPARE(prefixed.value(QLatin1StringView(longName)), 7);
+        QCOMPARE(prefixed.value(QLatin1StringView(shortName)), -1);
     }
 
     void textIsTheSameInEveryEncoding()
