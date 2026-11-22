@@ -265,6 +265,7 @@ set(phosphorengineruntime_SRCS
     src/config/configmigration_v7.cpp
     src/config/configmigration_v8.cpp
     src/config/configmigration_v8overlay.cpp
+    src/config/configmigration_v9.cpp
     src/config/perscreenresolver.cpp
     src/config/settings.cpp
     src/config/settings/animationprofile.cpp

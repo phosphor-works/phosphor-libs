@@ -451,8 +451,8 @@ void appendOrderingSchema(PhosphorConfig::Schema& schema)
 // The motion profile is one nested JSON object (`Animations.Profile`) holding
 // the curve, duration, minimum distance, sequence mode and stagger interval.
 // migrateV1ToV2 folds the v1 per-field keys into it (clamped), writing it as a
-// JSON string that Store::read's legacy-string fallback parses on first load;
-// the next save stores the nested object.
+// JSON string, and migrateV8ToV9 turns that string into the nested object the
+// store reads (the store reads structured keys natively only).
 //
 // The per-field accessors on Settings (animationDuration and the rest) are
 // projections over the object, in settings/animationprofile.cpp.
@@ -479,7 +479,7 @@ void appendAnimationsSchema(PhosphorConfig::Schema& schema)
         // Profile and the two trees persist as nested JSON objects
         // (QVariantMap) so the on-disk config shows their structure
         // directly. A string-blob value, as migrateV1ToV2 writes the Profile,
-        // is parsed by Store::read's legacy-string fallback on first load.
+        // is made native by migrateV8ToV9 before the store reads it.
         {CD::animationProfileKey(), CD::animationProfile(registry), QMetaType::QVariantMap,
          QStringLiteral("The active motion profile: easing curve, duration, stagger interval and sequence mode. "
                         "The animations page writes this, so it is not meant to be edited by hand.")},

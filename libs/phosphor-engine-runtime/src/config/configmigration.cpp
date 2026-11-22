@@ -76,6 +76,7 @@ PhosphorConfig::Schema makeMigrationSchema(ConfigMigration::ExternalImports impo
          [importFiles](QJsonObject& root) {
              ConfigMigration::migrateV7ToV8(root, importFiles);
          }},
+        {8, &ConfigMigration::migrateV8ToV9},
     };
     // clang-format on
     return s;
@@ -599,10 +600,11 @@ bool ConfigMigration::ensureJsonConfigImpl()
 
     qInfo("ConfigMigration: migration complete");
     // The in-memory chain above ran through migrateV4ToV5 up to
-    // migrateV7ToV8 — pure config→config transforms (v5 folds the per-mode
+    // migrateV8ToV9 — pure config→config transforms (v5 folds the per-mode
     // appearance/gap values into the unified "Windows" / "Gaps" groups; v6
     // converts the snapping zone colours to theme-fallback strings; v7
-    // renames the placement animation nodes; v8 only stamps the version), so
+    // renames the placement animation nodes; v8 only stamps the version; v9
+    // turns JSON-encoded structured values native), so
     // the filesystem-touching finalizers run here: finalizeV4Conversion
     // (which also adopts a legacy windowrules.json as rules.json and prunes
     // the retired provider-default rule) plus the v8 overlay-shader sidecar
