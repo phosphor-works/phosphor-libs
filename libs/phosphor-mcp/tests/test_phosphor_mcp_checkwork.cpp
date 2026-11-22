@@ -1451,6 +1451,21 @@ private Q_SLOTS:
         prefixed.insert(shortName, 8);
         QCOMPARE(valueOf(prefixed, shortName), 8);
         QCOMPARE(values(prefixed), QList<int>({7, 7, 8, 8}));
+        // Nor is a name found in the slot of a shorter one that it begins
+        // with, though the text after that one's, here of the name inserted
+        // next, is the rest of the name; nor does it take that slot when it
+        // is inserted after them.
+        NameTable prefix;
+        prefix.insert(shortName, 8);
+        NameTable longer;
+        longer.insert(longName, 7);
+        QVERIFY(NameTableProbe::collide(prefix, longer));
+        prefix.insert(QStringLiteral("ed"), 9);
+        QCOMPARE(valueOf(prefix, longName), -1);
+        prefix.insert(longName, 7);
+        QCOMPARE(valueOf(prefix, longName), 7);
+        QCOMPARE(valueOf(prefix, QStringLiteral("ed")), 9);
+        QCOMPARE(values(prefix), QList<int>({7, 7, 8, 8, 9, 9}));
 
         // The hashes are keyed by Qt's global seed when the table's first
         // name was inserted, which the table keeps: under another seed the
