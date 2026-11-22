@@ -257,7 +257,10 @@ parse(mesh->bytes);
   jsoncons does not compile. Such is also one by pointer below `items`
   beside `prefixItems`, which jsoncons files as `additionalItems`, or below
   a member of `patternProperties` or `dependentSchemas`, which it files
-  without the member's name. An `$anchor` below those resolves.
+  without the member's name. An `$anchor` below those resolves. A member of
+  `properties` or `$defs` whose name percent-decodes to a `~` followed by
+  neither `0` nor `1` (`a%7E2`) is refused, since jsoncons then reads its
+  location as an anchor's name and compiles it apart from the schema.
 - A `$ref` that leads back to its own schema without descending into the
   document is refused, even in a `$defs` entry nothing uses, since jsoncons
   would recurse on it until the stack overflowed. That is a `$ref` back

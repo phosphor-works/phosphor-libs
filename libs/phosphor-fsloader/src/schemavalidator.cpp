@@ -670,13 +670,18 @@ private:
         }
         for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
             const QString keyword = it.key();
+            const bool isSingle = isSubschemaKeyword(keyword);
+            const bool isMap = isSubschemaMapKeyword(keyword) && it.value().isObject();
+            const bool isArray = isSubschemaArrayKeyword(keyword) && it.value().isArray();
+            if (!isSingle && !isMap && !isArray) {
+                continue;
+            }
             const QString at = pointer + QChar(u'/') + pointerToken(keyword);
             const bool inPlace = isInPlaceKeyword(keyword, object);
-            const std::string keywordUtf8 = keyword.toStdString();
             // jsoncons' names for what it compiles below this keyword
             // (keyword_validator_factory.hpp).
             Unnamed below = unnamed;
-            jsonschema::uri_wrapper keywordLocation = location.append(keywordUtf8);
+            jsonschema::uri_wrapper keywordLocation = location.append(keyword.toStdString());
             bool memberNamed = true;
             if (keyword == QLatin1StringView("contentSchema")) {
                 below = Unnamed::InContentSchema;
@@ -700,15 +705,32 @@ private:
                     m_nodes[std::size_t(index)].inPlace.push_back(added);
                 }
             };
-            if (isSubschemaKeyword(keyword)) {
+            if (isSingle) {
                 child(it.value(), at, keywordLocation);
-            } else if (isSubschemaMapKeyword(keyword) && it.value().isObject()) {
+            } else if (isMap) {
                 const QJsonObject members = it.value().toObject();
                 for (auto member = members.constBegin(); member != members.constEnd(); ++member) {
-                    child(member.value(), at + QChar(u'/') + pointerToken(member.key()),
-                          memberNamed ? keywordLocation.append(member.key().toStdString()) : keywordLocation);
+                    const QString memberPointer = at + QChar(u'/') + pointerToken(member.key());
+                    if (!memberNamed) {
+                        child(member.value(), memberPointer, keywordLocation);
+                        continue;
+                    }
+                    const jsonschema::uri_wrapper memberLocation = keywordLocation.append(member.key().toStdString());
+                    // jsoncons percent-decodes a location to read it as a
+                    // JSON pointer, and takes one that does not read as one
+                    // for an anchor's name. Then it compiles the member and
+                    // what is below it apart from the schema, where a $ref
+                    // resolves to another subschema than this check finds.
+                    if (memberLocation.has_plain_name_fragment()) {
+                        errors.add(memberPointer,
+                                   QStringLiteral("\"%1\" percent-decodes to a \"~\" followed by neither \"0\" nor "
+                                                  "\"1\", which jsoncons cannot file as a JSON pointer")
+                                       .arg(member.key()));
+                        continue;
+                    }
+                    child(member.value(), memberPointer, memberLocation);
                 }
-            } else if (isSubschemaArrayKeyword(keyword) && it.value().isArray()) {
+            } else {
                 const QJsonArray items = it.value().toArray();
                 for (qsizetype i = 0; i < items.size(); ++i) {
                     child(items.at(i), at + QChar(u'/') + QString::number(i), keywordLocation.append(std::size_t(i)));

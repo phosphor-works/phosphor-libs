@@ -510,9 +510,9 @@ private Q_SLOTS:
             // jsoncons files items beside prefixItems as additionalItems, and
             // a member of patternProperties or dependentSchemas without the
             // member's name, so nothing below those can be named by its
-            // pointer. jsoncons threw on the first two, and resolved the
-            // others to another subschema: a wrong verdict, and for the last
-            // two a $ref to the `not` that holds it, which recursed until the
+            // pointer. jsoncons threw on the first four, and resolved the
+            // last three to another subschema: a wrong verdict, and for the
+            // last two a $ref to the `not` that holds it, which recursed until the
             // stack overflowed at validate().
             {"{\"prefixItems\": [{}], \"items\": {\"properties\": {\"a\": {}}}, \"properties\": {\"x\": "
              "{\"$ref\": \"#/items/properties/a\"}}}",
@@ -545,6 +545,18 @@ private Q_SLOTS:
              "/dependentSchemas/k/not/$ref: $ref \"#/dependentSchemas/not\" names a subschema below a "
              "dependentSchemas member by its pointer, which jsoncons files under another name and does not resolve "
              "(an $anchor there resolves)"},
+            // jsoncons percent-decodes a location to read it as a JSON
+            // pointer, and a "~" followed by neither "0" nor "1" makes it read
+            // as an anchor's name instead. It then compiled the member apart
+            // from the schema, where a $ref named another subschema than
+            // here, and the first row's recursed until the stack overflowed
+            // at validate(). Such a name is refused wherever it is.
+            {"{\"properties\": {\"a%7E2\": {\"properties\": {\"x\": {\"$ref\": \"#\"}}}}}",
+             "/properties/a%7E2: \"a%7E2\" percent-decodes to a \"~\" followed by neither \"0\" nor \"1\", which "
+             "jsoncons cannot file as a JSON pointer"},
+            {"{\"$defs\": {\"d%7e\": {}}, \"properties\": {\"y\": {\"type\": \"integer\"}}}",
+             "/$defs/d%7e: \"d%7e\" percent-decodes to a \"~\" followed by neither \"0\" nor \"1\", which jsoncons "
+             "cannot file as a JSON pointer"},
         };
         for (const auto& row : rows) {
             const SchemaValidator validator{QByteArray(row.schema)};
@@ -577,6 +589,13 @@ private Q_SLOTS:
         const auto memberErrors = members.validate(parse(R"({"a": 1, "b": {}})"));
         QVERIFY(memberErrors.has_value());
         QCOMPARE(memberErrors->size(), 2);
+
+        // A name that percent-decodes to "~0" or "~1" reads as a pointer, and
+        // is kept.
+        const SchemaValidator tilde(
+            QByteArrayLiteral("{\"properties\": {\"a%7E0\": {\"properties\": {\"x\": {\"type\": \"integer\"}}}}}"));
+        QVERIFY(tilde.isValid());
+        QVERIFY(tilde.validate(parse(R"({"a%7E0": {"x": "s"}})")).has_value());
 
         // An $id at the root is allowed, and a $ref by pointer or by anchor
         // resolves within the schema.
