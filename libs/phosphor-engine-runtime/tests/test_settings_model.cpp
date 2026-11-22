@@ -7,13 +7,19 @@
 
 #include <PhosphorPaths/SuiteDirectories.h>
 #include <PhosphorEngineRuntime/ConfigDefaults.h>
+#include <PhosphorEngineRuntime/ConfigMigration.h>
 #include <PhosphorEngineRuntime/Settings.h>
 #include <PhosphorEngineRuntime/SettingsSchema.h>
 
 #include <PhosphorConfig/Schema.h>
 
+#include <QDir>
+#include <QFile>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
+
+#include <memory>
 
 using namespace PhosphorEngineRuntime;
 
@@ -40,11 +46,38 @@ class TestSettingsModel : public QObject
 {
     Q_OBJECT
 
+private:
+    // Each test function's own config, data, state and cache roots. The
+    // functions save values and expect the defaults before they do, so they
+    // need an empty config. The XDG sandbox ctest gives them lives in the
+    // build directory and keeps what an earlier run saved, and run by hand
+    // there is no sandbox at all.
+    std::unique_ptr<QTemporaryDir> m_home;
+
 private Q_SLOTS:
     void initTestCase()
     {
         PhosphorPaths::setAppDirectoryName(QStringLiteral("phosphor-engine-runtime-test"));
         setHostSettingsExtension({&appendTestHostSchema, &testHostMachineScoped, nullptr});
+    }
+
+    void init()
+    {
+        m_home = std::make_unique<QTemporaryDir>();
+        QVERIFY(m_home->isValid());
+        for (const char* variable : {"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"}) {
+            const QString root = m_home->filePath(QString::fromLatin1(variable));
+            QVERIFY(QDir().mkpath(root));
+            qputenv(variable, QFile::encodeName(root));
+        }
+        // The guard would skip the migration that sets up the new config
+        // directory, since an earlier function's Settings already ran it.
+        ConfigMigration::resetMigrationGuardForTesting();
+    }
+
+    void cleanup()
+    {
+        m_home.reset();
     }
 
     void savedValueReadsBackInANewSettings()
