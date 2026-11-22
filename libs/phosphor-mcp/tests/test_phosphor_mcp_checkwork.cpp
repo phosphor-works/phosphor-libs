@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <memory>
 #include <random>
+#include <tuple>
 #include <type_traits>
 
 using namespace PhosphorMcp::Schema;
@@ -698,6 +699,150 @@ private Q_SLOTS:
         QCOMPARE(work(200), work(100) + 100 * level + 146);
     }
 
+    void largeTables()
+    {
+        // A name or a string looked up in a table of the schema costs 4
+        // units more from 256 KiB of the schema's tables, and twice as many
+        // at each fourfold, up to 16.
+        QCOMPARE(tableUnits(0), qint64(0));
+        QCOMPARE(tableUnits(FootprintBytes - 1), qint64(0));
+        QCOMPARE(tableUnits(FootprintBytes), qint64(4));
+        QCOMPARE(tableUnits(4 * FootprintBytes - 1), qint64(4));
+        QCOMPARE(tableUnits(4 * FootprintBytes), qint64(8));
+        QCOMPARE(tableUnits(16 * FootprintBytes - 1), qint64(8));
+        QCOMPARE(tableUnits(16 * FootprintBytes), qint64(16));
+        QCOMPARE(tableUnits(64 * FootprintBytes), qint64(16));
+        QCOMPARE(tableUnits(1000 * FootprintBytes), qint64(16));
+
+        // The memory of the tables: for each encoding, slots of 16 bytes,
+        // twice as many as the names at least, a power of two, and the text
+        // (5000 names of 5 bytes of UTF-8, and 5 code units of UTF-16).
+        QByteArray strings;
+        for (int i = 0; i < 5000; ++i) {
+            strings += (i ? ", '" : "'") + QByteArray::number(i).rightJustified(5, '0') + "'";
+        }
+        const QByteArray big = "'$defs': {'big': {'enum': [" + strings + "]}}";
+        CompiledSchema compiled;
+        QCOMPARE(compileSchema(parse("{" + big + "}").toObject(), false, compiled), QString());
+        QCOMPARE(compiled.tableBytes, qint64(2 * 16384 * 16 + 5000 * (5 + 2 * 5)));
+        QCOMPARE(tableUnits(compiled.tableBytes), qint64(4));
+        // Those of properties: two names of one letter each.
+        QCOMPARE(compileSchema(parse("{'properties': {'a': {}, 'b': {}}}").toObject(), false, compiled), QString());
+        QCOMPARE(compiled.tableBytes, qint64(2 * 8 * 16 + 2 * (1 + 2)));
+        // Those of dependentRequired hold its triggers' entries and their
+        // lists too: two names of one letter each, and a list of one.
+        QCOMPARE(compileSchema(parse("{'dependentRequired': {'a': ['bc'], 'b': []}}").toObject(), false, compiled),
+                 QString());
+        QCOMPARE(compiled.tableBytes,
+                 qint64(2 * 8 * 16 + 2 * (1 + 2))
+                     + 2
+                         * qint64(sizeof(decltype(Node::dependentRequired)::value_type)
+                                  + sizeof(decltype(Node::dependentRequiredHashes)::value_type))
+                     + qint64(sizeof(QString) + sizeof(quint64) + 2 * 2));
+
+        // So with a large enum anywhere in the schema, each lookup in any
+        // of its tables costs 4 more: a string of the enum of nine strings,
+        // a member in properties, a member in the triggers of
+        // dependentRequired (with more triggers than members), and the
+        // names of each trigger that an object has, 4 for its entry and 4
+        // for a list that is not empty, whichever way it was found.
+        const QByteArray nine = "{'items': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '" + A32 + "']}";
+        const QByteArray properties = "{'items': {'properties': {'a': {'type': 'integer'}}}";
+        const QByteArray triggers = "{'items': {'dependentRequired': {'a': ['a'], 'x': [], 'y': []}}";
+        const QByteArray empty = "{'items': {'dependentRequired': {'a': [], 'x': [], 'y': []}}";
+        const QByteArray found = "{'items': {'dependentRequired': {'a': ['b']}}";
+        const QList<std::tuple<QByteArray, QByteArray, qint64>> rows{
+            {nine, repeat("'" + A32 + "'", 256), 256 * 4},
+            {nine, repeat("'zz'", 256), 256 * 4},
+            {properties, repeat("{'a': 1, 'b': 2}", 256), 2 * 256 * 4},
+            {triggers, repeat("{'a': 1}", 256), 256 * (4 + 4 + 4)},
+            {triggers, repeat("{'b': 1}", 256), 256 * 4},
+            {empty, repeat("{'a': 1}", 256), 256 * (4 + 4)},
+            {found, repeat("{'a': 1, 'b': 2}", 256), 256 * (4 + 4)},
+        };
+        for (const auto& [schema, value, more] : rows) {
+            const Counts small = count(parse(schema + "}").toObject(), parse(value));
+            const Counts large = count(parse(schema + ", " + big + "}").toObject(), parse(value));
+            QVERIFY(small.work > 0);
+            QCOMPARE(large.lines, small.lines);
+            QCOMPARE(large.work - small.work, more);
+        }
+    }
+
+    void listsStopAtTheBound()
+    {
+        // The schema sets the length of required and dependentRequired, and
+        // a check stops the moment its work passes the bound, even in the
+        // middle of one of them, whether its names are found or not. An
+        // array of a string, whose length sets the work it takes, and an
+        // object of 10000 members against a list of the schema: the string
+        // is as long as brings the check past the bound at a part of the
+        // list's work.
+        QByteArray names;
+        QByteArray selves;
+        QByteArray empties;
+        QByteArray more;
+        QByteArray members;
+        for (int i = 0; i < 20000; ++i) {
+            const QByteArray name = "'k" + QByteArray::number(i).rightJustified(5, '0') + "'";
+            more += (i ? ", " : "") + name + ": []";
+            if (i < 10000) {
+                names += (i ? ", " : "") + name;
+                selves += (i ? ", " : "") + name + ": [" + name + "]";
+                empties += (i ? ", " : "") + name + ": []";
+                members += (i ? ", " : "") + name + ": 1";
+            }
+        }
+        // The string, of UTF-8, is looked up in 300 enums of nine strings
+        // inside not, and its hash costs a unit in each for each eight bytes,
+        // four characters here (see lookupUnits()), whatever else the
+        // schema's tables cost.
+        constexpr int Enums = 300;
+        QByteArray enums;
+        for (int i = 0; i < Enums; ++i) {
+            enums += (i ? ", " : "") + QByteArray("{'not': {'enum': ['1', '2', '3', '4', '5', '6', '7', '8', '9']}}");
+        }
+        const auto work = [&](const QByteArray& list, qint64 quads) {
+            const QByteArray schema = "{'prefixItems': [{'allOf': [" + enums + "]}, {" + list + "}]}";
+            const QByteArray value =
+                "['" + QByteArray("\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9").repeated(quads) + "', {" + members + "}]";
+            return count(parse(schema).toObject(), parse(value));
+        };
+        // From 1000 characters on, a string costs the same more for each
+        // four characters, since its reads stop at four lines.
+        constexpr qint64 Base = 250;
+        const qint64 without = work(QByteArray(), Base).work;
+        QCOMPARE(work(QByteArray(), Base + 1000).work - without, 1000 * Enums);
+        // The list, and the part of its work after the index of the
+        // object's names (one step, which a name of required builds) at
+        // which the bound passes: in the names of required, in the triggers
+        // looked up in the object or the members in the triggers (which
+        // builds no index), or in the triggers found and their names (0.85,
+        // and one trigger of 10000 names).
+        const qint64 index = work("'required': ['k00000']", Base).work - without;
+        const QList<std::tuple<QByteArray, qint64, double>> lists{
+            {"'required': [" + names + "]", index, 0.5},
+            {"'dependentRequired': {" + empties + "}", index, 0.3},
+            {"'dependentRequired': {" + empties + "}", index, 0.85},
+            {"'dependentRequired': {" + selves + "}", index, 0.15},
+            {"'dependentRequired': {" + selves + "}", index, 0.85},
+            {"'dependentRequired': {'k00000': [" + names + "]}", index, 0.5},
+            {"'dependentRequired': {" + more + "}", 0, 0.3},
+        };
+        for (const auto& [list, first, part] : lists) {
+            const Counts with = work(list, Base);
+            QCOMPARE(with.lines, QStringList());
+            const qint64 listWork = with.work - without - first;
+            QVERIFY(listWork > 100000);
+            // The work before the list, and as much of it as the part.
+            const qint64 quads = Base + (MaxWork - without - first - qint64(double(listWork) * part)) / Enums;
+            const Counts stopped = work(list, quads);
+            QCOMPARE(stopped.lines,
+                     QStringList{QStringLiteral(": is too large for the server to check against the schema")});
+            QVERIFY2(stopped.work - MaxWork < 100, qPrintable(QString::number(stopped.work - MaxWork)));
+        }
+    }
+
     void objectsCompareWhateverTheirOrder()
     {
         // An object built in C++ keeps its members in the order of their
@@ -962,6 +1107,45 @@ private Q_SLOTS:
             QVERIFY(compareValues(first, second, compareBudget, &readsA, &readsB) != 0);
             QCOMPARE(compareBudget.work(), qint64(1 + (1 + 2) + 1));
         }
+    }
+
+    void tablesCompareTheText()
+    {
+        // A name inserted again keeps its last value.
+        NameTable table;
+        table.insert(QStringLiteral("x"), 1);
+        table.insert(QStringLiteral("x"), 2);
+        QCOMPARE(table.value(QLatin1StringView("x")), 2);
+        QCOMPARE(table.value(QStringView(u"x")), 2);
+
+        // A slot keeps a part of its name's hash, and a name of the same
+        // size whose hash has that part, and the same place in a table of
+        // eight slots, is found only when the texts are the same. Under the
+        // seed 0, with Qt's hash of this build, two such names are found
+        // among a few hundred thousand.
+        QHash<quint64, QByteArray> seen;
+        QByteArray first;
+        QByteArray second;
+        for (int i = 0; i < 4000000 && first.isEmpty(); ++i) {
+            const QByteArray name = QByteArray::number(i).rightJustified(8, 'n');
+            const quint64 hash = qHash(QByteArrayView(name), 0);
+            const quint64 key = (quint64(quint32(hash >> 32) ^ quint32(hash)) << 3) | (hash & 7);
+            const auto it = seen.constFind(key);
+            if (it != seen.constEnd()) {
+                first = *it;
+                second = name;
+            } else {
+                seen.insert(key, name);
+            }
+        }
+        QVERIFY(!first.isEmpty());
+        // The table takes the seed when its first name is inserted.
+        QHashSeed::setDeterministicGlobalSeed();
+        NameTable collided;
+        collided.insert(QString::fromLatin1(first), 5);
+        QHashSeed::resetRandomGlobalSeed();
+        QCOMPARE(collided.value(QLatin1StringView(first)), 5);
+        QCOMPARE(collided.value(QLatin1StringView(second)), -1);
     }
 
     void textIsTheSameInEveryEncoding()
