@@ -215,7 +215,8 @@ constexpr qsizetype MaxShownTokenLength = 64;
 class Budget
 {
 public:
-    // Counts `units` of work. False once the work passed MaxWork.
+    // Counts `units` of work. False once the budget is spent: the work
+    // past MaxWork, or the memory past MaxMemory.
     bool charge(qint64 units)
     {
         m_work += units;
@@ -224,7 +225,8 @@ public:
         }
         return !m_exceeded;
     }
-    // Counts `bytes` more of memory held. False once it passed MaxMemory.
+    // Counts `bytes` more of memory held. False once the budget is spent:
+    // the memory past MaxMemory, or the work past MaxWork.
     bool allocate(qint64 bytes)
     {
         m_memory += bytes;
@@ -280,7 +282,8 @@ public:
     HeldMemory(const HeldMemory&) = delete;
     HeldMemory& operator=(const HeldMemory&) = delete;
 
-    // Counts `bytes` more. False once the memory passed MaxMemory.
+    // Counts `bytes` more. False once the budget is spent, as
+    // Budget::allocate.
     bool allocate(qint64 bytes)
     {
         m_bytes += bytes;
