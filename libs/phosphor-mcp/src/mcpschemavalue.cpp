@@ -24,9 +24,9 @@ namespace {
 constexpr double TwoTo63 = 9223372036854775808.0;
 
 // The order of the JSON types in compareValues().
-int typeRank(const QJsonValue& value)
+int typeRank(QJsonValue::Type type)
 {
-    switch (value.type()) {
+    switch (type) {
     case QJsonValue::Null:
     case QJsonValue::Undefined:
         return 0;
@@ -544,16 +544,30 @@ qint64 readUnits(TextReads* reads, QAnyStringView text)
     return reads ? reads->next(text) : 0;
 }
 
+// A value of the type `type` taken out of its container, if it was: a
+// QJsonValue made of it, which holds a reference to storage when it is a
+// string, an object or an array.
+qint64 takenUnits(TextReads* reads, QJsonValue::Type type)
+{
+    if (!reads) {
+        return 0;
+    }
+    const bool referenced = type == QJsonValue::String || type == QJsonValue::Array || type == QJsonValue::Object;
+    return UnitsPerTaken + (referenced ? UnitsPerReference : 0);
+}
+
 // The comparisons and the hash below, with the reads of the containers that
 // the values are items or members of, when they are (see TextReads).
 bool equalIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
-    budget.charge(1);
-    const int rank = typeRank(a);
-    if (rank != typeRank(b)) {
+    // Each type read once: QJsonValue::type() is a call into Qt.
+    const QJsonValue::Type type = a.type();
+    const QJsonValue::Type other = b.type();
+    budget.charge(1 + takenUnits(readsA, type) + takenUnits(readsB, other));
+    if (typeRank(type) != typeRank(other)) {
         return false;
     }
-    switch (a.type()) {
+    switch (type) {
     case QJsonValue::Null:
     case QJsonValue::Undefined:
         return true;
@@ -637,13 +651,15 @@ bool equalIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads
 
 int compareIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
-    budget.charge(1);
-    const int rankA = typeRank(a);
-    const int rankB = typeRank(b);
+    const QJsonValue::Type type = a.type();
+    const QJsonValue::Type other = b.type();
+    budget.charge(1 + takenUnits(readsA, type) + takenUnits(readsB, other));
+    const int rankA = typeRank(type);
+    const int rankB = typeRank(other);
     if (rankA != rankB) {
         return rankA < rankB ? -1 : 1;
     }
-    switch (a.type()) {
+    switch (type) {
     case QJsonValue::Null:
     case QJsonValue::Undefined:
         return 0;
@@ -708,8 +724,9 @@ int compareIn(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextRead
 
 quint64 hashIn(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads)
 {
-    budget.charge(1);
-    switch (value.type()) {
+    const QJsonValue::Type type = value.type();
+    budget.charge(1 + takenUnits(reads, type));
+    switch (type) {
     case QJsonValue::Null:
     case QJsonValue::Undefined:
         return start(key, KindNull);
@@ -739,11 +756,11 @@ quint64 hashIn(const QJsonValue& value, quint64 key, Budget& budget, TextReads* 
         quint64 sum = 0;
         const QJsonObject object = value.toObject();
         const quint64 names = start(key, KindName);
-        TextReads reads;
+        TextReads members;
         for (auto it = object.begin(); it != object.end() && !budget.exceeded(); ++it) {
             const QAnyStringView name = it.keyView();
-            budget.charge(UnitsPerMember + reads.next(name) + hashUnits(name));
-            sum += mix(hashText(name, names), hashIn(it.value(), key, budget, &reads));
+            budget.charge(UnitsPerMember + members.next(name) + hashUnits(name));
+            sum += mix(hashText(name, names), hashIn(it.value(), key, budget, &members));
         }
         return mix(mix(start(key, KindObject), sum), quint64(object.size()));
     }
@@ -753,14 +770,14 @@ quint64 hashIn(const QJsonValue& value, quint64 key, Budget& budget, TextReads* 
 
 } // namespace
 
-bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
-    return equalIn(a, b, budget, nullptr, nullptr);
+    return equalIn(a, b, budget, readsA, readsB);
 }
 
-int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget)
+int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA, TextReads* readsB)
 {
-    return compareIn(a, b, budget, nullptr, nullptr);
+    return compareIn(a, b, budget, readsA, readsB);
 }
 
 quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads)

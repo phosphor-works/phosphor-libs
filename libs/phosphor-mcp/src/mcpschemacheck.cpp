@@ -455,10 +455,14 @@ bool Checker::apply(int index, const QJsonValue& value, Mode mode, Evaluated* ou
     return valid && !stopped();
 }
 
-// Applies the node `index` to an item or a member of a container: its text,
-// when a keyword reads it, is read after the last one that `reads` saw.
+// Applies the node `index` to an item or a member of a container, taken
+// out of it: its text, when a keyword reads it, is read after the last one
+// that `reads` saw.
 bool Checker::applyTo(TextReads& reads, int index, const QJsonValue& value, Mode mode)
 {
+    if (value.isString()) {
+        charge(UnitsPerReference);
+    }
     TextReads* const outer = m_texts;
     m_texts = &reads;
     const bool valid = apply(index, value, mode, nullptr);
@@ -920,7 +924,16 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
 
     // Within each run of one hash, a merge sort by value (stable, so equal
     // items stay in the order of their indices), which stops when the work
-    // is spent, whatever the comparisons said.
+    // is spent, whatever the comparisons said. Each comparison reads two
+    // items far apart in the array, in the order of their hashes: the place
+    // of each in the array's storage, away from the last one read
+    // (UnitsPerContainer), and its text away from the last text read, or
+    // its own storage.
+    TextReads apart;
+    const auto equal = [&](qsizetype a, qsizetype b) {
+        charge(2 * UnitsPerContainer);
+        return equalValues(array.at(a), array.at(b), m_budget, &apart, &apart);
+    };
     qsizetype firstRepeat = -1;
     qsizetype repeated = -1;
     std::vector<Key> scratch;
@@ -930,7 +943,7 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
         while (end < keys.size() && keys[end].hash == keys[start].hash) {
             ++end;
         }
-        if (end - start > 1 && equalValues(array.at(keys[start].index), array.at(keys[start + 1].index), m_budget)) {
+        if (end - start > 1 && equal(keys[start].index, keys[start + 1].index)) {
             // The run is in the order of the indices: its first two items
             // are equal, and no repeat in it comes earlier.
             if (firstRepeat < 0 || keys[start + 1].index < firstRepeat) {
@@ -938,12 +951,9 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
                 repeated = keys[start].index;
             }
         } else if (end - start > 2) {
-            // Each comparison reads two items far apart in the array, and
-            // their own storage when they are arrays or objects: misses of
-            // the cache, at random.
             const auto less = [&](const Key& a, const Key& b) {
-                m_budget.charge(3 * UnitsPerContainer);
-                return compareValues(array.at(a.index), array.at(b.index), m_budget) < 0;
+                charge(2 * UnitsPerContainer);
+                return compareValues(array.at(a.index), array.at(b.index), m_budget, &apart, &apart) < 0;
             };
             scratch.resize(end - start);
             for (std::size_t width = 1; width < end - start && !stopped(); width *= 2) {
@@ -958,14 +968,14 @@ bool Checker::checkUnique(const QJsonArray& array, Mode mode)
                 }
             }
             for (std::size_t i = start + 1; i < end && !stopped(); ++i) {
-                if (equalValues(array.at(keys[i - 1].index), array.at(keys[i].index), m_budget)) {
+                if (equal(keys[i - 1].index, keys[i].index)) {
                     // The first two of a group of equal items are its first
                     // item and its first repeat.
                     if (firstRepeat < 0 || keys[i].index < firstRepeat) {
                         firstRepeat = keys[i].index;
                         repeated = keys[i - 1].index;
                     }
-                    while (i + 1 < end && equalValues(array.at(keys[i].index), array.at(keys[i + 1].index), m_budget)) {
+                    while (i + 1 < end && equal(keys[i].index, keys[i + 1].index)) {
                         ++i;
                     }
                 }

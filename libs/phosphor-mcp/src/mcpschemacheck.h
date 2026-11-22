@@ -20,11 +20,11 @@ namespace PhosphorMcp::Schema {
 // Work is counted in units, at most about 20 ns each of a release build,
 // whatever the schema and the value. The checker charges each step it takes
 // (a value walked, a subschema applied to a value, a keyword checked, a
-// member or an item visited, a name looked up, a name or a string read away
-// from the last one read of its object or array, sixteen code units of a
-// string or a name read, compared or hashed, a word of an annotation set
-// merged, an error built), weighted by what it costs as a sweep of each
-// charge measured it. The check stops the moment the count passes MaxWork,
+// member or an item visited, a value taken out of its array or object, a
+// name looked up, a name or a string read away from the last one read of
+// its object or array, sixteen code units of a string or a name read,
+// compared or hashed, a word of an annotation set merged, an error built),
+// weighted by what it costs as a sweep of each charge measured it. The check stops the moment the count passes MaxWork,
 // under a second. The README has the measured times.
 constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
@@ -50,9 +50,20 @@ constexpr qint64 MaxCheckStackBytes = 4 * 1024 * 1024;
 constexpr qint64 UnitsPerValueWalked = 3;
 // A subschema applied to a value.
 constexpr qint64 UnitsPerApply = 2;
-// More for an object or an array, walked or applied to: its members or
-// items are read through its own storage, away from the last.
+// More for an object or an array, walked, applied to, compared or hashed:
+// its members or items are read through its own storage, away from the
+// last. And for an item that uniqueItems compares, read in the order of
+// the hashes, away from the last one read of the array.
 constexpr qint64 UnitsPerContainer = 2;
+// More for a string applied to, which Qt took out of its array or object:
+// the value it makes of the string holds a reference to the container's
+// storage, counted up and down again. And for a string, an object or an
+// array compared or hashed, taken out of its container, whose value holds a
+// reference to that storage or to its own.
+constexpr qint64 UnitsPerReference = 2;
+// A value taken out of its array or object to be compared or hashed (enum,
+// const, uniqueItems), beside UnitsPerReference.
+constexpr qint64 UnitsPerTaken = 1;
 // A keyword checked, or an item visited.
 constexpr qint64 UnitsPerStep = 1;
 // A member visited, or a name looked up or sorted.
@@ -207,12 +218,17 @@ private:
 // members (an object built in C++ keeps them in the order of their UTF-16
 // code units, a parsed one in that of their code points). Each charges the
 // budget for its work, and returns early once the budget is spent.
-bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
+// `readsA` and `readsB`: those of the arrays that the values were taken out
+// of, if they were (see UnitsPerTaken).
+bool equalValues(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA = nullptr,
+                 TextReads* readsB = nullptr);
 // A total order of JSON values that is 0 exactly when equalValues() is true.
-int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget);
+int compareValues(const QJsonValue& a, const QJsonValue& b, Budget& budget, TextReads* readsA = nullptr,
+                  TextReads* readsB = nullptr);
 // A hash that is the same for values that equalValues() finds equal, keyed
 // by `key` so that a value cannot be chosen to collide with another without
-// it. `reads`: those of the array that the value is an item of, if any.
+// it. `reads`: those of the array that the value was taken out of, if it
+// was.
 quint64 hashValue(const QJsonValue& value, quint64 key, Budget& budget, TextReads* reads = nullptr);
 
 // A token of a place in a value: a member name, read in place in the value
