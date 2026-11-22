@@ -59,10 +59,12 @@ namespace PhosphorFsLoader {
  *   @c additionalItems, or below a member of @c patternProperties or
  *   @c dependentSchemas, which it files without the member's name. An
  *   @c $anchor below those resolves. A member of @c properties or @c $defs
- *   whose name jsoncons writes into its location as a "%7E" followed by
- *   neither "0" nor "1" once decoded (@c "a%7E2", or a U+0007 then an "E"
- *   at the end, which it encodes so) is refused, since jsoncons then reads
- *   its location as an anchor's name and compiles it apart from the schema.
+ *   whose name jsoncons writes into its location as a "%7E" or "%7e"
+ *   followed by neither "0" nor "1" once decoded (@c "a%7E2", or a U+0007
+ *   then an "E" or "e" at the end, which it encodes so) is refused, since
+ *   jsoncons then reads its location as an anchor's name and compiles it
+ *   apart from the schema. A literal "~" is kept, since jsoncons writes it
+ *   as "~0".
  * - No @c $ref that leads back to its own schema without descending into the
  *   document, that is through @c allOf, @c anyOf, @c oneOf, @c not, @c if,
  *   @c then and @c else beside an @c if (2020-12 ignores them without one),

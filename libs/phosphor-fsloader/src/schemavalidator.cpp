@@ -719,18 +719,20 @@ private:
                     // jsoncons percent-encodes a member's name into its
                     // location, then decodes the location to read it as a
                     // JSON pointer, and takes one that does not read as one
-                    // for an anchor's name. A "%7E" in the name, or a U+0007
-                    // then an "E" that it encodes as one, decodes to a "~"
-                    // that can be followed by neither "0" nor "1". Then it
+                    // for an anchor's name. A "%7E" or "%7e" in the name, or
+                    // a U+0007 then an "E" or "e" at its end that it encodes
+                    // as one, decodes to a "~" that can be followed by
+                    // neither "0" nor "1". Then it
                     // compiles the member and what is below it apart from the
                     // schema, where a $ref resolves to another subschema than
                     // this check finds.
                     if (memberLocation.has_plain_name_fragment()) {
-                        errors.add(memberPointer,
-                                   QStringLiteral("\"%1\" is a name whose location jsoncons reads as an anchor's name, "
-                                                  "not a JSON pointer, since it decodes to a \"~\" followed by "
-                                                  "neither \"0\" nor \"1\"")
-                                       .arg(member.key()));
+                        errors.add(
+                            memberPointer,
+                            QStringLiteral("jsoncons percent-encodes the name \"%1\" into a location that decodes to a "
+                                           "\"~\" followed by neither \"0\" nor \"1\", so it reads that location "
+                                           "as an anchor's name, not a JSON pointer (rename the member)")
+                                .arg(member.key()));
                         continue;
                     }
                     child(member.value(), memberPointer, memberLocation);
