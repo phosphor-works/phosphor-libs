@@ -27,10 +27,15 @@ namespace PhosphorMcp::Schema {
 // of an annotation set merged, an error built), weighted by what it costs.
 // A sweep of each charge, with short and long text in each encoding,
 // numbers of each kind, large and deep schemas, and tables of the schema of
-// up to a million entries, measured at most 16 ns a unit, some 1.55 times
-// (1.6 in a single run) the 10 ns a unit of a list of integers checked for
-// their type by the same build beside it. The check stops the moment the
-// count passes MaxWork, in some 0.6 s at the most measured. The README has
+// up to a million entries, measured at most about 16 ns a unit while little
+// else contended for the caches and for memory, some 1.6 times the 10 ns a
+// unit of a list of integers checked for their type by the same build
+// beside it. The dearest shapes wait on memory, and slow down when other
+// processes contend for it, while the list does not: under such load they
+// measured up to about 20 ns a unit, twice the list's. The check stops the
+// moment the count passes MaxWork, within the charge of one step (a text
+// read, a name or an item hashed or sorted, an error built), in some 0.6 s
+// at the most measured without such load and 0.8 s with it. The README has
 // the measured times.
 constexpr qint64 MaxWork = 40'000'000;
 // The memory the check holds beyond the value and the schema, counted as it
@@ -71,11 +76,12 @@ constexpr qint64 StackBytesPerApply = 1024;
 constexpr qint64 FootprintBytes = 256 * 1024;
 constexpr qint64 MaxFootprintUnits = 3;
 // More for a name or a string looked up in a table of the schema (enum,
-// properties, dependentRequired), and for the names of a trigger of
-// dependentRequired that an object has: a slot and a text read anywhere in
-// the schema's tables, misses of the caches and of the TLB once the tables
-// together are larger than the caches hold. Four units from FootprintBytes of
-// the tables, and twice as many at each fourfold, up to MaxTableUnits (see
+// properties, dependentRequired), and for each trigger of dependentRequired
+// that an object has, once for its entry and once more for its list of
+// names when it has one: a slot and a text read anywhere in the schema's
+// tables, misses of the caches and of the TLB once the tables together are
+// larger than the caches hold. Four units from FootprintBytes of the
+// tables, and twice as many at each fourfold, up to MaxTableUnits (see
 // tableUnits()).
 constexpr qint64 MaxTableUnits = 16;
 // More for an object or an array, walked, applied to, compared or hashed:

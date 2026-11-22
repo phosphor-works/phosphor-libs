@@ -228,15 +228,21 @@ short and long strings and names (around each sixteen code units), with
 numbers of each kind, with large schemas and checks deep in them, with
 names in random order, with strings and other values taken out of their
 arrays and objects and compared far apart, and with tables of the schema
-of up to a million entries, measured at most 16 ns a unit for a check of a
-millisecond or more. That is some 1.55 times what a list of integers
+of up to a million entries, measured at most about 16 ns a unit for a
+check of a millisecond or more, while little else contended for the
+caches and for memory. That is some 1.6 times what a list of integers
 checked for their type measures beside it in the same build (10 ns a
-unit), and 1.6 times in a single run. The dearest read an object or an
-array of 16 MiB again for each of 40 or 50 subschemas, as fast as memory
-gives it, and the shapes below measure as much. A check of less than a
-millisecond pays fixed costs too, such as the first use of the stack, and
-nothing that grows with the arguments. The bound is 40 million units,
-under a second whatever the schema and the arguments.
+unit). The dearest read an object or an array of 16 MiB again for each of
+40 or 50 subschemas, as fast as memory gives it, or apply thousands of
+subschemas in random order. They slow down when other processes contend
+for the caches and for memory, and the list of integers does not. Under
+such load the dearest measured up to about 20 ns a unit, twice the
+list's. A check of less than a millisecond pays fixed costs too, such as
+the first use of the stack, and nothing that grows with the arguments.
+The bound is 40 million units, under a second whatever the schema and the
+arguments. A check that ends at the bound took up to some 0.6 s without
+such load, and up to some 0.8 s with it. The shapes below were measured
+the same way.
 
 Strings and names are read where Qt's parser keeps them, and never decoded
 to be compared, hashed or counted, not even the names that `propertyNames`
@@ -266,15 +272,17 @@ unit more than one applied to a member or an item. Each subschema applied
 costs a unit more again once the schema's subschemas and the check's own
 frames (a kilobyte for each subschema it is in) come to 256 KiB, and one
 more at each fourfold, up to 3, since the caches no longer hold them. A
-string looked up in an `enum` of more than eight strings, a name looked up
-in `properties` or in the triggers of `dependentRequired`, and the names
-of each trigger of `dependentRequired` that an object has, cost 4 units
-more once the tables of the whole schema come to 256 KiB, and twice as
-many at each fourfold, up to 16, since each lookup then misses the caches.
-The schema sets the size of its tables, and the server does not cap it. A
-name is decoded, and its `~` and `/` escaped, only for the JSON pointer of
-an error, once for all the errors at its place and below it while the
-check stays there, and again when it comes back. The text of a pointer is
+string looked up in an `enum` of more than eight strings, and a name
+looked up in `properties` or in the triggers of `dependentRequired`, cost
+4 units more once the tables of the whole schema come to 256 KiB, and
+twice as many at each fourfold, up to 16, since each lookup then misses
+the caches. So does each trigger of `dependentRequired` that an object
+has, once for its entry and once more for its list of names when it has
+one. The schema sets the size of its tables, and the server does not cap
+it. A name is decoded, and its `~` and `/` escaped, only for the JSON
+pointer of an error, once for all the errors at its place and below it
+while the check stays there, and again when it comes back. The text of a
+pointer is
 charged for each whole sixteen code units, not rounded up as other text
 is, since the error and each of its tokens are charged units of their own
 besides. The memory the check holds beyond the arguments and the schema is
@@ -713,8 +721,9 @@ than 256 deep, is refused. A tool's schema goes to the model with every
 `tools/list`, and Afterglow's largest has some sixty. The compile keeps
 for each subschema its parent and one token, not its path, and takes time
 in proportion to the schema. In a release build, on a machine loaded with
-other work, 9999 empty `properties` compile in 15 ms, 9037 subschemas 251
-levels deep in 13 ms, and an `enum` of 100,000 strings (1.2 MB) in 40 ms.
+other work, 9999 empty `properties` compile in 8 to 15 ms, 9037
+subschemas 251 levels deep in 8 to 13 ms, and an `enum` of 100,000 strings
+(1.2 MB) in 36 to 43 ms.
 A megabyte of schema 900 levels deep is refused at once.
 
 ## Dependencies
