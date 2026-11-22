@@ -232,6 +232,15 @@ private Q_SLOTS:
             "{'items': {'allOf': [{'maxLength': 20}, {'maxLength': 20}, {'maxLength': 20}]}}",
             repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 3 * (2 + 1 + (1 + 1) + 1) + (1 + 2)),
             0);
+        // anyOf and oneOf apply their branches in place too (2 + 1 each),
+        // whatever their verdicts: the first fails, counting the length once
+        // (1 + 2), and the second passes with the same count.
+        row("maxLength counted once in anyOf", "{'items': {'anyOf': [{'maxLength': 1}, {'maxLength': 20}]}}",
+            repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 2 * (2 + 1 + (1 + 1) + 1) + (1 + 2)),
+            0);
+        row("maxLength counted once in oneOf", "{'items': {'oneOf': [{'maxLength': 1}, {'maxLength': 20}]}}",
+            repeat("'" + Pairs16 + "'", 256), 10 + 256 * ((3 + 1 + 2) + 2 + 2 + 2 * (2 + 1 + (1 + 1) + 1) + (1 + 2)),
+            0);
         // 31 code units of UTF-16 hold at least 16 code points, and are
         // read through in 2.
         row("minLength not counted", "{'items': {'minLength': 16}}",
@@ -341,6 +350,23 @@ private Q_SLOTS:
             members("1", 64),
             (3 + 2) + 64 * (2 + 3) + (2 + 2 + 1) + 2 * (2 + 1 + 2 + 1) + 64 * (2 + 3 + 1) + 2 * (1 + 7 + (1 + 1)),
             64 * IndexBytes);
+        // if, then and else in place (2 + 1 each), with the one index of the
+        // object's names: an object of one member walked (10), the subschema
+        // of the items applied to it (2 + 2, and 1 for the keywords of
+        // objects), the condition (2 + 1 + 2 + 1) that builds the index
+        // (2 + 1) and finds "a" (1 + 1, and 1 + 1 to compare) or finds no
+        // name of its hash (1 + 1), and then or else (the same, without the
+        // index).
+        row("if and then share the index",
+            "{'items': {'if': {'required': ['a']}, 'then': {'required': ['a']}, 'else': {'required': ['b']}}}",
+            repeat("{'a': 1}", 256),
+            10 + 256 * (10 + (2 + 2 + 1) + (2 + 1 + 2 + 1) + (2 + 1) + 2 * (1 + 1 + (1 + 1)) + (2 + 1 + 2 + 1)),
+            IndexBytes);
+        row("if and else share the index",
+            "{'items': {'if': {'required': ['a']}, 'then': {'required': ['a']}, 'else': {'required': ['b']}}}",
+            repeat("{'b': 1}", 256),
+            10 + 256 * (10 + (2 + 2 + 1) + (2 + 1 + 2 + 1) + (2 + 1) + (1 + 1) + (1 + 1 + (1 + 1)) + (2 + 1 + 2 + 1)),
+            IndexBytes);
         // dependentRequired: a trigger looked up, and its names.
         row("dependentRequired", "{'items': {'dependentRequired': {'a': ['b']}}}", repeat("{'a': 1, 'b': 2}", 256),
             10 + 256 * ((3 + 2 + 2 * (2 + 3)) + (2 + 2 + 1) + 2 * (2 + 1 + 1) + 2 * (1 + 2 + (1 + 1))), 2 * IndexBytes);
@@ -581,14 +607,15 @@ private Q_SLOTS:
                                            + (4 + 5)
                                            + (2 * (4 + 5) + (4 + 7 + 4 + 2 * 2 * (2 + 2 * (1 + 1)) + 2 * (2 + 1 + 3)))
                                            + (4 + 5) + (4 + 7 + 4 + 2 * (2 + 1 + 3)) + 24);
-        // Four strings of 600 bytes one after the other, X0, X2, X3 and X4
-        // by their indices, and the integer: a run of five. Each comparison of two strings is 4 + 7, and 150
-        // by code point in the sort or 75 after it, and reads each string
-        // away from the last one that the run read (0 or 8 here, and 8 for
-        // the first), whether the sort or the comparisons after it read it.
-        // The sort reads X3 and X2 (8 + 0), X2 and X0 (0 + 0), and X4 with
-        // each of the three others (8 + 8, 8 + 8 and 8 + 0). After it, X0
-        // is read away from X3 (8), and X2, X3 and X4 in their order.
+        // Four strings of 600 bytes one after the other, X0, X2, X3 and X4 by
+        // their indices, and the integer: a run of five. Each comparison of
+        // two strings is 4 + 7, and 150 by code point in the sort or 75 after
+        // it, and reads each string away from the last one that the run read
+        // (0 or 8 here, and 8 for the first), whether the sort or the
+        // comparisons after it read it. The sort reads X3 and X2 (8 + 0), X2
+        // and X0 (0 + 0), and X4 with each of the three others (8 + 8, 8 + 8
+        // and 8 + 0). After it, X0 is read away from X3 (8), and X2, X3 and X4
+        // in their order.
         QTest::newRow("strings apart") << "['" + X600 + "', -6792571494992432110, '" + X600 + "', '" + X600 + "', '"
                 + X600 + "']" << "'" + X600 + "'"
                                        << 2
@@ -618,12 +645,54 @@ private Q_SLOTS:
                  QStringList{QStringLiteral(": must have unique items, and items 0 and %1 are equal").arg(repeat)});
         QCOMPARE(collided.work, work);
 
+        // Inside not, uniqueItems sorts and compares each run to its end
+        // too, though its first repeat decides: the same work, but for the
+        // error (24) and not applied in place (2 + 1, and 2 + 1 for the
+        // array and its keywords again).
+        QHashSeed::setDeterministicGlobalSeed();
+        const Counts verdict = count(parse("{'not': {'uniqueItems': true}}").toObject(), items);
+        QHashSeed::resetRandomGlobalSeed();
+        QCOMPARE(verdict.lines, QStringList());
+        QCOMPARE(verdict.work, work - 24 + (2 + 1 + 2 + 1));
+
         // With a random seed the hashes differ: the same line, and less
         // work.
         QVERIFY(QHashSeed::globalSeed() != 0);
         const Counts apart = count(parse("{'uniqueItems': true}").toObject(), items);
         QCOMPARE(apart.lines, collided.lines);
         QVERIFY2(apart.work < collided.work, qPrintable(QString::number(apart.work)));
+    }
+
+    void checksUseTheKeyOfTheCompile()
+    {
+        // The names of the schema are hashed when it compiles, with Qt's
+        // global seed then, and the check hashes what it looks them up in
+        // with the same key, whatever the seed is when it runs. Compiled
+        // with the key 0, a schema finds its names, and items that collide
+        // under that key collide in the check.
+        QHashSeed::setDeterministicGlobalSeed();
+        CompiledSchema required;
+        QCOMPARE(compileSchema(parse("{'required': ['a', 'b'], 'dependentRequired': {'a': ['b']}}").toObject(), false,
+                               required),
+                 QString());
+        CompiledSchema unique;
+        QCOMPARE(compileSchema(parse("{'uniqueItems': true}").toObject(), false, unique), QString());
+        QHashSeed::resetRandomGlobalSeed();
+        QVERIFY(QHashSeed::globalSeed() != 0);
+        QCOMPARE(required.key, quint64(0));
+        QCOMPARE(checkValue(required, parse("{'a': 1, 'b': 2}")), QStringList());
+        QCOMPARE(
+            checkValue(required, parse("{'a': 1}")),
+            (QStringList{QStringLiteral("/b: is required"), QStringLiteral("/b: is required when \"a\" is present")}));
+
+        // The integer collides with 0.5 under the key 0 (see
+        // collisionsAreSorted): walked (5 + 3 * 3) and applied to (5), the
+        // three items hashed (3 * 2) and sorted (3 * 2), the run of three
+        // compared and sorted (7 + 3 * 7 + 2 * 7), and the error (24).
+        CheckStats stats;
+        QCOMPARE(checkValue(unique, parse("[0.5, -173880412977153776, 0.5]"), &stats),
+                 QStringList{QStringLiteral(": must have unique items, and items 0 and 2 are equal")});
+        QCOMPARE(stats.work, qint64(14 + 5 + 3 * 2 + 3 * (1 + 1) + (4 + 3) + 3 * (4 + 3) + 2 * (4 + 3) + 24));
     }
 
     void uniqueItemsWorkWhateverTheSeed()
@@ -674,29 +743,44 @@ private Q_SLOTS:
         QCOMPARE(footprintUnits(16 * FootprintBytes), qint64(3));
         QCOMPARE(footprintUnits(1000 * FootprintBytes), qint64(3));
 
-        // 400 empty branches of allOf and the root, some 350 KB of nodes:
-        // the number walked (3), the root applied to it (2, and 1), and each
-        // branch in place (2 + 1, and 1).
-        QByteArray branches;
-        for (int i = 0; i < 400; ++i) {
-            branches += i ? ", {}" : "{}";
+        // Empty branches of allOf and the root, past 256 KiB, 1 MiB and
+        // 4 MiB of nodes: the number walked (3), the root applied to it (2),
+        // and each branch in place (2 + 1), each with the units of the
+        // nodes.
+        for (const qint64 bytes : {FootprintBytes, 4 * FootprintBytes, 16 * FootprintBytes}) {
+            const qint64 branches = bytes / qint64(sizeof(Node));
+            QVERIFY(branches < MaxNodes);
+            QByteArray list;
+            for (qint64 i = 0; i < branches; ++i) {
+                list += i ? ", {}" : "{}";
+            }
+            const qint64 nodeUnits = footprintUnits((branches + 1) * qint64(sizeof(Node)));
+            QCOMPARE(nodeUnits, footprintUnits(bytes));
+            QCOMPARE(count(parse("{'allOf': [" + list + "]}").toObject(), QJsonValue(1)).work,
+                     3 + (2 + nodeUnits) + branches * (2 + 1 + nodeUnits));
         }
-        const qint64 nodeUnits = footprintUnits(401 * qint64(sizeof(Node)));
-        QCOMPARE(nodeUnits, qint64(1));
-        QCOMPARE(count(parse("{'allOf': [" + branches + "]}").toObject(), QJsonValue(1)).work,
-                 3 + (2 + nodeUnits) + 400 * (2 + 1 + nodeUnits));
 
-        // Lists through items and $ref, two subschemas for each level: each
-        // level costs the same until the subschemas are 255 deep, and a unit
-        // more for each subschema applied from there on (146 of those for
-        // lists 200 levels deep, 0 to 400 subschemas deep).
+        // Lists through items and $ref, two subschemas (two nodes) for each
+        // level: each level costs the same until the nodes and the frames
+        // of the subschemas the check is in come to 256 KiB, and a unit more
+        // for each subschema applied from there on. Lists 200 levels deep
+        // apply subschemas from 0 to 400 deep, those 100 deep up to 200.
         const QJsonObject lists = parse("{'items': {'$ref': '#'}}").toObject();
         const auto work = [&lists](int levels) {
             return count(lists, parse(QByteArray(levels, '[') + "1" + QByteArray(levels, ']'))).work;
         };
+        const auto deeper = [](int from, int to) {
+            qint64 units = 0;
+            for (int depth = from; depth <= to; ++depth) {
+                units += footprintUnits(2 * qint64(sizeof(Node)) + depth * StackBytesPerApply);
+            }
+            return units;
+        };
+        QCOMPARE(deeper(0, 200), qint64(0));
+        QVERIFY(deeper(201, 400) > 0);
         const qint64 level = (work(100) - work(50)) / 50;
         QCOMPARE(work(100) - work(50), 50 * level);
-        QCOMPARE(work(200), work(100) + 100 * level + 146);
+        QCOMPARE(work(200), work(100) + 100 * level + deeper(201, 400));
     }
 
     void largeTables()
@@ -1290,13 +1374,13 @@ private Q_SLOTS:
         QCOMPARE(counts.lines,
                  QStringList{QStringLiteral(": does not match the schema, and is too large for the server to list "
                                             "each error")});
-        // Walked (3 for each value, 2 more for each object, 2 for each
-        // member and 4 for the lines of its name). The root applied to each
-        // object (4, type 1, 1 for the keywords of objects, and the member
-        // 2 + 4), and the $ref, in place, to the two inner ones (4 + 1 +
-        // 1), and both to the number (2, and 2 + 1 + 1). The error: two names decoded and
-        // scanned for "~" and "/" (2 + 25000 + 25000 each), and a third
-        // token begun (2) that would not fit.
+        // Walked (3 for each value, 2 more for each object, 2 for each member
+        // and 4 for the lines of its name). The root applied to each object
+        // (4, type 1, 1 for the keywords of objects, and the member 2 + 4),
+        // and the $ref, in place, to the two inner ones (4 + 1 + 1), and both
+        // to the number (2, and 2 + 1 + 1). The error: two names decoded and
+        // scanned for "~" and "/" (2 + 25000 + 25000 each), and a third token
+        // begun (2) that would not fit.
         QCOMPARE(counts.work,
                  qint64(3 * (3 + 2 + 2 + 4) + 3 + 3 * (4 + 1 + 1 + 6) + 2 * (4 + 1 + 1) + 2 + (2 + 1 + 1) + 24
                         + 2 * (2 + 400000 / 16 + 400000 / 16) + 2));
