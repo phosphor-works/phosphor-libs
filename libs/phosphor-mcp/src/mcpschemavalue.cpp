@@ -547,12 +547,6 @@ std::size_t hashOf(const char16_t* text, qsizetype size, std::size_t seed)
     return qHash(QStringView(text, size), seed);
 }
 
-// The part of a hash that a slot keeps, beside the bits of its place.
-quint32 tagOf(std::size_t hash)
-{
-    return quint32(quint64(hash) >> 32) ^ quint32(hash);
-}
-
 } // namespace
 
 void NameTable::insert(const QString& name, const QByteArray& utf8, int value)

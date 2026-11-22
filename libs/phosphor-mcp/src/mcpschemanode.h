@@ -137,6 +137,11 @@ private:
         // The seed of the hashes, Qt's global seed when the table was made.
         std::size_t seed = QHashSeed::globalSeed();
     };
+    // The part of a hash that a slot keeps, beside the bits of its place.
+    static constexpr quint32 tagOf(std::size_t hash)
+    {
+        return quint32(quint64(hash) >> 32) ^ quint32(hash);
+    }
     // Whether the name is new to the table.
     template<typename Char>
     bool put(Table<Char>& table, const Char* name, qsizetype size, int value);
@@ -148,6 +153,10 @@ private:
     // Made with the first name, so that a node without a table holds a
     // pointer alone.
     std::unique_ptr<Tables> m_tables;
+
+    // Defined by the tests alone, to read the slots and to make names'
+    // tags and places collide whatever their hashes.
+    friend struct NameTableProbe;
 };
 
 // The JSON types, as bits of Node::types.
