@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QObject>
+#include <QSignalSpy>
 #include <QString>
 #include <QTest>
 #include <QtCore/qtclasshelpermacros.h>
@@ -83,6 +84,15 @@ private Q_SLOTS:
     void unregister_endsSubscriptions();
     void destroyedTarget_endsSubscriptions();
     void subscribe_duplicateIdRejected();
+    void hasSubscribers_none();
+    void hasSubscribers_followsSubscribeAndUnsubscribe();
+    void hasSubscribers_disconnect();
+    void hasSubscribers_unregisteredTarget();
+    void hasSubscribers_destroyedTarget();
+    void hasSubscribers_stop();
+    void subscribersChanged_firstAndLast();
+    void subscribersChanged_fromTheEventLoop();
+    void subscribersChanged_noneForAComeAndGo();
 };
 
 void TestPhosphorIpcSubscribe::subscribe_replies_then_streams_events()
@@ -535,6 +545,300 @@ void TestPhosphorIpcSubscribe::subscribe_duplicateIdRejected()
     const QList<QJsonObject> otherAck = readLines(other, 1);
     QCOMPARE(otherAck.size(), 1);
     QCOMPARE(otherAck.first().value(QStringLiteral("type")).toString(), QStringLiteral("reply"));
+}
+
+namespace {
+
+const QString Count = QStringLiteral("count");
+const QString CountChanged = QStringLiteral("countChanged");
+
+// Subscribes `socket` to count.countChanged under `id`; true on the ack.
+bool subscribeCount(QLocalSocket& socket, qint64 id)
+{
+    send(socket, makeReq(QStringLiteral("subscribe"), id, Count, CountChanged));
+    const QList<QJsonObject> ack = readLines(socket, 1);
+    return ack.size() == 1 && ack.first().value(QStringLiteral("type")).toString() == QStringLiteral("reply");
+}
+
+// Ends the subscription `subscriptionId` of `socket`; true on the ack.
+bool unsubscribe(QLocalSocket& socket, qint64 id, qint64 subscriptionId)
+{
+    send(socket, makeReq(QStringLiteral("unsubscribe"), id, {}, {}, subscriptionId));
+    const QList<QJsonObject> ack = readLines(socket, 1);
+    return ack.size() == 1 && ack.first().value(QStringLiteral("type")).toString() == QStringLiteral("reply");
+}
+
+} // namespace
+
+void TestPhosphorIpcSubscribe::hasSubscribers_none()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QVERIFY(router.start(fx.sockPath));
+
+    // A connection that subscribes to nothing is no subscriber.
+    QLocalSocket socket;
+    QVERIFY(connectClient(socket, fx.sockPath));
+    send(socket, makeReq(QStringLiteral("list"), 1));
+    QCOMPARE(readLines(socket, 1).size(), 1);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QVERIFY(!router.hasSubscribers(QStringLiteral("ghost"), CountChanged));
+
+    // Neither is a subscribe that the router refused.
+    send(socket, makeReq(QStringLiteral("subscribe"), 2, Count, QStringLiteral("ghostSignal")));
+    QCOMPARE(readLines(socket, 1).first().value(QStringLiteral("code")).toString(), QStringLiteral("NO_SUCH_SIGNAL"));
+    QVERIFY(!router.hasSubscribers(Count, QStringLiteral("ghostSignal")));
+}
+
+void TestPhosphorIpcSubscribe::hasSubscribers_followsSubscribeAndUnsubscribe()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    CounterTarget d;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.registerTarget(QStringLiteral("other"), &d));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket a;
+    QLocalSocket b;
+    QVERIFY(connectClient(a, fx.sockPath));
+    QVERIFY(connectClient(b, fx.sockPath));
+
+    QVERIFY(subscribeCount(a, 1));
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+    // The pair is the target and the signal: another signal of the target,
+    // or the signal of another target, has no subscriber.
+    QVERIFY(!router.hasSubscribers(Count, QStringLiteral("resetDone")));
+    QVERIFY(!router.hasSubscribers(QStringLiteral("other"), CountChanged));
+    QVERIFY(!router.hasSubscribers(QStringLiteral("countChanged"), Count));
+
+    // Two subscribers, then one leaves: the other still counts.
+    QVERIFY(subscribeCount(b, 7));
+    QVERIFY(unsubscribe(a, 2, 1));
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+    QVERIFY(unsubscribe(b, 8, 7));
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+
+    // A refused duplicate subscribe adds nothing to the count: one
+    // unsubscribe ends the pair's subscribers.
+    QVERIFY(subscribeCount(a, 3));
+    send(a, makeReq(QStringLiteral("subscribe"), 4, Count, CountChanged));
+    QCOMPARE(readLines(a, 1).first().value(QStringLiteral("code")).toString(), QStringLiteral("MALFORMED_REQUEST"));
+    QVERIFY(unsubscribe(a, 5, 3));
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+
+    // An unsubscribe of an unknown id leaves the count alone.
+    QVERIFY(subscribeCount(b, 9));
+    send(b, makeReq(QStringLiteral("unsubscribe"), 10, {}, {}, 42));
+    QCOMPARE(readLines(b, 1).first().value(QStringLiteral("code")).toString(), QStringLiteral("NO_SUCH_SUBSCRIPTION"));
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+}
+
+void TestPhosphorIpcSubscribe::hasSubscribers_disconnect()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket stays;
+    QVERIFY(connectClient(stays, fx.sockPath));
+    QVERIFY(subscribeCount(stays, 1));
+    {
+        QLocalSocket leaves;
+        QVERIFY(connectClient(leaves, fx.sockPath));
+        QVERIFY(subscribeCount(leaves, 1));
+        leaves.disconnectFromServer();
+        QTRY_COMPARE(router.connectionCount(), 1);
+    }
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+
+    stays.disconnectFromServer();
+    QTRY_COMPARE(router.connectionCount(), 0);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+}
+
+void TestPhosphorIpcSubscribe::hasSubscribers_unregisteredTarget()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket a;
+    QLocalSocket b;
+    QVERIFY(connectClient(a, fx.sockPath));
+    QVERIFY(connectClient(b, fx.sockPath));
+    QVERIFY(subscribeCount(a, 1));
+    QVERIFY(subscribeCount(b, 1));
+
+    // The subscriptions end with the target, at once.
+    router.unregisterTarget(Count, &c);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QCOMPARE(readLines(a, 1).first().value(QStringLiteral("code")).toString(),
+             QString::fromUtf8(ErrorCode::NoSuchTarget));
+
+    // A target registered again under the name starts with none.
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QVERIFY(subscribeCount(a, 2));
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+}
+
+void TestPhosphorIpcSubscribe::hasSubscribers_destroyedTarget()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    auto c = std::make_unique<CounterTarget>();
+    QVERIFY(router.registerTarget(Count, c.get()));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket socket;
+    QVERIFY(connectClient(socket, fx.sockPath));
+    QVERIFY(subscribeCount(socket, 1));
+    c.reset();
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+}
+
+void TestPhosphorIpcSubscribe::hasSubscribers_stop()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket socket;
+    QVERIFY(connectClient(socket, fx.sockPath));
+    QSignalSpy changed(&router, &IpcRouter::subscribersChanged);
+    QVERIFY(subscribeCount(socket, 1));
+    QTRY_COMPARE(changed.count(), 1);
+
+    router.stop();
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QTRY_COMPARE(changed.count(), 2);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+
+    // Started again, the router counts new subscriptions from nothing.
+    QVERIFY(router.start(fx.sockPath));
+    QLocalSocket again;
+    QVERIFY(connectClient(again, fx.sockPath));
+    QVERIFY(subscribeCount(again, 1));
+    QVERIFY(router.hasSubscribers(Count, CountChanged));
+    QVERIFY(unsubscribe(again, 2, 1));
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+}
+
+void TestPhosphorIpcSubscribe::subscribersChanged_firstAndLast()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+    QSignalSpy changed(&router, &IpcRouter::subscribersChanged);
+
+    QLocalSocket a;
+    QLocalSocket b;
+    QVERIFY(connectClient(a, fx.sockPath));
+    QVERIFY(connectClient(b, fx.sockPath));
+
+    // The first subscriber: one signal, naming the pair, with the answer
+    // true by the time it comes.
+    bool answerInSlot = false;
+    QObject::connect(&router, &IpcRouter::subscribersChanged, &router,
+                     [&router, &answerInSlot](const QString& target, const QString& signalName) {
+                         answerInSlot = router.hasSubscribers(target, signalName);
+                     });
+    QVERIFY(subscribeCount(a, 1));
+    QTRY_COMPARE(changed.count(), 1);
+    QCOMPARE(changed.at(0).at(0).toString(), Count);
+    QCOMPARE(changed.at(0).at(1).toString(), CountChanged);
+    QVERIFY(answerInSlot);
+
+    // A second subscriber, and the leave of one of two, change nothing:
+    // they book no announcement at all.
+    QVERIFY(subscribeCount(b, 1));
+    QVERIFY(unsubscribe(a, 2, 1));
+    QCoreApplication::processEvents();
+    QCOMPARE(changed.count(), 1);
+
+    // The last one leaves: one more, with the answer false.
+    b.disconnectFromServer();
+    QTRY_COMPARE(changed.count(), 2);
+    QCOMPARE(changed.at(1).at(0).toString(), Count);
+    QCOMPARE(changed.at(1).at(1).toString(), CountChanged);
+    QVERIFY(!answerInSlot);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+
+    // A refused subscribe sends nothing.
+    send(a, makeReq(QStringLiteral("subscribe"), 3, Count, QStringLiteral("ghostSignal")));
+    QCOMPARE(readLines(a, 1).size(), 1);
+    QCoreApplication::processEvents();
+    QCOMPARE(changed.count(), 2);
+}
+
+void TestPhosphorIpcSubscribe::subscribersChanged_fromTheEventLoop()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+
+    QLocalSocket socket;
+    QVERIFY(connectClient(socket, fx.sockPath));
+    QSignalSpy changed(&router, &IpcRouter::subscribersChanged);
+    QVERIFY(subscribeCount(socket, 1));
+    QTRY_COMPARE(changed.count(), 1);
+
+    // unregisterTarget ends the subscription at once, and the signal
+    // comes later, from the event loop: not inside the call.
+    router.unregisterTarget(Count, &c);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
+    QCOMPARE(changed.count(), 1);
+    QCoreApplication::processEvents();
+    QCOMPARE(changed.count(), 2);
+}
+
+void TestPhosphorIpcSubscribe::subscribersChanged_noneForAComeAndGo()
+{
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    IpcRouter& router = fx.router;
+    CounterTarget c;
+    QVERIFY(router.registerTarget(Count, &c));
+    QVERIFY(router.start(fx.sockPath));
+    QSignalSpy changed(&router, &IpcRouter::subscribersChanged);
+
+    // A subscribe and its unsubscribe in one write: the router handles
+    // both in one read, before the announcement runs, which then finds the
+    // answer as it last told it (false) and sends nothing.
+    QLocalSocket socket;
+    QVERIFY(connectClient(socket, fx.sockPath));
+    socket.write(writeLine(makeReq(QStringLiteral("subscribe"), 1, Count, CountChanged))
+                 + writeLine(makeReq(QStringLiteral("unsubscribe"), 2, {}, {}, 1)));
+    socket.flush();
+    const QList<QJsonObject> acks = readLines(socket, 2);
+    QCOMPARE(acks.size(), 2);
+    QCOMPARE(acks.at(1).value(QStringLiteral("type")).toString(), QStringLiteral("reply"));
+    QCoreApplication::processEvents();
+    QCOMPARE(changed.count(), 0);
+    QVERIFY(!router.hasSubscribers(Count, CountChanged));
 }
 
 QTEST_GUILESS_MAIN(TestPhosphorIpcSubscribe)

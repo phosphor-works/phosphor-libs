@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Subscribe / unsubscribe / broadcast / targeted-event paths for
-// IpcRouter. All four methods are members of IpcRouter and reach into its
-// per-connection state (the subscriptions, the connection ids); the split
-// from ipcrouter.cpp is purely organisational. Meta-helpers and the
-// per-connection caps live in ipcrouterdetail.h: dispatch() and
-// handleSubscribe() share the introspection floor, and broadcastEvent()
-// and sendEvent() the output limit.
+// IpcRouter, and the subscriber counts behind hasSubscribers. The methods
+// are members of IpcRouter and reach into its per-connection state (the
+// subscriptions, the connection ids); the split from ipcrouter.cpp is
+// purely organisational. Meta-helpers and the per-connection caps live in
+// ipcrouterdetail.h: dispatch() and handleSubscribe() share the
+// introspection floor, and broadcastEvent() and sendEvent() the output
+// limit.
 
 #include <PhosphorIpc/IpcRouter.h>
 
@@ -103,6 +104,7 @@ void IpcRouter::handleSubscribe(QLocalSocket* socket, qint64 id, const QString& 
     sub.target = targetName;
     sub.signalName = signalName;
     subs.append(sub);
+    countSubscription(sub);
 
     // Acknowledge the subscription is live so the client knows to
     // start streaming events.
@@ -120,6 +122,7 @@ void IpcRouter::handleUnsubscribe(QLocalSocket* socket, qint64 id, qint64 subscr
     QList<Subscription>& subs = it.value();
     for (int i = 0; i < subs.size(); ++i) {
         if (subs.at(i).subscriptionId == subscriptionId) {
+            uncountSubscription(subs.at(i));
             subs.removeAt(i);
             socket->write(writeLine(buildReply(id, QJsonValue::Null)));
             return;
@@ -127,6 +130,78 @@ void IpcRouter::handleUnsubscribe(QLocalSocket* socket, qint64 id, qint64 subscr
     }
     socket->write(writeLine(buildError(id, QString::fromUtf8(ErrorCode::NoSuchSubscription),
                                        QStringLiteral("unknown subscriptionId %1").arg(subscriptionId))));
+}
+
+bool IpcRouter::hasSubscribers(const QString& targetName, const QString& signalName) const
+{
+    return m_subscriberCounts.contains(SubscriberKey(targetName, signalName));
+}
+
+void IpcRouter::countSubscription(const Subscription& subscription)
+{
+    const SubscriberKey key(subscription.target, subscription.signalName);
+    int& count = m_subscriberCounts[key];
+    if (++count == 1) {
+        bookSubscribersChange(key);
+    }
+}
+
+void IpcRouter::uncountSubscription(const Subscription& subscription)
+{
+    const SubscriberKey key(subscription.target, subscription.signalName);
+    const auto it = m_subscriberCounts.find(key);
+    Q_ASSERT(it != m_subscriberCounts.end());
+    if (it == m_subscriberCounts.end()) {
+        return;
+    }
+    if (--it.value() == 0) {
+        m_subscriberCounts.erase(it);
+        bookSubscribersChange(key);
+    }
+}
+
+void IpcRouter::uncountAllSubscriptions()
+{
+    for (auto it = m_subscriberCounts.cbegin(); it != m_subscriberCounts.cend(); ++it) {
+        bookSubscribersChange(it.key());
+    }
+    m_subscriberCounts.clear();
+}
+
+void IpcRouter::bookSubscribersChange(const SubscriberKey& key)
+{
+    // One queued announcement serves every change booked before it runs,
+    // as connectionGone does for closes. A pair that changes back before
+    // then stays booked, and announceSubscribers finds nothing to tell.
+    const bool firstBooked = m_subscribersToAnnounce.isEmpty();
+    m_subscribersToAnnounce.insert(key);
+    if (firstBooked) {
+        QMetaObject::invokeMethod(this, &IpcRouter::announceSubscribers, Qt::QueuedConnection);
+    }
+}
+
+void IpcRouter::announceSubscribers()
+{
+    // One pair at a time, not a range loop: a slot may change the
+    // subscriptions (unregisterTarget, stop()), which books more pairs
+    // while these are being sent. A slot that destroys the router ends
+    // the loop, as in announceClosedConnections.
+    const QPointer<IpcRouter> self(this);
+    while (self && !m_subscribersToAnnounce.isEmpty()) {
+        const auto first = m_subscribersToAnnounce.begin();
+        const SubscriberKey key = *first;
+        m_subscribersToAnnounce.erase(first);
+        const bool subscribed = m_subscriberCounts.contains(key);
+        if (subscribed == m_announcedSubscribed.contains(key)) {
+            continue;
+        }
+        if (subscribed) {
+            m_announcedSubscribed.insert(key);
+        } else {
+            m_announcedSubscribed.remove(key);
+        }
+        Q_EMIT subscribersChanged(key.first, key.second);
+    }
 }
 
 void IpcRouter::broadcastEvent(const QString& targetName, const QString& signalName, const QJsonArray& args)
@@ -137,6 +212,9 @@ void IpcRouter::broadcastEvent(const QString& targetName, const QString& signalN
     Q_ASSERT(onRouterThread);
     if (!onRouterThread) {
         qWarning("PhosphorIpc::IpcRouter::broadcastEvent: called off the router's thread; the event is dropped");
+        return;
+    }
+    if (!hasSubscribers(targetName, signalName)) {
         return;
     }
     // Snapshot the matching (socket, subscriptionId) pairs BEFORE
@@ -151,7 +229,8 @@ void IpcRouter::broadcastEvent(const QString& targetName, const QString& signalN
     //
     // Iteration is O(N subscriptions); for the expected per-process
     // subscription count (≤ ~50 in any realistic shell deployment)
-    // the linear scan is cheaper than maintaining a secondary index.
+    // the linear scan is cheaper than an index of subscribers. The
+    // counts behind hasSubscribers end a broadcast with none above.
     struct PendingSend
     {
         QPointer<QLocalSocket> socket;

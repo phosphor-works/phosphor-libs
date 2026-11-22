@@ -236,6 +236,7 @@ void IpcRouter::stop(StopMode mode, int flushTimeoutMs)
     // are booked here, once, after the sockets are closed.
     QList<quint64> closed = m_socketByConnectionId.keys();
     std::sort(closed.begin(), closed.end());
+    uncountAllSubscriptions();
     m_subscriptionsBySocket.clear();
     m_malformedCountBySocket.clear();
     m_connectionBySocket.clear();
@@ -398,6 +399,7 @@ void IpcRouter::endSubscriptionsTo(const QString& name)
                 socket->write(writeLine(buildError(sub->subscriptionId, QString::fromUtf8(ErrorCode::NoSuchTarget),
                                                    QStringLiteral("target '%1' was unregistered").arg(name))));
             }
+            uncountSubscription(*sub);
             sub = list.erase(sub);
         }
     }
@@ -749,7 +751,10 @@ void IpcRouter::handleClientDisconnected(QLocalSocket* socket)
     // record so memory doesn't grow with churn. The malformed-frame
     // counter is the same shape; clear it too so the per-socket
     // map size stays bounded by live connections.
-    m_subscriptionsBySocket.remove(socket);
+    const QList<Subscription> subscriptions = m_subscriptionsBySocket.take(socket);
+    for (const Subscription& subscription : subscriptions) {
+        uncountSubscription(subscription);
+    }
     m_malformedCountBySocket.remove(socket);
     // The connection's id goes, so sendEvent and pending replies find it
     // closed, and so do its deferred calls, whose answers have nowhere to

@@ -22,6 +22,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 QT_BEGIN_NAMESPACE
 class QLocalServer;
@@ -73,6 +74,8 @@ namespace PhosphorIpc {
 //     destroying the QObject").
 //   - Subscribers are tracked per-(target, signal-name, socket)
 //     tuple. Socket disconnect auto-prunes the subscriber set.
+//     hasSubscribers() tells a target whether an event has anyone to
+//     go to, and subscribersChanged() when that answer changes.
 //   - Do not destroy the router from inside a call it runs or a signal
 //     it emits (a target method, a connectionClosed slot): it is still
 //     on the stack. stop() is fine there. So is deleteLater(), except
@@ -233,6 +236,18 @@ public:
     // thread it sends nothing (with a warning; debug builds assert).
     void broadcastEvent(const QString& target, const QString& signalName, const QJsonArray& args);
 
+    // Whether a client connection subscribes to (target, signalName) now:
+    // whether broadcastEvent(target, signalName, ...) has anyone to write
+    // to. A target that builds its events at some cost (merges them, runs
+    // a timer for them) asks before it does, and skips the work while the
+    // answer is false. A subscription counts from the subscribe that the
+    // router accepted until its unsubscribe, the close of its connection
+    // (once the router has seen it), the end of the target's subscriptions
+    // (unregisterTarget, or the destruction of the target object) or
+    // stop(). The router keeps a count for each (target, signal), so the
+    // call costs one hash lookup, whatever the number of connections.
+    [[nodiscard]] bool hasSubscribers(const QString& target, const QString& signalName) const;
+
     // Write one event to the client connection `connectionId`, whether
     // or not it subscribed to anything:
     //   {"type":"event","target":<target>,"signal":<signalName>,"args":[...]}
@@ -293,6 +308,17 @@ Q_SIGNALS:
     // declared after the router are gone. Declare the router after the
     // state the slot uses, or disconnect before the router goes.
     void connectionClosed(quint64 connectionId);
+    // hasSubscribers(target, signalName) changed: the first subscriber to
+    // the pair came, or the last one went. A target starts or stops the
+    // work that builds the pair's events here. Sent from the event loop,
+    // as connectionClosed is, and never synchronously from inside a call
+    // into the router (unregisterTarget, stop(), or the close of a
+    // connection in broadcastEvent or sendEvent). Sent only when the
+    // answer differs from the one the previous subscribersChanged of the
+    // pair told (none: false), so a subscriber that comes and goes before
+    // the event loop runs sends nothing. Read the answer with
+    // hasSubscribers(). The router's destructor sends none.
+    void subscribersChanged(const QString& target, const QString& signalName);
 
 private:
     friend class IpcCallContext;
@@ -349,6 +375,23 @@ private:
         QString target;
         QString signalName;
     };
+    // (target, signalName): the key of the subscriber counts.
+    using SubscriberKey = std::pair<QString, QString>;
+
+    // Count a subscription that was added to, or is being taken out of,
+    // m_subscriptionsBySocket. Every path that changes the lists calls
+    // one of them, so the counts match the lists. They book the pairs
+    // whose answer of hasSubscribers changed for announceSubscribers, and
+    // emit nothing themselves: they run inside router calls and inside
+    // loops over the lists.
+    void countSubscription(const Subscription& subscription);
+    void uncountSubscription(const Subscription& subscription);
+    // uncountSubscription for every subscription, for stop().
+    void uncountAllSubscriptions();
+    void bookSubscribersChange(const SubscriberKey& key);
+    // Sends subscribersChanged, from the event loop, for each booked pair
+    // whose answer differs from the one it told last.
+    void announceSubscribers();
 
     void handleNewConnection();
     // Runs readFrames for `socket`, unless a dispatch on it is on the
@@ -389,6 +432,13 @@ private:
     // Per-socket subscription list; lets disconnect cleanup walk one
     // socket's subscriptions without scanning the whole router.
     QHash<QLocalSocket*, QList<Subscription>> m_subscriptionsBySocket;
+    // The subscriptions to each (target, signal) across every socket: an
+    // entry while the count is above 0. hasSubscribers reads it.
+    QHash<SubscriberKey, int> m_subscriberCounts;
+    // The pairs that subscribersChanged last told had subscribers, and the
+    // pairs whose answer changed since announceSubscribers last ran.
+    QSet<SubscriberKey> m_announcedSubscribed;
+    QSet<SubscriberKey> m_subscribersToAnnounce;
     // Per-socket consecutive malformed-frame counter. Reset to zero
     // on a successfully-parsed frame; closes the connection when the
     // count exceeds detail::MaxConsecutiveMalformedFrames so a peer can't
