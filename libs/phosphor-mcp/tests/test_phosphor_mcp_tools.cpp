@@ -1083,10 +1083,10 @@ private Q_SLOTS:
         // server's own verdicts, which the README gives: an integer past
         // qint64 where the schema asks for an integer (one that Qt's parser
         // rounds to 2^63 too), and an unpaired surrogate in a string or a
-        // name, are refused, and an integer divisor of multipleOf past 2^53
-        // divides a value written with a fraction exactly. Python's
-        // jsonschema disagrees with seven of them, and agrees with every
-        // other row.
+        // name, are refused, and a whole divisor of multipleOf, past 2^53 or
+        // written with an exponent, divides exactly where Python divides as
+        // floats. Python's jsonschema disagrees with the eight of them, and
+        // agrees with every other row.
         QTest::addColumn<QByteArray>("property");
         QTest::addColumn<QByteArray>("value");
         QTest::addColumn<bool>("accepted");
@@ -1126,7 +1126,8 @@ private Q_SLOTS:
         row("enum number", "{'enum': [1, 2]}", "2", true);
         row("enum refuses", "{'enum': [1, 2]}", "3", false);
         row("enum string", "{'enum': ['tab', 'split']}", "'tab'", true);
-        // Departure: an unpaired surrogate.
+        // An unpaired surrogate, refused before the check. Python refuses
+        // it too, as a string that is not in the enum.
         row("enum unpaired surrogate", "{'enum': ['tab', 'split']}", "'t\\ud800ab'", false);
         row("enum of many strings", "{'enum': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']}", "'j'", true);
         row("enum of many strings refuses", "{'enum': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']}", "'k'",

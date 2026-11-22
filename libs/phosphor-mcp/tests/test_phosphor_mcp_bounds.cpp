@@ -29,8 +29,8 @@ namespace {
 
 // AddressSanitizer grows each frame of the check's recursion, more when it
 // is optimized: a build at -O1 refuses lists 500 levels deep at the bound of
-// the check's own stack, and one at -O0, as CI's sanitizer build is, passes
-// them. Such a build checks the lists that pass below half as deep.
+// the check's own stack. A build with AddressSanitizer checks lists half as
+// deep, which pass in every build.
 #if defined(__SANITIZE_ADDRESS__)
 constexpr bool Sanitized = true;
 #elif defined(__has_feature)
@@ -43,7 +43,6 @@ constexpr bool Sanitized = false;
 constexpr bool Sanitized = false;
 #endif
 constexpr int ListLevels = Sanitized ? 250 : 500;
-constexpr int ChainedLevels = Sanitized ? 75 : 150;
 
 // JSON with single quotes for double ones.
 QByteArray json(QByteArray text)
@@ -224,14 +223,12 @@ private Q_SLOTS:
                 + QStringLiteral("/0").repeated(ListLevels) + QStringLiteral(": must be of type array or integer");
         // ...and through three $ref more, five subschemas for each level, so
         // that 3000 subschemas deep are 600 levels, with the root and "a".
-        // The stack bound stops a build with sanitizers sooner (see
-        // Sanitized).
+        // Lists 150 levels deep pass in every build, AddressSanitizer's too.
         const QJsonObject chained = parse(
             "{'type': 'object', 'properties': {'a': {'$ref': '#/$defs/n'}}, '$defs': {'n': {'type': ['array', "
             "'integer'], 'items': {'$ref': '#/$defs/b'}}, 'b': {'$ref': '#/$defs/c'}, 'c': {'$ref': '#/$defs/d'}, "
             "'d': {'$ref': '#/$defs/n'}}}");
-        QTest::newRow("lists through $ref, deep")
-            << chained << "{'a': " + nest(ChainedLevels, "[", "]") + "}" << QString();
+        QTest::newRow("lists through $ref, deep") << chained << "{'a': " + nest(150, "[", "]") + "}" << QString();
         QTest::newRow("lists through $ref, 700 deep")
             << chained << "{'a': " + nest(700, "[", "]") + "}" << TooLargeToCheck;
 
