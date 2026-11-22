@@ -1094,6 +1094,14 @@ private Q_SLOTS:
             counts.work,
             qint64(15 + 4 + 1 + 1 + (1 + 4) + (2 + 2) + 2 * 2 * (2 + 2 * (1 + 1)) + (2 + 1 + 1 + 2) + (2 + 1 + 2 + 2)));
         QCOMPARE(counts.memory, qint64(2 * 2 * SortedBytes));
+        // Each comparison releases the members it sorted: an enum of an
+        // object with another value, then of the same object, sorts both
+        // objects twice and holds them once.
+        QJsonObject other = built;
+        other.insert(letter, 3);
+        const Counts twice = count(QJsonObject{{QLatin1StringView("enum"), QJsonArray{other, built}}}, parsed);
+        QCOMPARE(twice.lines, QStringList());
+        QCOMPARE(twice.memory, qint64(2 * 2 * SortedBytes));
     }
 
     void valuesCompared_data()
