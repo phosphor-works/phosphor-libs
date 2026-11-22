@@ -1469,7 +1469,8 @@ private Q_SLOTS:
 
         // The hashes are keyed by Qt's global seed when the table's first
         // name was inserted, which the table keeps: under another seed the
-        // same names take other places or tags.
+        // same names take other places or tags, in each encoding, and a name
+        // inserted under another seed is found by the table's.
         const QStringList names{QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c"), QStringLiteral("d")};
         QHashSeed::setDeterministicGlobalSeed();
         NameTable fixed;
@@ -1489,6 +1490,11 @@ private Q_SLOTS:
         }
         QVERIFY(NameTableProbe::takenUtf8(fixed) != NameTableProbe::takenUtf8(random));
         QVERIFY(NameTableProbe::takenUtf16(fixed) != NameTableProbe::takenUtf16(random));
+        fixed.insert(QStringLiteral("e"), 4);
+        QCOMPARE(valueOf(fixed, QStringLiteral("e")), 4);
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            QCOMPARE(valueOf(fixed, names.at(i)), int(i));
+        }
     }
 
     void textIsTheSameInEveryEncoding()
