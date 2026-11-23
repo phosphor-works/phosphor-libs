@@ -1,15 +1,19 @@
 # SPDX-FileCopyrightText: 2026 fuddlesworth
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-# Phosphor libraries: LGPL Qt6 and Wayland libraries for window placement,
-# rendering, layer-shell surfaces and desktop shells.
+# Phosphor libraries: LGPL Qt6 and Wayland libraries for rendering, layer-shell
+# surfaces, desktop shells and the foundations window placement builds on. The
+# placement engines themselves (zones, tiles, workspaces, the snap, tile and
+# scroll engines, the engine runtime) are in phosphor-engine-libs, which builds
+# on this tree.
 #
 # Two ways in:
 #
 #   * On its own. cmake --workflow --preset dev configures, builds and tests
 #     every library here, with nothing else checked out.
 #   * As a subproject of an app. PlasmaZones and Afterglow pin one commit of
-#     this repository and add it with CPM (CPMAddPackage), so the app's own
+#     this repository and add it with CPM (CPMAddPackage), before any tree that
+#     builds on it (phosphor-engine-libs, phosphor-shell-libs), so the app's own
 #     find_package and target_link_libraries calls resolve to the targets
 #     declared here. CPM's -DCPM_phosphor-libs_SOURCE=<dir> builds a local
 #     checkout instead of the pinned one.
@@ -180,8 +184,8 @@ add_subdirectory(libs/phosphor-fsloader)    # filesystem-backed loader scaffoldi
 # (else find_package resolves a stale installed copy). Depends on phosphor-fsloader.
 add_subdirectory(libs/phosphor-registry)    # generic Registry<T> + 5 factory interfaces + plugin loader
 add_subdirectory(libs/phosphor-rules)  # unified window/context rule engine (MatchExpression, RuleEvaluator) - depends on phosphor-identity + phosphor-protocol + phosphor-fsloader
-add_subdirectory(libs/phosphor-layout-api)  # shared layout-preview contract (LayoutPreview, ILayoutSource)
-add_subdirectory(libs/phosphor-config)      # schema-driven configuration + migration runner - needed by phosphor-zones
+add_subdirectory(libs/phosphor-layout-api)  # shared layout contract (LayoutPreview, ILayoutSource, the layout-file keys)
+add_subdirectory(libs/phosphor-config)      # schema-driven configuration + migration runner
 add_subdirectory(libs/phosphor-shaders)     # shader-domain primitives (BaseUniforms, IUniformExtension, ShaderRegistry)
 add_subdirectory(libs/phosphor-surface)     # surface-shader pack subsystem (SurfaceShaderContract/Effect/Registry) - depends on phosphor-shaders/registry/fsloader
 add_subdirectory(libs/phosphor-pointer)     # pointer-shader pack subsystem (PointerShaderContract/Effect/Registry, PointerHistory) - depends on phosphor-shaders/registry/fsloader
@@ -194,11 +198,8 @@ add_subdirectory(libs/phosphor-wayland)       # Wayland layer-shell QPA plugin +
 # is already unconditional.
 add_subdirectory(libs/phosphor-service-idle)  # Wayland idle monitoring + inhibition
 add_subdirectory(libs/phosphor-geometry)    # pure geometry math (coordinate transforms, overlap, min-size) - needed by phosphor-screens (swapper directional selector)
-add_subdirectory(libs/phosphor-screens)     # screen-topology + virtual-screen subdivision - needed by phosphor-zones
-add_subdirectory(libs/phosphor-zones)       # zone primitives + LayoutManager (depends on phosphor-config IBackend, phosphor-screens ScreenIdentity)
-add_subdirectory(libs/phosphor-context-resolver) # frozen-snapshot per-screen mode + disable/lock cascade façade (depends on phosphor-zones for AssignmentEntry::Mode)
+add_subdirectory(libs/phosphor-screens)     # screen-topology + virtual-screen subdivision
 add_subdirectory(libs/phosphor-scripting)   # generic embedded Luau host (engine, sandbox, watchdog, marshalling) — vendored extern/luau
-add_subdirectory(libs/phosphor-tiles)       # auto-tiling algorithm primitives (TilingAlgorithm, AlgorithmRegistry, SplitTree)
 add_subdirectory(libs/phosphor-rendering)   # GPU shader rendering via Qt RHI
 add_subdirectory(libs/phosphor-surface-quick) # Qt Quick consumer of surface packs (SurfaceShaderItem + the org.phosphor.surface module) - depends on phosphor-rendering/surface/shaders
 add_subdirectory(libs/phosphor-layer)       # wlr-layer-shell surface lifecycle management
@@ -230,182 +231,8 @@ add_subdirectory(libs/phosphor-animation)   # unified animation library: motion 
 add_subdirectory(libs/phosphor-audio)       # audio spectrum provider (CAVA backend)
 add_subdirectory(libs/phosphor-surfaces)    # managed surface lifecycle (engine, keep-alive, scope gen)
 add_subdirectory(libs/phosphor-overlay)     # per-screen shell-host + slot mechanism (rides on layer/shell-patterns/surfaces/animation/screens)
-# Order still matters below. The shell libraries (in PlasmaZones' tree until
-# they move here) link PhosphorWorkspaces, and phosphor-workspaces links
-# PhosphorEngine, so a consumer that adds this tree before its own targets
-# finds both already declared. Their own dependencies (identity, protocol,
-# layout-api, geometry) are all declared further up.
-add_subdirectory(libs/phosphor-engine)  # unified placement engine contracts + window registry (SHARED lib)
-add_subdirectory(libs/phosphor-workspaces)  # virtual desktop / workspace management
-add_subdirectory(libs/phosphor-tile-engine) # autotile placement engine (IAutotileSettings + engine code)
-add_subdirectory(libs/phosphor-snap-engine) # zone-based snap placement engine
-add_subdirectory(libs/phosphor-scroll-engine) # niri-style scrolling placement engine (strip model + engine)
-
-add_subdirectory(libs/phosphor-placement)   # window placement state tracking
 add_subdirectory(libs/phosphor-compositor)  # compositor-plugin SDK
 add_subdirectory(libs/phosphor-control) # reusable Qt6/QML/Kirigami settings-app framework (page controllers, registry, chrome)
-add_subdirectory(libs/phosphor-zone-rendering) # zone overlays drawn with shader packs (ZoneShaderItem) - depends on rendering/shaders/zones
-add_subdirectory(libs/phosphor-engine-runtime) # the placement engine runtime a host embeds - depends on the engines, zones, screens, config, animation, layer/overlay/surfaces and zone rendering
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Engine QML firewall
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Canonical list of engine library target names. Consumed by the
-# engine QML firewall below. Kept in sync with the engine
-# add_subdirectory calls above by hand; the firewall FATAL_ERRORs naming any
-# entry that matches no target, so a single renamed engine cannot quietly
-# stop being guarded.
-set(PHOSPHOR_ENGINE_TARGETS
-    PhosphorZones
-    PhosphorSnapEngine
-    PhosphorTileEngine
-    PhosphorScrollEngine
-    PhosphorEngine
-    PhosphorWorkspaces
-    PhosphorWorkspacesPlasma
-    PhosphorPlacement
-)
-
-# ─── Engine QML firewall ─────────────────────────────────────────────────────
-#
-# Engine libraries hold authoritative placement/snap/zone state and must
-# stay free of the QML/JS engine. The moment one of them links Qt6::Qml or
-# Qt6::Quick, the cost model changes: every QObject in the engine gets a
-# JS scope, bindings cross language boundaries, and ownership becomes
-# implicit through QQmlEngine. That's the trajectory Noctalia couldn't
-# escape, their engines and config were both QML, so multi-day uptime
-# leaks (FD exhaustion, GC pauses, JSValue retention across reloads) had
-# nowhere to be fixed without a full rewrite.
-#
-# Refuse to configure if any engine target reaches Qml/Quick anywhere in its
-# link closure: its own direct links (PUBLIC and PRIVATE), then the
-# INTERFACE_LINK_LIBRARIES of every target those name, recursively, through
-# in-tree libraries and imported Qt targets alike. A check over the direct
-# lists alone let PhosphorRegistry's PUBLIC Qt6::Qml reach every engine
-# through PhosphorEngine -> PhosphorLayoutApi -> PhosphorRegistry, so the
-# engines compiled with QT_QML_LIB while this guard reported them clean. The
-# failure names the whole chain, so the offending edge is visible.
-#
-# Every entry must also match a real target, so the firewall can't
-# silently degrade if PHOSPHOR_ENGINE_TARGETS goes stale (e.g. an engine
-# lib gets renamed but the list doesn't follow). An unmatched entry would
-# let a future Qml link into that engine through unnoticed, which is
-# exactly the failure mode the rationale above is designed to prevent.
-
-# Strip the link-list wrappers that carry a target name through to the link
-# step, and answer the bare item. Directory-scope markers (`::@...`, recorded
-# when target_link_libraries runs in a directory other than the target's) and
-# install-only entries answer empty, since neither names a build-tree target.
-function(_phosphor_engine_link_item _raw _out)
-    set(_item "${_raw}")
-    if(_item MATCHES "^::@" OR _item MATCHES "^\\$<INSTALL_INTERFACE:")
-        set(${_out} "" PARENT_SCOPE)
-        return()
-    endif()
-    while(_item MATCHES "^\\$<(LINK_ONLY|BUILD_INTERFACE|BUILD_LOCAL_INTERFACE):(.*)>$")
-        set(_item "${CMAKE_MATCH_2}")
-    endwhile()
-    if(TARGET "${_item}")
-        get_target_property(_aliased "${_item}" ALIASED_TARGET)
-        if(_aliased)
-            set(_item "${_aliased}")
-        endif()
-    endif()
-    set(${_out} "${_item}" PARENT_SCOPE)
-endfunction()
-
-# Breadth-first walk of <engine>'s link closure. Sets <out> to the chain
-# "engine -> ... -> Qt6::Qml" for the first Qml/Quick target reached, or to
-# empty when the closure is clean. Each target is visited once, so a diamond in
-# the graph costs nothing extra and a cycle cannot loop.
-function(_phosphor_engine_qml_chain _engine _out)
-    set(_queue "")
-    set(_seen "${_engine}")
-    get_target_property(_direct ${_engine} LINK_LIBRARIES)
-    if(NOT _direct)
-        set(_direct "")
-    endif()
-    get_target_property(_iface ${_engine} INTERFACE_LINK_LIBRARIES)
-    if(_iface)
-        list(APPEND _direct ${_iface})
-    endif()
-    foreach(_raw IN LISTS _direct)
-        _phosphor_engine_link_item("${_raw}" _item)
-        if(_item STREQUAL "" OR _item IN_LIST _seen)
-            continue()
-        endif()
-        list(APPEND _seen "${_item}")
-        list(APPEND _queue "${_item}")
-        string(MAKE_C_IDENTIFIER "${_item}" _key)
-        set(_p_via_${_key} "${_engine}")
-    endforeach()
-    while(_queue)
-        list(POP_FRONT _queue _node)
-        if(_node MATCHES "^Qt6?::(Qml|Quick)(Private)?$")
-            set(_chain "${_node}")
-            set(_cursor "${_node}")
-            while(NOT _cursor STREQUAL _engine)
-                string(MAKE_C_IDENTIFIER "${_cursor}" _key)
-                set(_cursor "${_p_via_${_key}}")
-                set(_chain "${_cursor} -> ${_chain}")
-            endwhile()
-            set(${_out} "${_chain}" PARENT_SCOPE)
-            return()
-        endif()
-        if(NOT TARGET "${_node}")
-            continue()
-        endif()
-        get_target_property(_next "${_node}" INTERFACE_LINK_LIBRARIES)
-        if(NOT _next)
-            continue()
-        endif()
-        foreach(_raw IN LISTS _next)
-            _phosphor_engine_link_item("${_raw}" _item)
-            if(_item STREQUAL "" OR _item IN_LIST _seen)
-                continue()
-            endif()
-            list(APPEND _seen "${_item}")
-            list(APPEND _queue "${_item}")
-            string(MAKE_C_IDENTIFIER "${_item}" _key)
-            set(_p_via_${_key} "${_node}")
-        endforeach()
-    endwhile()
-    set(${_out} "" PARENT_SCOPE)
-endfunction()
-
-set(_p_engine_unmatched "")
-foreach(_p_engine_lib IN LISTS PHOSPHOR_ENGINE_TARGETS)
-    if(NOT TARGET ${_p_engine_lib})
-        list(APPEND _p_engine_unmatched ${_p_engine_lib})
-        continue()
-    endif()
-    _phosphor_engine_qml_chain(${_p_engine_lib} _p_engine_chain)
-    if(_p_engine_chain)
-        message(FATAL_ERROR
-            "Engine library '${_p_engine_lib}' reaches the QML engine through "
-            "its link closure: ${_p_engine_chain}. Engine libs must stay "
-            "QML-free, see the comment above this check in phosphor-libs' CMakeLists.txt "
-            "for the rationale. Drop the Qml/Quick edge from the library that "
-            "carries it, or move the engine's dependency off that library.")
-    endif()
-endforeach()
-if(_p_engine_unmatched)
-    # PER-ENTRY, not "did anything match". Every name in the list is an
-    # unconditional target by this point in the file, so a name that matches
-    # nothing means that ONE engine silently stopped being guarded while the
-    # others still are — the realistic staleness mode, and one a
-    # matched-anything check sails straight past.
-    message(FATAL_ERROR
-        "Engine QML firewall matched no target for: ${_p_engine_unmatched}. "
-        "Those entries of PHOSPHOR_ENGINE_TARGETS guard nothing, so a Qml "
-        "link into them would go unnoticed. Either the library was renamed "
-        "without updating the list, the add_subdirectory order changed so it "
-        "has not been declared yet at this point, or it got gated behind an "
-        "option that is currently OFF. Update PHOSPHOR_ENGINE_TARGETS to "
-        "match the real engine target names, or move this firewall block "
-        "below the add_subdirectory calls that declare the engines.")
-endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Top-level finish

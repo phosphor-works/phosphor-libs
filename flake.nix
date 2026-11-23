@@ -1,5 +1,5 @@
 {
-  description = "LGPL Qt 6 and Wayland libraries for window placement, rendering and layer-shell surfaces";
+  description = "LGPL Qt 6 and Wayland libraries for rendering, layer-shell surfaces and desktop shells";
 
   # The same nixpkgs as PlasmaZones' flake.lock, so both build against one Qt.
   inputs = {
