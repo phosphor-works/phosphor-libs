@@ -5,6 +5,7 @@
 #include <PhosphorZones/Layout.h>
 #include <PhosphorZones/ZoneJsonKeys.h>
 #include <PhosphorZones/ZoneDefaults.h>
+#include <PhosphorLayoutApi/FixedGeometry.h>
 #include "zoneslogging.h"
 #include <QJsonArray>
 #include <cmath>
@@ -206,9 +207,7 @@ QRectF Zone::computeAbsoluteGeometry(ZoneGeometryMode mode, const QRectF& relati
 
 QRectF Zone::fixedGeometryToLogical(const QRectF& fixedGeometry, qreal divisor)
 {
-    // A non-positive divisor is no unit at all and reads as logical.
-    const qreal d = divisor > 0.0 ? divisor : 1.0;
-    return QRectF(fixedGeometry.x() / d, fixedGeometry.y() / d, fixedGeometry.width() / d, fixedGeometry.height() / d);
+    return PhosphorLayout::fixedGeometryToLogical(fixedGeometry, divisor);
 }
 
 qreal Zone::fixedGeometryDivisor(qreal screenScale) const

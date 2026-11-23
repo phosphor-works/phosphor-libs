@@ -256,11 +256,10 @@ public:
     qreal fixedGeometryDivisor(qreal screenScale) const;
 
     /// @p fixedGeometry in logical units: every component divided by
-    /// @p divisor, a non-positive one reading as 1.0. The one place the
-    /// division is written, shared by the absolute, normalized, bounding-box
-    /// and gap-edge readers and by the shell's placement-map parser
-    /// (PhosphorShell::PlacementMapParser::parseSnappingLayout) so none of
-    /// them can resolve the unit differently.
+    /// @p divisor, a non-positive one reading as 1.0. Forwards to
+    /// PhosphorLayout::fixedGeometryToLogical (PhosphorLayoutApi/FixedGeometry.h),
+    /// the one place the division is written, which the shell's placement-map
+    /// parser calls too, so none of them can resolve the unit differently.
     static QRectF fixedGeometryToLogical(const QRectF& fixedGeometry, qreal divisor);
 
     /**
