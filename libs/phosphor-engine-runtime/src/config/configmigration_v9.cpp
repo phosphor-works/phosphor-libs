@@ -6,6 +6,7 @@
 #include <PhosphorEngineRuntime/ConfigKeys.h>
 #include <PhosphorEngineRuntime/ConfigMigrationUtil.h>
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
