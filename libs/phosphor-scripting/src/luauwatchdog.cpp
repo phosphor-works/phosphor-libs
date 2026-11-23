@@ -3,9 +3,30 @@
 
 #include <PhosphorScripting/LuauWatchdog.h>
 
+#include <algorithm>
+
+#include <pthread.h>
+
 namespace PhosphorScripting {
 
 using Clock = std::chrono::steady_clock;
+
+namespace {
+// The shortest wait between two reads of a thread's CPU clock. Without it a
+// call a few microseconds short of its budget would wake the watchdog in a
+// loop; with it, the interrupt is at most this late in CPU time.
+constexpr auto MinCpuRecheck = std::chrono::milliseconds(1);
+
+bool readCpuClock(clockid_t clock, std::chrono::nanoseconds* now)
+{
+    timespec ts{};
+    if (clock_gettime(clock, &ts) != 0) {
+        return false;
+    }
+    *now = std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
+    return true;
+}
+} // namespace
 
 LuauWatchdog::LuauWatchdog()
 {
@@ -36,6 +57,7 @@ void LuauWatchdog::registerFlag(const void* key, std::shared_ptr<std::atomic<boo
         Entry& entry = m_entries[key];
         entry.flag = std::move(flag);
         entry.deadline = Clock::time_point::max();
+        entry.onThreadCpu = false;
         ++entry.generation;
     }
     m_cv.notify_all();
@@ -50,21 +72,33 @@ void LuauWatchdog::unregister(const void* key)
     m_cv.notify_all();
 }
 
-void LuauWatchdog::arm(const void* key, int timeoutMs)
+void LuauWatchdog::arm(const void* key, int timeoutMs, WatchdogClock clock)
 {
     if (timeoutMs <= 0) {
         return;
     }
+    const std::chrono::milliseconds budget(timeoutMs);
+    clockid_t cpuClock{};
+    const bool wantCpu = clock == WatchdogClock::ThreadCpu && pthread_getcpuclockid(pthread_self(), &cpuClock) == 0;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_entries.find(key);
         if (it == m_entries.end()) {
             return;
         }
+        Entry& entry = it->second;
+        std::chrono::nanoseconds cpuNow{0};
+        entry.onThreadCpu = wantCpu && readCpuClock(cpuClock, &cpuNow);
+        if (entry.onThreadCpu) {
+            entry.cpuClock = cpuClock;
+            entry.cpuDeadline = cpuNow + budget;
+        }
         // Compute the deadline inside the lock so contention can't push it into
-        // the past and fire a spurious interrupt.
-        it->second.deadline = Clock::now() + std::chrono::milliseconds(timeoutMs);
-        ++it->second.generation;
+        // the past and fire a spurious interrupt. One thread spends CPU time no
+        // faster than the wall clock runs, so for ThreadCpu this is the earliest
+        // moment the budget can be spent: the first time to read its clock.
+        entry.deadline = Clock::now() + budget;
+        ++entry.generation;
     }
     m_cv.notify_all();
 }
@@ -77,6 +111,7 @@ void LuauWatchdog::disarm(const void* key)
         if (it != m_entries.end()) {
             ++it->second.generation;
             it->second.deadline = Clock::time_point::max();
+            it->second.onThreadCpu = false;
         }
     }
     m_cv.notify_all();
@@ -136,9 +171,26 @@ void LuauWatchdog::threadMain()
         // engine — so a concurrent engine teardown is safe.
         auto it = m_entries.find(nextKey);
         if (it != m_entries.end() && it->second.generation == nextGeneration) {
-            it->second.deadline = Clock::time_point::max();
-            if (it->second.flag) {
-                it->second.flag->store(true, std::memory_order_relaxed);
+            Entry& entry = it->second;
+            if (entry.onThreadCpu) {
+                // The armed thread is alive here: it disarms under m_mutex before
+                // it leaves the call, and the generation shows it has not. A
+                // thread cannot be waited on until a CPU time, so wait for the
+                // CPU budget that is left, a lower bound of the wall time it
+                // takes to spend it, and read the clock again. A failed read
+                // falls back to the wall deadline that has just passed.
+                std::chrono::nanoseconds cpuNow{0};
+                if (readCpuClock(entry.cpuClock, &cpuNow) && cpuNow < entry.cpuDeadline) {
+                    const std::chrono::nanoseconds left =
+                        std::max<std::chrono::nanoseconds>(entry.cpuDeadline - cpuNow, MinCpuRecheck);
+                    entry.deadline = Clock::now() + std::chrono::ceil<Clock::duration>(left);
+                    continue;
+                }
+            }
+            entry.deadline = Clock::time_point::max();
+            entry.onThreadCpu = false;
+            if (entry.flag) {
+                entry.flag->store(true, std::memory_order_relaxed);
             }
         }
     }

@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 struct lua_State;
@@ -19,6 +20,7 @@ struct lua_State;
 namespace PhosphorScripting {
 
 class LuauWatchdog;
+enum class WatchdogClock : std::uint8_t; // LuauWatchdog.h
 
 /**
  * @brief An embedded, sandboxed Luau virtual machine with a QVariant API.
@@ -61,7 +63,7 @@ public:
     /// @p watchdog may be shared across engines; nullptr disables the timeout
     /// safety net (useful for short, trusted scripts in tests). @p memoryCapBytes
     /// caps heap allocated once the engine is sandboxed (0 = unlimited); the
-    /// watchdog bounds CPU time, this bounds memory. See @ref sandbox.
+    /// watchdog bounds run time, this bounds memory. See @ref sandbox.
     explicit LuauEngine(std::shared_ptr<LuauWatchdog> watchdog = nullptr,
                         std::size_t memoryCapBytes = DefaultMemoryCapBytes);
     ~LuauEngine();
@@ -84,6 +86,21 @@ public:
     /// Compile + load a module chunk and run it; the chunk is expected to
     /// `return` a table. Returns a handle (>= 0) to that table, or -1 on error.
     int loadModule(const QString& chunkName, const QByteArray& source, QString* error = nullptr);
+
+    /// The clock the watchdog measures this engine's calls on: WatchdogClock::Wall
+    /// (the default) or WatchdogClock::ThreadCpu, the CPU time of the thread that
+    /// runs the call. It applies to every call that starts after this, the
+    /// chunks of @ref runPrelude and @ref loadModule included. Include
+    /// LuauWatchdog.h for the enumerators.
+    void setWatchdogClock(WatchdogClock clock) noexcept
+    {
+        m_watchdogClock = clock;
+    }
+
+    WatchdogClock watchdogClock() const noexcept
+    {
+        return m_watchdogClock;
+    }
 
     /// Release a module handle from @ref loadModule.
     void releaseModule(int handle);
@@ -157,6 +174,7 @@ private:
     std::shared_ptr<std::atomic<bool>> m_interrupt;
     MemoryBudget m_memory;
     bool m_sandboxed = false;
+    WatchdogClock m_watchdogClock{}; // Wall, the first enumerator
     // VM-thread-only: written by guardedPcall before arming the watchdog and
     // read after disarming; the interrupt callback that consumes them also runs
     // on the VM thread (the watchdog thread only flips the atomic m_interrupt).

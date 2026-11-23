@@ -128,7 +128,7 @@ return pluau.algorithm {
   a thumbnail, and keeps the Luau host reusable beyond tiling.
 - **The sandbox is defensive.** `LuauEngine` freezes the global table and the
   `pluau` stdlib (`luaL_sandbox`) before any untrusted script runs, leaving no
-  `io`, `os.execute`, filesystem, or network access. It bounds both CPU time
+  `io`, `os.execute`, filesystem, or network access. It bounds both run time
   (the watchdog) and heap (the capped allocator).
 - **Algorithms consume positions, not window IDs.** They take a
   `TilingParams` carrying window count, usable area, inner gap, per-window
