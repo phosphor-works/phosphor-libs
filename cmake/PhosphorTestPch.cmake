@@ -10,9 +10,14 @@
 # test parsed QtCore and the standard library from scratch, which was most of
 # its compile.
 #
-# Call it from the top-level CMakeLists after every tier has been added: it
-# walks the whole directory tree for the targets to attach, so a test declared
-# after the call is not covered.
+# Call it from a project's top CMakeLists after every tier has been added, and
+# after the library trees that project adds: it walks the calling directory and
+# everything below it for the targets to attach, so a test declared after the
+# call, or outside that directory, is not covered. Each app calls it for its own
+# tree, as the top-level project or inside a superbuild. A superbuild of several
+# apps then has one PCH per app, each built with that app's compile flags
+# (KDECompilerSettings' -fno-exceptions, for one), which a single PCH declared
+# at the superbuild's root could not match.
 #
 # What the header may hold is set by how GCC validates a PCH. Every macro the
 # PCH was built with must be defined, identically, when it is used, and a
@@ -24,8 +29,8 @@
 #     modules each test links.
 # QtTest's own headers test both, so no QtTest header can be in the PCH, and
 # the PCH target links Qt6::Core alone so that QT_CORE_LIB, which every test
-# has, is its only module macro. It is declared in the top-level directory, so
-# its other definitions are the top-level ones every target inherits. The
+# has, is its only module macro. It is declared in the calling directory, so
+# its other definitions are the ones every target below it inherits. The
 # header list is QtCore and standard headers the test sources include most.
 #
 # A target the PCH does not fit is not broken by it, because GCC then ignores
@@ -63,16 +68,18 @@ function(phosphor_share_test_pch)
     endif()
     # The PCH target needs one source to compile. Written with file(CONFIGURE)
     # so a reconfigure leaves it untouched and does not rebuild the PCH.
-    set(_src "${CMAKE_CURRENT_BINARY_DIR}/phosphor_test_pch.cpp")
+    # Named for the calling project, so each app in a superbuild has its own.
+    set(_pch "${PROJECT_NAME}_test_pch")
+    set(_src "${CMAKE_CURRENT_BINARY_DIR}/${_pch}.cpp")
     file(CONFIGURE OUTPUT "${_src}" CONTENT "// Host for the shared test PCH (cmake/PhosphorTestPch.cmake).\n")
-    add_library(phosphor_test_pch OBJECT "${_src}")
-    target_link_libraries(phosphor_test_pch PRIVATE Qt6::Core)
-    set_target_properties(phosphor_test_pch PROPERTIES
+    add_library(${_pch} OBJECT "${_src}")
+    target_link_libraries(${_pch} PRIVATE Qt6::Core)
+    set_target_properties(${_pch} PROPERTIES
         AUTOMOC OFF
         AUTOUIC OFF
         AUTORCC OFF
         UNITY_BUILD OFF)
-    target_precompile_headers(phosphor_test_pch PRIVATE
+    target_precompile_headers(${_pch} PRIVATE
         <QCoreApplication>
         <QDebug>
         <QDir>
@@ -111,10 +118,10 @@ function(phosphor_share_test_pch)
         <vector>
     )
 
-    _phosphor_targets_below("${CMAKE_SOURCE_DIR}" _all)
+    _phosphor_targets_below("${CMAKE_CURRENT_SOURCE_DIR}" _all)
     set(_attached 0)
     foreach(_target IN LISTS _all)
-        if(_target STREQUAL "phosphor_test_pch")
+        if(_target STREQUAL "${_pch}")
             continue()
         endif()
         get_target_property(_type ${_target} TYPE)
@@ -138,8 +145,8 @@ function(phosphor_share_test_pch)
         if(NOT _sources MATCHES "\\.(cpp|cxx|cc)(;|$)")
             continue()
         endif()
-        target_precompile_headers(${_target} REUSE_FROM phosphor_test_pch)
+        target_precompile_headers(${_target} REUSE_FROM ${_pch})
         math(EXPR _attached "${_attached} + 1")
     endforeach()
-    message(STATUS "Shared test PCH: attached to ${_attached} test targets")
+    message(STATUS "Shared test PCH ${_pch}: attached to ${_attached} test targets")
 endfunction()
