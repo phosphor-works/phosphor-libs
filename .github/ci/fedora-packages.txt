@@ -20,11 +20,9 @@ wayland-devel
 wayland-protocols-devel
 vulkan-headers
 # The optional lookups the Arch list also installs: KGlobalAccel
-# (phosphor-shortcuts), Kirigami (phosphor-control's tests) and
-# PlasmaActivities (phosphor-workspaces).
+# (phosphor-shortcuts) and Kirigami (phosphor-control's tests).
 kf6-kglobalaccel-devel
 kf6-kirigami-devel
-plasma-activities-devel
 # dbus-run-session, which PhosphorTestIsolation runs each test under.
 dbus-daemon
 # The offscreen and Wayland tests' runtime.

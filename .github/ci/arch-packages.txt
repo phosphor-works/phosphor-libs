@@ -20,10 +20,8 @@ wayland-protocols
 # phosphor-surfaces uses it wherever Qt was built with Vulkan, as Arch's is.
 vulkan-headers
 # Optional lookups, installed so CI builds the code they switch on:
-# KGlobalAccel (phosphor-shortcuts), Kirigami (phosphor-control's tests) and
-# PlasmaActivities (phosphor-workspaces).
+# KGlobalAccel (phosphor-shortcuts) and Kirigami (phosphor-control's tests).
 kglobalaccel
 kirigami
-plasma-activities
 # The offscreen and Wayland tests' runtime.
 mesa

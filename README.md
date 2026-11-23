@@ -1,14 +1,16 @@
 # phosphor-libs
 
-LGPL Qt 6 and Wayland libraries for window placement, rendering, layer-shell surfaces and desktop shells. They are
-the shared code of the [phosphor-works](https://github.com/phosphor-works) apps: PlasmaZones, Afterglow and the
-Phosphor compositor and shell.
+LGPL Qt 6 and Wayland libraries for rendering, layer-shell surfaces, desktop shells and the foundations window
+placement builds on. They are the shared code of the [phosphor-works](https://github.com/phosphor-works) apps:
+PlasmaZones, Afterglow and the Phosphor compositor and shell. The placement engines themselves (zones, tiles,
+workspaces, the snap, tile and scroll engines and the engine runtime) are in
+[phosphor-engine-libs](https://github.com/phosphor-works/phosphor-engine-libs), which builds on this repository.
 
 | Area | Libraries |
 | --- | --- |
-| Placement | `phosphor-engine`, `phosphor-snap-engine`, `phosphor-tile-engine`, `phosphor-scroll-engine`, `phosphor-zones`, `phosphor-tiles`, `phosphor-workspaces`, `phosphor-placement`, `phosphor-context-resolver`, `phosphor-layout-api`, `phosphor-engine-runtime`, `phosphor-zone-rendering` |
+| Placement foundations | `phosphor-layout-api`, `phosphor-geometry`, `phosphor-screens`, `phosphor-rules`, `phosphor-identity` |
 | Rendering and surfaces | `phosphor-rendering`, `phosphor-shaders`, `phosphor-animation`, `phosphor-surface`, `phosphor-surface-quick`, `phosphor-pointer`, `phosphor-layer`, `phosphor-overlay`, `phosphor-surfaces`, `phosphor-shell-patterns`, `phosphor-wayland` |
-| Infrastructure | `phosphor-paths`, `phosphor-config`, `phosphor-control`, `phosphor-registry`, `phosphor-fsloader`, `phosphor-ipc`, `phosphor-mcp`, `phosphor-channel`, `phosphor-dbus`, `phosphor-protocol`, `phosphor-identity`, `phosphor-geometry`, `phosphor-screens`, `phosphor-rules`, `phosphor-scripting`, `phosphor-shortcuts`, `phosphor-service-idle`, `phosphor-audio`, `phosphor-compositor` |
+| Infrastructure | `phosphor-paths`, `phosphor-config`, `phosphor-control`, `phosphor-registry`, `phosphor-fsloader`, `phosphor-ipc`, `phosphor-mcp`, `phosphor-channel`, `phosphor-dbus`, `phosphor-protocol`, `phosphor-scripting`, `phosphor-shortcuts`, `phosphor-service-idle`, `phosphor-audio`, `phosphor-compositor` |
 
 Each library lives in `libs/<name>/` with its own `CMakeLists.txt`, headers, sources and tests.
 
@@ -40,8 +42,8 @@ CPMAddPackage(NAME phosphor-libs
 Its `find_package` and `target_link_libraries` calls then resolve to the targets here. To build the app against a
 local checkout instead, configure it with `-DCPM_phosphor-libs_SOURCE=/path/to/phosphor-libs`.
 
-The libraries name no app's data directories. The app passes each one in: the layout, algorithm, scrolling-template
-and shader-preset subdirectories to the classes and functions that read them, the pointer-pack subdirectory to
+The libraries name no app's data directories. The app passes each one in: the shader-preset subdirectory to the
+classes and functions that read it, the pointer-pack subdirectory to
 `PointerShaderRegistry::includePathsFor`, and, once at startup before any QML loads, the surface-pack subdirectory to
 `PhosphorSurfaceShaders::setSurfacePackDataSubdir` (`PhosphorSurface/SurfacePackLocation.h`).
 

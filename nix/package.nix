@@ -92,10 +92,9 @@ stdenv.mkDerivation {
     # phosphor-surfaces uses it when Qt has Vulkan, as nixpkgs' Qt does.
     vulkan-headers
     # Optional lookups, so the package builds the code they switch on:
-    # KGlobalAccel (phosphor-shortcuts) and PlasmaActivities
-    # (phosphor-workspaces). Kirigami is used by phosphor-control's tests.
+    # KGlobalAccel (phosphor-shortcuts). Kirigami is used by phosphor-control's
+    # tests.
     kdePackages.kglobalaccel
-    kdePackages.plasma-activities
     kdePackages.kirigami
   ];
 
@@ -136,7 +135,7 @@ stdenv.mkDerivation {
   '';
 
   meta = {
-    description = "LGPL Qt 6 and Wayland libraries for window placement, rendering and layer-shell surfaces";
+    description = "LGPL Qt 6 and Wayland libraries for rendering, layer-shell surfaces and desktop shells";
     homepage = "https://github.com/phosphor-works/phosphor-libs";
     license = with lib.licenses; [
       lgpl21Plus
