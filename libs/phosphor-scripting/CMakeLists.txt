@@ -191,6 +191,11 @@ set_target_properties(PhosphorScripting PROPERTIES
     UNITY_BUILD OFF
 )
 
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScripting" OR BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════

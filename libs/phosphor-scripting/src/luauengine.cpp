@@ -384,7 +384,8 @@ void LuauEngine::interruptCallback(lua_State* L, int gc)
     auto* self = static_cast<LuauEngine*>(lua_callbacks(L)->userdata);
     if (self && self->m_interrupt && self->m_interrupt->load(std::memory_order_relaxed)) {
         self->m_timedOut = true;
-        luaL_error(L, "script exceeded %d ms — interrupted", self->m_lastTimeoutMs);
+        const char* clock = self->m_watchdogClock == WatchdogClock::ThreadCpu ? " of CPU time" : "";
+        luaL_error(L, "script exceeded %d ms%s — interrupted", self->m_lastTimeoutMs, clock);
     }
 }
 
@@ -395,7 +396,7 @@ LuauEngine::CallStatus LuauEngine::guardedPcall(int nargs, int nresults, int tim
     m_lastTimeoutMs = timeoutMs;
 
     if (m_watchdog && timeoutMs > 0) {
-        m_watchdog->arm(this, timeoutMs);
+        m_watchdog->arm(this, timeoutMs, m_watchdogClock);
     }
     // Enforce the heap cap only for the duration of this protected call, so a
     // runaway script allocation becomes a catchable Luau OOM here (errorJmp is

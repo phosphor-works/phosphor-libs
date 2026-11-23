@@ -4,7 +4,7 @@
 # phosphor-scripting
 
 > A generic, sandboxed [Luau](https://luau.org/) host: VM lifecycle,
-> `luaL_sandbox`, a CPU-time watchdog, a per-engine heap cap, bytecode
+> `luaL_sandbox`, a run-time watchdog, a per-engine heap cap, bytecode
 > compile/load, and a `QVariant`↔Lua marshalling layer, with **no** knowledge
 > of tiling or any other domain.
 
@@ -23,7 +23,9 @@ scripts compute.
   (per script) → `callModule` / `moduleField`. The public surface is entirely
   `QVariant`-based, and `lua_State` is forward-declared and never leaks across the
   shared-library boundary.
-- **`LuauWatchdog`.** A shared supervisor thread that bounds CPU time: it only
+- **`LuauWatchdog`.** A shared supervisor thread that bounds the run time of a
+  call, on wall time or on the CPU time of the thread that runs it (see
+  [Choosing the clock](#choosing-the-clock)): it only
   ever flips a co-owned atomic flag the engine's interrupt callback reads, and
   never touches the `lua_State`, so a late fire during teardown is safe. One
   watchdog can be shared across many engines.
@@ -40,7 +42,8 @@ scripts compute.
 | Type | Purpose |
 |------|---------|
 | `PhosphorScripting::LuauEngine`   | The sandboxed VM, with a `QVariant`-only API (init / runPrelude / sandbox / loadModule / releaseModule / moduleField / hasFunction / callModule) |
-| `PhosphorScripting::LuauWatchdog` | Shared CPU-deadline supervisor that aborts runaway scripts via the interrupt callback |
+| `PhosphorScripting::LuauWatchdog` | Shared deadline supervisor that aborts runaway scripts via the interrupt callback |
+| `PhosphorScripting::WatchdogClock` | The clock a deadline runs on: `Wall` (the default) or `ThreadCpu` |
 
 ## Typical use
 
@@ -52,6 +55,7 @@ using namespace PhosphorScripting;
 
 auto watchdog = std::make_shared<LuauWatchdog>();
 LuauEngine engine(watchdog);          // default 64 MiB heap cap
+engine.setWatchdogClock(WatchdogClock::ThreadCpu);  // optional, Wall by default
 engine.init();
 engine.runPrelude(QStringLiteral("pluau"), preludeSource);  // install host globals
 engine.sandbox();                     // freeze globals + stdlib
@@ -79,7 +83,7 @@ project's global build settings.
 
 ## Design notes
 
-- **Two safety nets, two axes.** The watchdog bounds CPU *time*. The capped
+- **Two safety nets, two axes.** The watchdog bounds run *time*. The capped
   allocator bounds *heap*. Both surface a violation as a catchable error and let
   the engine recover for the next call.
 - **`lua_State` is private.** Public headers forward-declare it and expose only
@@ -87,6 +91,32 @@ project's global build settings.
   symbols cross the `.so` boundary. Domain bindings marshal their own params.
 - **Not thread-safe.** Like the underlying VM, all calls on one engine must
   occur on its owning thread.
+
+## Choosing the clock
+
+`LuauEngine::setWatchdogClock` chooses the clock that the watchdog measures the
+engine's calls on. It applies to every call that starts after it, the prelude and
+module chunks included.
+
+| Clock | The budget counts | Use it when |
+|-------|-------------------|-------------|
+| `WatchdogClock::Wall` (default) | Wall time from the start of the call, on the steady clock | The call must end by a time, whatever the machine does |
+| `WatchdogClock::ThreadCpu` | CPU time of the thread that runs the call | The budget is for the script's work, and its thread can wait for a CPU |
+
+Luau code advances only while its thread runs. On a loaded machine (a large
+compile, for example) a GUI thread waits for a CPU while the wall clock runs on,
+and a call that does little work spends a short wall budget. With `ThreadCpu`, a
+call spends no budget while its thread is descheduled, sleeps or blocks in a host
+function.
+
+`ThreadCpu` reads the thread's clock through `pthread_getcpuclockid` and
+`clock_gettime` (Linux and FreeBSD). If either fails, that call falls back to
+wall time. The watchdog cannot sleep until a CPU time, so it sleeps for the CPU
+budget that is left (one thread spends CPU time no faster than the wall clock
+runs) and reads the clock again, at least 1 ms later. The interrupt is therefore
+up to 1 ms of CPU time late. A direct user of `LuauWatchdog::arm` with
+`ThreadCpu` arms on the thread that runs the script, and disarms before that
+thread exits.
 
 ## Dependencies
 
