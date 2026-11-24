@@ -118,6 +118,14 @@ else()
                 # (computed gotos, non-virtual dtors, ...). They are not ours
                 # to fix — silence them on the vendored targets only.
                 target_compile_options(${_luau_tgt} PRIVATE -fexceptions -w)
+                # Optimized in Debug builds too. Scripts run under CPU-time
+                # limits (LuauWatchdog, an app's per-handler limit and CPU
+                # budget), and the interpreter at -O0 runs several times
+                # slower, so a Debug build hit limits that an optimized build
+                # stays far below, and tests that rely on that margin failed.
+                # A later -O wins, so this also overrides a sanitizer preset's
+                # -O1 here; the sanitizers still instrument the VM.
+                target_compile_options(${_luau_tgt} PRIVATE $<$<CONFIG:Debug>:-O2>)
                 # Treat Luau's interface headers as SYSTEM for consumers so
                 # including lua.h / DenseHash.h from our TUs doesn't surface
                 # third-party header warnings there either. (The SYSTEM
