@@ -10,7 +10,7 @@ workspaces, the snap, tile and scroll engines and the engine runtime) are in
 | --- | --- |
 | Placement foundations | `phosphor-layout-api`, `phosphor-geometry`, `phosphor-screens`, `phosphor-rules`, `phosphor-identity` |
 | Rendering and surfaces | `phosphor-rendering`, `phosphor-shaders`, `phosphor-animation`, `phosphor-surface`, `phosphor-surface-quick`, `phosphor-pointer`, `phosphor-layer`, `phosphor-overlay`, `phosphor-surfaces`, `phosphor-shell-patterns`, `phosphor-wayland` |
-| Infrastructure | `phosphor-paths`, `phosphor-config`, `phosphor-control`, `phosphor-registry`, `phosphor-fsloader`, `phosphor-ipc`, `phosphor-mcp`, `phosphor-channel`, `phosphor-dbus`, `phosphor-protocol`, `phosphor-scripting`, `phosphor-shortcuts`, `phosphor-service-idle`, `phosphor-audio`, `phosphor-compositor` |
+| Infrastructure | `phosphor-paths`, `phosphor-config`, `phosphor-control`, `phosphor-registry`, `phosphor-fsloader`, `phosphor-ipc`, `phosphor-mcp`, `phosphor-mcp-ipc`, `phosphor-channel`, `phosphor-dbus`, `phosphor-protocol`, `phosphor-scripting`, `phosphor-shortcuts`, `phosphor-service-idle`, `phosphor-audio`, `phosphor-compositor` |
 
 Each library lives in `libs/<name>/` with its own `CMakeLists.txt`, headers, sources and tests.
 
