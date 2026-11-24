@@ -68,8 +68,9 @@ phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor
 
 - `cmake --workflow --preset dev` configures into `build/`, builds and tests. The other presets are `release` and
   `relwithdebinfo`. Follow `phosphor-works:build` for the memory cap, jobs, the warning count and the non-unity gate.
-- CI runs the `dev` workflow on Arch, a `-k 0` build and test on Fedora 44 (older Qt), clang-format and qmlformat on
-  the changed files, and `nix flake check`. Tests run with `QT_QPA_PLATFORM=offscreen`.
+- CI is the shared C++ CI of the workspace repository (`cpp-ci.yml`): the `dev` preset on Arch and on Fedora 44 (older
+  Qt), with a warning failing the build, clang-format and qmlformat on every tracked file, and `nix flake check`.
+  Tests run with `QT_QPA_PLATFORM=offscreen`.
 - This repository has no pre-commit hooks. Run `clang-format -i` and `qmlformat -i` on the files you touch.
 
 ## Third-party pins and ABI
