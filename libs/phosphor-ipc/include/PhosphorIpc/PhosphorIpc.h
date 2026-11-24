@@ -7,6 +7,7 @@
 // consumers should include the specific header they need.
 
 #include <PhosphorIpc/IpcCallContext.h>
+#include <PhosphorIpc/IpcClient.h>
 #include <PhosphorIpc/IpcEngine.h>
 #include <PhosphorIpc/IpcPendingReply.h>
 #include <PhosphorIpc/IpcProtocol.h>

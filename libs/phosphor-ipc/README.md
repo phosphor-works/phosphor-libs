@@ -33,6 +33,8 @@ The library owns:
   documented QMetaType maps to a JSON Schema fragment, and unknown types
   degrade to `{"description": "<QMetaType::name>"}` without a `type`
   constraint.
+- **`IpcClient`**: the client side of the wire format, for programs
+  that drive an application's socket from C++ (see [Client](#client)).
 - **`IpcEngine::install`**: small bridge that stashes the
   application's `IpcRouter` on the `QQmlEngine` so `IpcTarget`
   instances find it in `componentComplete`.
@@ -51,6 +53,7 @@ subcommands.
 | `PhosphorIpc::IpcEngine` | Bridge between an application-owned `IpcRouter` and QML-side `IpcTarget` instances. |
 | `PhosphorIpc::IpcSchemaGenerator` | `QMetaObject` → JSON Schema. Used by the schema response and by the CLI for client-side argument validation. |
 | `PhosphorIpc::IpcCallContext` | Mixin for a C++ target. `sendErrorReply(message)` fails the running wire call with `CALL_FAILED`, like `QDBusContext` does for D-Bus. `deferReply()` defers the answer to an `IpcPendingReply`, `connectionId()` names the client connection that made the call, and `connectionPid()` the process that opened it. |
+| `PhosphorIpc::IpcClient` | A client of one router's socket over `QLocalSocket`. `call`, `list`, `schema`, `subscribe` and `unsubscribe` each take a callback that gets the answer as an `IpcReply`, from the event loop. Signals `connected`, `closed(reason)`, `eventReceived` and `subscriptionEnded`. |
 | `PhosphorIpc::IpcPendingReply` | Move-only handle to a deferred call. `finish(result)` or `fail(...)` answers it once, and dropping it unanswered fails it with `CALL_ABANDONED`. |
 
 ## Wire protocol
@@ -434,6 +437,82 @@ export PHOSPHOR_SOCKET=/tmp/p.sock
 phosphorctl call count.increment        # demo's event log gains an entry
 phosphorctl subscribe count.countChanged   # optional: same events on stdout
 ```
+
+## Client
+
+`IpcClient` speaks the wire format from the other end, for a C++
+program that drives a running application, such as an MCP server that
+offers the application's calls to an agent. It never blocks the event
+loop.
+
+```cpp
+#include <PhosphorIpc/IpcClient.h>
+
+PhosphorIpc::IpcClient client;
+QObject::connect(&client, &PhosphorIpc::IpcClient::closed, [](const QString& reason) {
+    qWarning() << "IPC connection ended:" << reason;
+});
+client.connectToServer(path);
+client.call(QStringLiteral("theme"), QStringLiteral("setMode"), {QStringLiteral("dark")},
+            [](const PhosphorIpc::IpcReply& reply) {
+                if (reply.isError()) {
+                    qWarning() << reply.errorCode << reply.errorMessage;
+                    return;
+                }
+                qDebug() << reply.result;
+            });
+```
+
+The rules:
+
+- **Ids.** Each request gets an id of its own, and the client matches the
+  answer to it. Any number of requests may be in flight, and they may be
+  answered in any order (a deferred call answers after later ones). Ids
+  only grow, so a request never takes the id of a live subscription.
+- **Callbacks.** Each callback runs once, from the event loop, never
+  from inside the call that made the request. `IpcReply` holds the
+  result, or an error with its code, message and detail. The code is
+  the server's (`ErrorCode`, or a target's own code for a deferred call)
+  or one of the client's own (`ClientErrorCode`), which never travel on
+  the wire:
+
+  | Code | When |
+  |------|------|
+  | `NOT_CONNECTED` | The request was made without a connection. |
+  | `CONNECTION_CLOSED` | The connection ended before the answer came. |
+  | `WRITE_QUEUE_FULL` | The request would pass the write cap (below). |
+  | `MALFORMED_REPLY` | The server sent an error without a code. |
+
+- **Connecting.** Requests made while the client connects wait, and go
+  out once it is connected. A connection that fails at once (no socket
+  at the path) leaves the client unconnected when `connectToServer`
+  returns. `connected()` and `closed(reason)` come from the event loop.
+- **The end.** When the connection ends (the server went away, a read
+  failed, `close()` ran), every request still waiting fails with
+  `CONNECTION_CLOSED`, and then `closed(reason)` comes, once. The live
+  subscriptions end with it. `connectToServer` may then start another
+  connection.
+- **Events.** A subscription's events come as
+  `eventReceived(subscriptionId, target, signal, args)` from the answer of
+  `subscribe` until `unsubscribe`, after which none comes, not even one
+  already on its way. An error that the server sends under a
+  subscription's id (`NO_SUCH_TARGET` when the target went away) ends it
+  with `subscriptionEnded`. Events that a target sends to the connection
+  (`IpcRouter::sendEvent`) come with subscription id 0.
+- **Bounded memory.** The bytes that the server has not read yet,
+  requests that wait for the connection included, are capped at
+  `MaxPendingWriteBytes` (16 MiB, the router's own cap on a connection
+  that is behind). A request past it fails with `WRITE_QUEUE_FULL`, so a
+  server that stops reading cannot grow the client without bound. A line
+  from the server longer than `MaxLineBytes` (64 MiB) ends the
+  connection.
+- **Lifetime.** Destroying the client drops the callbacks that wait,
+  unrun, since they may hold objects that are gone by then. Never destroy
+  it from inside one of its callbacks or signals. `deleteLater()` is fine
+  there. Single-threaded, like the router.
+
+The client has no timeout. A deferred call may take as long as its work,
+so the caller decides how long to wait, and `close()` ends the wait.
 
 ## Arbitration / lifecycle
 

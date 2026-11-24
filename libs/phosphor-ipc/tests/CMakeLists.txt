@@ -58,6 +58,7 @@ phosphoripc_add_test(test_phosphor_ipc_subscribe)
 phosphoripc_add_test(test_phosphor_ipc_engine)
 phosphoripc_add_test(test_phosphor_ipc_deferred)
 phosphoripc_add_test(test_phosphor_ipc_umask)
+phosphoripc_add_test(test_phosphor_ipc_client)
 # The test defines umask() to count the calls. Exported (with default
 # visibility in the source), it is the one that the dynamic linker binds for
 # libPhosphorIpc too, which a definition that stays inside the executable

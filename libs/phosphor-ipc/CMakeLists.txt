@@ -75,6 +75,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(phosphoripc_public_HDRS
     include/PhosphorIpc/PhosphorIpc.h
     include/PhosphorIpc/IpcCallContext.h
+    include/PhosphorIpc/IpcClient.h
     include/PhosphorIpc/IpcPendingReply.h
     include/PhosphorIpc/IpcRouter.h
     include/PhosphorIpc/IpcTarget.h
@@ -85,6 +86,7 @@ set(phosphoripc_public_HDRS
 
 set(phosphoripc_SRCS
     src/ipccallcontext.cpp
+    src/ipcclient.cpp
     src/ipcpendingreply.cpp
     src/ipcrouter.cpp
     src/ipcrouterdispatch.cpp
