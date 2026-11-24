@@ -34,11 +34,15 @@
 # header list is QtCore and standard headers the test sources include most.
 #
 # A target the PCH does not fit is not broken by it, because GCC then ignores
-# the PCH and parses the header as text. GCC also takes one PCH across -fPIC,
-# -fPIE and non-PIC compiles, so the library directories that turn on
-# CMAKE_POSITION_INDEPENDENT_CODE share it too. A target with a precompiled
-# header of its own keeps it, and one that sets DISABLE_PRECOMPILE_HEADERS
-# goes without.
+# the PCH and parses the header as text, with a -Winvalid-pch warning. GCC
+# rejects a PCH built with other position-independence flags, so there is one
+# host for each: the plain one, a -fPIE one for the test executables of the
+# library directories that turn on CMAKE_POSITION_INDEPENDENT_CODE, and a
+# -fPIC one for object libraries there. Arch's GCC compiles PIE by default, so
+# there the plain and the -fPIE host agree anyway, but Fedora's does not. A
+# host is made only when a target needs it. A target with a precompiled header
+# of its own keeps it, and one that sets DISABLE_PRECOMPILE_HEADERS goes
+# without.
 #
 # GCC only. Clang validates a PCH strictly and fails the compile on the
 # mismatches GCC tolerates (a PIC level, a macro the PCH did not have), so a
@@ -62,66 +66,86 @@ function(_phosphor_targets_below dir out)
     set(${out} ${_targets} PARENT_SCOPE)
 endfunction()
 
+# Sets <out> to the PCH host for one position-independence variant: "" (none),
+# "PIE" or "PIC". The host is made on first use, in the directory of the
+# phosphor_share_test_pch() call, so it inherits that directory's definitions.
+function(_phosphor_test_pch_host variant out)
+    # Named for the calling project, so each app in a superbuild has its own.
+    set(_pch "${PROJECT_NAME}_test_pch")
+    if(variant)
+        string(TOLOWER "${variant}" _suffix)
+        string(APPEND _pch "_${_suffix}")
+    endif()
+    if(NOT TARGET ${_pch})
+        # The PCH target needs one source to compile. Written with
+        # file(CONFIGURE) so a reconfigure leaves it untouched and does not
+        # rebuild the PCH.
+        set(_src "${CMAKE_CURRENT_BINARY_DIR}/${_pch}.cpp")
+        file(CONFIGURE OUTPUT "${_src}" CONTENT "// Host for the shared test PCH (cmake/PhosphorTestPch.cmake).\n")
+        add_library(${_pch} OBJECT "${_src}")
+        target_link_libraries(${_pch} PRIVATE Qt6::Core)
+        # POSITION_INDEPENDENT_CODE would give an object library the PIC flag
+        # for the PIE variant too, so the flag comes from the compiler's own
+        # option list instead.
+        set_target_properties(${_pch} PROPERTIES
+            AUTOMOC OFF
+            AUTOUIC OFF
+            AUTORCC OFF
+            UNITY_BUILD OFF
+            POSITION_INDEPENDENT_CODE OFF)
+        if(variant)
+            target_compile_options(${_pch} PRIVATE ${CMAKE_CXX_COMPILE_OPTIONS_${variant}})
+        endif()
+        target_precompile_headers(${_pch} PRIVATE
+            <QCoreApplication>
+            <QDebug>
+            <QDir>
+            <QFile>
+            <QFileInfo>
+            <QHash>
+            <QJsonArray>
+            <QJsonDocument>
+            <QJsonObject>
+            <QJsonValue>
+            <QList>
+            <QMap>
+            <QObject>
+            <QPoint>
+            <QPointer>
+            <QRect>
+            <QRectF>
+            <QRegularExpression>
+            <QScopeGuard>
+            <QSet>
+            <QSize>
+            <QStandardPaths>
+            <QString>
+            <QStringList>
+            <QTemporaryDir>
+            <QTimer>
+            <QUrl>
+            <QUuid>
+            <QVariant>
+            <QVariantMap>
+            <algorithm>
+            <functional>
+            <limits>
+            <memory>
+            <optional>
+            <vector>
+        )
+    endif()
+    set(${out} ${_pch} PARENT_SCOPE)
+endfunction()
+
 function(phosphor_share_test_pch)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         return()
     endif()
-    # The PCH target needs one source to compile. Written with file(CONFIGURE)
-    # so a reconfigure leaves it untouched and does not rebuild the PCH.
-    # Named for the calling project, so each app in a superbuild has its own.
-    set(_pch "${PROJECT_NAME}_test_pch")
-    set(_src "${CMAKE_CURRENT_BINARY_DIR}/${_pch}.cpp")
-    file(CONFIGURE OUTPUT "${_src}" CONTENT "// Host for the shared test PCH (cmake/PhosphorTestPch.cmake).\n")
-    add_library(${_pch} OBJECT "${_src}")
-    target_link_libraries(${_pch} PRIVATE Qt6::Core)
-    set_target_properties(${_pch} PROPERTIES
-        AUTOMOC OFF
-        AUTOUIC OFF
-        AUTORCC OFF
-        UNITY_BUILD OFF)
-    target_precompile_headers(${_pch} PRIVATE
-        <QCoreApplication>
-        <QDebug>
-        <QDir>
-        <QFile>
-        <QFileInfo>
-        <QHash>
-        <QJsonArray>
-        <QJsonDocument>
-        <QJsonObject>
-        <QJsonValue>
-        <QList>
-        <QMap>
-        <QObject>
-        <QPoint>
-        <QPointer>
-        <QRect>
-        <QRectF>
-        <QRegularExpression>
-        <QScopeGuard>
-        <QSet>
-        <QSize>
-        <QStandardPaths>
-        <QString>
-        <QStringList>
-        <QTemporaryDir>
-        <QTimer>
-        <QUrl>
-        <QUuid>
-        <QVariant>
-        <QVariantMap>
-        <algorithm>
-        <functional>
-        <limits>
-        <memory>
-        <optional>
-        <vector>
-    )
-
     _phosphor_targets_below("${CMAKE_CURRENT_SOURCE_DIR}" _all)
     set(_attached 0)
     foreach(_target IN LISTS _all)
-        if(_target STREQUAL "${_pch}")
+        if(_target MATCHES "^${PROJECT_NAME}_test_pch(_pie|_pic)?$")
             continue()
         endif()
         get_target_property(_type ${_target} TYPE)
@@ -145,8 +169,18 @@ function(phosphor_share_test_pch)
         if(NOT _sources MATCHES "\\.(cpp|cxx|cc)(;|$)")
             continue()
         endif()
+        # The flags the target compiles with: CMake gives an executable the PIE
+        # flag and a library the PIC flag when POSITION_INDEPENDENT_CODE is on.
+        get_target_property(_pic ${_target} POSITION_INDEPENDENT_CODE)
+        set(_variant "")
+        if(_pic AND _type STREQUAL "EXECUTABLE")
+            set(_variant PIE)
+        elseif(_pic)
+            set(_variant PIC)
+        endif()
+        _phosphor_test_pch_host("${_variant}" _pch)
         target_precompile_headers(${_target} REUSE_FROM ${_pch})
         math(EXPR _attached "${_attached} + 1")
     endforeach()
-    message(STATUS "Shared test PCH ${_pch}: attached to ${_attached} test targets")
+    message(STATUS "Shared test PCH ${PROJECT_NAME}_test_pch: attached to ${_attached} test targets")
 endfunction()
