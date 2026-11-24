@@ -248,7 +248,7 @@ void TestPhosphorIpcEngine::qmlUntypedAndTypedFunctionsAreCallable()
     component.setData(R"(import PhosphorIpcTest
 IpcTarget {
     target: "calc"
-    function untyped(a, b) { return { sum: a + b, kinds: [typeof a, typeof b] } }
+    function untyped(a, b) { return { sum: a + b, kinds: [typeof a, typeof b], none: null } }
     function typed(a: int, b: int): int { return a * b }
     function nothing(text) { }
 })",
@@ -263,9 +263,10 @@ IpcTarget {
     QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
     // The reply on the wire carries the JavaScript object as JSON.
     QCOMPARE(variantToJson(returned),
-             QJsonValue(QJsonObject{
-                 {QStringLiteral("sum"), 5.5},
-                 {QStringLiteral("kinds"), QJsonArray{QStringLiteral("number"), QStringLiteral("number")}}}));
+             QJsonValue(
+                 QJsonObject{{QStringLiteral("sum"), 5.5},
+                             {QStringLiteral("kinds"), QJsonArray{QStringLiteral("number"), QStringLiteral("number")}},
+                             {QStringLiteral("none"), QJsonValue::Null}}));
     const QVariantMap untyped = returned.toMap();
     QCOMPARE(untyped.value(QStringLiteral("sum")).toDouble(), 5.5);
     QCOMPARE(untyped.value(QStringLiteral("kinds")).toStringList(),

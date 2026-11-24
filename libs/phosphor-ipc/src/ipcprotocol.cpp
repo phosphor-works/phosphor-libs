@@ -259,6 +259,9 @@ QJsonValue variantToJson(const QVariant& v)
         return variantToJson(v.value<QJSValue>().toVariant(QJSValue::ConvertJSObjects));
     }
     switch (v.typeId()) {
+    case QMetaType::Nullptr:
+        // A JSON null that came in as an argument, or a JavaScript null.
+        return QJsonValue::Null;
     case QMetaType::Bool:
         return v.toBool();
     case QMetaType::Int:

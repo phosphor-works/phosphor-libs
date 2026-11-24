@@ -147,7 +147,7 @@ struct PHOSPHORIPC_EXPORT Request
 // naturally; QJsonValue / QJsonObject / QJsonArray pass through; a
 // QJSValue (what an untyped QML function returns) converts as its
 // JavaScript value, objects and arrays included;
-// invalid QVariant maps to null; any other metatype degrades to
+// invalid QVariant and std::nullptr_t map to null; any other metatype degrades to
 // the toString() representation. Shared between the router's
 // call-return path and IpcTarget's emitEvent broadcast path so
 // the wire JSON shape stays identical across the two.
