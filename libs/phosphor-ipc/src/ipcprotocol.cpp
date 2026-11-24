@@ -3,6 +3,7 @@
 
 #include <PhosphorIpc/IpcProtocol.h>
 
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -251,6 +252,11 @@ QJsonValue variantToJson(const QVariant& v)
 {
     if (!v.isValid()) {
         return QJsonValue::Null;
+    }
+    // An untyped QML function returns a JavaScript value, and an object or
+    // array from it would otherwise go out as its toString(), "".
+    if (v.metaType() == QMetaType::fromType<QJSValue>()) {
+        return variantToJson(v.value<QJSValue>().toVariant(QJSValue::ConvertJSObjects));
     }
     switch (v.typeId()) {
     case QMetaType::Bool:

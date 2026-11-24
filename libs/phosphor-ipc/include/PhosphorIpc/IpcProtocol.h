@@ -144,7 +144,9 @@ struct PHOSPHORIPC_EXPORT Request
 
 // Convert a QVariant to a JSON value. Recursive on QVariantList /
 // QVariantMap. Numeric / bool / string / list / map types map
-// naturally; QJsonValue / QJsonObject / QJsonArray pass through;
+// naturally; QJsonValue / QJsonObject / QJsonArray pass through; a
+// QJSValue (what an untyped QML function returns) converts as its
+// JavaScript value, objects and arrays included;
 // invalid QVariant maps to null; any other metatype degrades to
 // the toString() representation. Shared between the router's
 // call-return path and IpcTarget's emitEvent broadcast path so

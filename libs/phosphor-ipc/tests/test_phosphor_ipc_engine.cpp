@@ -9,9 +9,13 @@
 // as a qWarning rather than a silent dead binding.
 
 #include <PhosphorIpc/IpcEngine.h>
+#include <PhosphorIpc/IpcProtocol.h>
 #include <PhosphorIpc/IpcRouter.h>
 #include <PhosphorIpc/IpcTarget.h>
 
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QObject>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -254,9 +258,15 @@ IpcTarget {
 
     IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::NoSuchFn;
     QString message;
-    const QVariantMap untyped =
-        router.invoke(QStringLiteral("calc"), QStringLiteral("untyped"), {2, 3.5}, &outcome, &message).toMap();
+    const QVariant returned =
+        router.invoke(QStringLiteral("calc"), QStringLiteral("untyped"), {2, 3.5}, &outcome, &message);
     QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+    // The reply on the wire carries the JavaScript object as JSON.
+    QCOMPARE(variantToJson(returned),
+             QJsonValue(QJsonObject{
+                 {QStringLiteral("sum"), 5.5},
+                 {QStringLiteral("kinds"), QJsonArray{QStringLiteral("number"), QStringLiteral("number")}}}));
+    const QVariantMap untyped = returned.toMap();
     QCOMPARE(untyped.value(QStringLiteral("sum")).toDouble(), 5.5);
     QCOMPARE(untyped.value(QStringLiteral("kinds")).toStringList(),
              (QStringList{QStringLiteral("number"), QStringLiteral("number")}));
