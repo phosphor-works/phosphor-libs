@@ -71,7 +71,8 @@ phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor
 - CI is the shared C++ CI of the workspace repository (`cpp-ci.yml`): the `dev` preset on Arch and on Fedora 44 (older
   Qt), with a warning failing the build, clang-format and qmlformat on every tracked file, and `nix flake check`.
   Tests run with `QT_QPA_PLATFORM=offscreen`.
-- This repository has no pre-commit hooks. Run `clang-format -i` and `qmlformat -i` on the files you touch.
+- The shared git hooks (`lefthook.yml`, set up by `lefthook install` or `workspace/tools/setup`) run clang-format and
+  qmlformat on the staged files and check the commit message.
 
 ## Third-party pins and ABI
 
