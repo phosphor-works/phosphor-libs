@@ -124,7 +124,7 @@ The shell drives the dirty/Apply lifecycle from the domains' signals:
 `applyResult(true, {})` at the end of `apply()` and the footer swaps
 "Save" → "Saving…" automatically.
 
-See `examples/minimal/` for a complete two-page app (General + About).
+See `examples/phosphor-control/minimal/` at the repository root for a complete two-page app (General + About), built with `-DPHOSPHOR_LIBS_BUILD_EXAMPLES=ON`.
 
 ## Control modules
 

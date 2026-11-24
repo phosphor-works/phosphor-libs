@@ -66,15 +66,22 @@ set_tests_properties(test_phosphor_mcp_checkwork PROPERTIES
     LABELS "phosphormcp"
 )
 
-# The example server, driven as a client would drive it. The example is built
-# whenever the tests are, unless BUILD_PHOSPHOR_MCP_EXAMPLES was turned off.
-if(TARGET phosphor-mcp-example)
+# The example server (examples/phosphor-mcp/wordcount.cpp), built here as a
+# test fixture and driven as a client would drive it, so the example cannot
+# fall behind the library. The examples themselves are built only with
+# PHOSPHOR_LIBS_BUILD_EXAMPLES. A library configured on its own, outside the
+# repository, has no examples/ and skips this test.
+set(_phosphormcp_example_source "${CMAKE_CURRENT_LIST_DIR}/../../../examples/phosphor-mcp/wordcount.cpp")
+if(EXISTS "${_phosphormcp_example_source}")
+    add_executable(phosphor-mcp-example-fixture "${_phosphormcp_example_source}")
+    target_link_libraries(phosphor-mcp-example-fixture PRIVATE PhosphorMcp::PhosphorMcp Qt6::Core)
+    target_compile_definitions(phosphor-mcp-example-fixture PRIVATE PHOSPHOR_MCP_EXAMPLE_VERSION="${PHOSPHORMCP_VERSION}")
     phosphormcp_add_test(test_phosphor_mcp_example)
     target_compile_definitions(test_phosphor_mcp_example
         PRIVATE
-            PHOSPHOR_MCP_EXAMPLE_PATH="$<TARGET_FILE:phosphor-mcp-example>"
+            PHOSPHOR_MCP_EXAMPLE_PATH="$<TARGET_FILE:phosphor-mcp-example-fixture>"
             PHOSPHORMCP_VERSION="${PHOSPHORMCP_VERSION}")
-    add_dependencies(test_phosphor_mcp_example phosphor-mcp-example)
+    add_dependencies(test_phosphor_mcp_example phosphor-mcp-example-fixture)
 else()
-    message(STATUS "phosphor-mcp: test_phosphor_mcp_example is not built, because BUILD_PHOSPHOR_MCP_EXAMPLES is OFF")
+    message(STATUS "phosphor-mcp: test_phosphor_mcp_example is not built: no examples/phosphor-mcp in this tree")
 endif()
