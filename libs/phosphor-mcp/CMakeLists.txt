@@ -238,24 +238,8 @@ install(FILES
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Example and tests
+# Tests
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# ON when phosphor-libs is the outermost project, when this library is
-# configured on its own, and when the tests are built, whose smoke test runs
-# it. OFF inside an app that adds the tree or this library without tests,
-# where PROJECT_IS_TOP_LEVEL would be the app's when the app adds this
-# directory itself. Never installed, since it is source for authors of other
-# servers.
-if(PHOSPHOR_LIBS_TOP_LEVEL OR CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR OR BUILD_TESTING)
-    set(_phosphormcp_examples_default ON)
-else()
-    set(_phosphormcp_examples_default OFF)
-endif()
-option(BUILD_PHOSPHOR_MCP_EXAMPLES "Build the phosphor-mcp example server" ${_phosphormcp_examples_default})
-if(BUILD_PHOSPHOR_MCP_EXAMPLES)
-    add_subdirectory(examples)
-endif()
 
 if(CMAKE_PROJECT_NAME STREQUAL "PhosphorMcp" OR BUILD_TESTING)
     enable_testing()

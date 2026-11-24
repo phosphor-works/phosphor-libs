@@ -93,6 +93,8 @@ if(PHOSPHOR_LIBS_TOP_LEVEL)
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/*.h
         ${CMAKE_CURRENT_SOURCE_DIR}/libs/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/examples/*.h
     )
     kde_clang_format(${PHOSPHOR_LIBS_CLANG_FORMAT_FILES})
 endif()
@@ -233,6 +235,15 @@ add_subdirectory(libs/phosphor-surfaces)    # managed surface lifecycle (engine,
 add_subdirectory(libs/phosphor-overlay)     # per-screen shell-host + slot mechanism (rides on layer/shell-patterns/surfaces/animation/screens)
 add_subdirectory(libs/phosphor-compositor)  # compositor-plugin SDK
 add_subdirectory(libs/phosphor-control) # reusable Qt6/QML/Kirigami settings-app framework (page controllers, registry, chrome)
+
+# The example programs in examples/: source for authors of apps and servers,
+# never installed. Not built unless asked for, so CI and the apps that add
+# this tree never build them. phosphor-mcp's tests build the one example they
+# drive as their own fixture.
+option(PHOSPHOR_LIBS_BUILD_EXAMPLES "Build the example programs in examples/" OFF)
+if(PHOSPHOR_LIBS_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Top-level finish
