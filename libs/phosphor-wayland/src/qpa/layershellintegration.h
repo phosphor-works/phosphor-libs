@@ -293,7 +293,7 @@ private:
 #ifdef PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH
     // test_plugin_layout builds a copy of this library with the class this
     // many bytes larger, to stand for a library newer than the plugin.
-    unsigned char m_testLayoutGrowth[PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH] = {};
+    [[maybe_unused]] unsigned char m_testLayoutGrowth[PHOSPHORWAYLAND_TEST_LAYOUT_GROWTH] = {};
 #endif
 };
 
