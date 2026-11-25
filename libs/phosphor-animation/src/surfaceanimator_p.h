@@ -43,7 +43,7 @@ class ShaderEffect;
 }
 
 namespace PhosphorLayer {
-class Role;
+struct Role;
 class Surface;
 }
 

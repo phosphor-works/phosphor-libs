@@ -24,7 +24,7 @@ class AnimationShaderRegistry;
 }
 
 namespace PhosphorLayer {
-class Role;
+struct Role;
 class Surface;
 }
 
