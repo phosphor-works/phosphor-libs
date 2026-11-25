@@ -83,10 +83,10 @@ set(PHOSPHOR_TEST_DEPS phosphor-surface-packs)
 # shaders, phosphor-works/phosphor-surface-packs), which phosphor-surface's
 # tests load to check the library against the packs the apps ship. A commit,
 # not a release, so VERSION is the commit hash.
-set(PHOSPHOR_DEP_phosphor-surface-packs_VERSION "087bd740eb0650b5a4256566663d8332d00c7cd7")
-set(PHOSPHOR_DEP_phosphor-surface-packs_URL "https://github.com/phosphor-works/phosphor-surface-packs/archive/087bd740eb0650b5a4256566663d8332d00c7cd7.tar.gz")
-set(PHOSPHOR_DEP_phosphor-surface-packs_FILE "phosphor-surface-packs-087bd740eb0650b5a4256566663d8332d00c7cd7.tar.gz")
-set(PHOSPHOR_DEP_phosphor-surface-packs_SHA256 "2b3244bbd1d198cc9361dea105b01bfbcd32bbe35843ddd392881208370b40e1")
+set(PHOSPHOR_DEP_phosphor-surface-packs_VERSION "572e2240ef306d48650ed45ba6672af5ab31e75f")
+set(PHOSPHOR_DEP_phosphor-surface-packs_URL "https://github.com/phosphor-works/phosphor-surface-packs/archive/572e2240ef306d48650ed45ba6672af5ab31e75f.tar.gz")
+set(PHOSPHOR_DEP_phosphor-surface-packs_FILE "phosphor-surface-packs-572e2240ef306d48650ed45ba6672af5ab31e75f.tar.gz")
+set(PHOSPHOR_DEP_phosphor-surface-packs_SHA256 "2fb063f95503dcca9b23c2905213940f1f4aa8701623f1020c695335dd90475e")
 
 # CPM.cmake itself. An app that adds this tree loads its own pinned CPM first,
 # and that copy is used.
