@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 import QtQuick
@@ -12,7 +12,7 @@ Settings.AboutPageShell {
     appIcon: "preferences-system"
     appVersion: "0.1.0"
     description: qsTr("Tiny end-to-end demo of the phosphor-control framework: ApplicationController + two registered pages routed through the standard sidebar/breadcrumbs/footer chrome.")
-    copyright: "© 2026 fuddlesworth"
+    copyright: "© 2026 Phosphor Works Team"
     license: "LGPL-2.1-or-later"
     homepageUrl: "https://github.com/phosphor-works/PlasmaZones"
     // Extras land below the homepage URL via the named `extraContent`

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Evaluation-cost benchmark. As rule evaluation is O(rules) per query (vs the
