@@ -98,6 +98,13 @@ private:
 
 } // namespace
 
+// What a page build waits for, in ms. The waits check what happens, not how
+// fast: a build takes well under a second, but the Nix check runs the suite
+// in parallel on a 4-core runner, and beside the heaviest tests of this
+// library a correct build took 5.2 s, past QTRY's default of 5 s. Only a build
+// that never ends reaches this.
+constexpr int PageWaitMs = 30000;
+
 // Named, not anonymous: TestPageHost holds one as a member, and a member of an
 // anonymous-namespace type would give TestPageHost internal linkage.
 namespace PhosphorControlTest {
@@ -316,14 +323,14 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == placeholder);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == placeholder, PageWaitMs);
 
         // A module that loads while its placeholder page is on screen binds
         // the real page into it. The new page requires its context, so it is
         // built only when PageHost creates it with the real controller.
         auto* const real = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), real, url(QStringLiteral("required"))));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), real);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "settingsAppAtCompletion"), &controller);
         QVERIFY(!itemNamed(host.get(), QStringLiteral("first")));
@@ -337,10 +344,10 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == page);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == page, PageWaitMs);
 
         QVERIFY(controller.bindPage(QStringLiteral("p"), page, url(QStringLiteral("required"))));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), page);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "settingsAppAtCompletion"), &controller);
     }
@@ -358,11 +365,11 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("q"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("first")));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("first")), PageWaitMs);
 
         QVERIFY(controller.bindPage(QStringLiteral("p"), page, url(QStringLiteral("required"))));
         controller.setCurrentPageId(QStringLiteral("p"));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), page);
     }
 
@@ -374,12 +381,12 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == placeholder);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == placeholder, PageWaitMs);
         const QPointer<QQuickItem> item = itemNamed(host.get(), QStringLiteral("first"));
 
         auto* const real = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), real, url(QStringLiteral("first"))));
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == real);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == real, PageWaitMs);
         // The same item, not a rebuilt one.
         QVERIFY(item);
         QCOMPARE(itemNamed(host.get(), QStringLiteral("first")), item.data());
@@ -395,20 +402,20 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == placeholder);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == placeholder, PageWaitMs);
         // p stays built, hidden, once q is shown.
         controller.setCurrentPageId(QStringLiteral("q"));
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("second")));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("second")), PageWaitMs);
 
         // The same QML: the cached item gets the new controller.
         auto* const real = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), real, url(QStringLiteral("first"))));
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == real);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == real, PageWaitMs);
 
         // New QML: the cached page is rebuilt from it, with its context.
         auto* const next = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), next, url(QStringLiteral("required2"))));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required2")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required2")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required2"), "controllerAtCompletion"), next);
         QVERIFY(!itemNamed(host.get(), QStringLiteral("first")));
         QCOMPARE(controller.currentPageId(), QStringLiteral("q"));
@@ -423,7 +430,7 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), page);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "settingsAppAtCompletion"), &controller);
     }
@@ -438,7 +445,7 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("plain")) == page);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("plain")) == page, PageWaitMs);
     }
 
     void aPageThatPassesContextIsNotBuiltAgainForAnotherPagesBind()
@@ -452,7 +459,7 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         const QPointer<QQuickItem> built = itemNamed(host.get(), QStringLiteral("required"));
 
         // Binding q makes every cached page read its registry entry again.
@@ -472,7 +479,7 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QQuickItem* const prompt = itemNamed(host.get(), QStringLiteral("page-host-select-page"));
         QQuickItem* const unavailable = itemNamed(host.get(), QStringLiteral("page-host-page-unavailable"));
         QVERIFY(prompt);
@@ -482,13 +489,13 @@ private Q_SLOTS:
         // A page that passes context bound to no QML: nothing to create, and
         // nothing has gone wrong, so the page area asks for a page.
         QVERIFY(controller.bindPage(QStringLiteral("p"), page, QUrl()));
-        QTRY_VERIFY(!itemNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(!itemNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QVERIFY(prompt->isVisible());
         QVERIFY(!unavailable->isVisible());
 
         // The same QML back: built again, with its context.
         QVERIFY(controller.bindPage(QStringLiteral("p"), page, url(QStringLiteral("required"))));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), page);
         QVERIFY(!prompt->isVisible());
     }
@@ -510,12 +517,12 @@ private Q_SLOTS:
 
         // Still incubating once the indicator's grace delay has passed, so
         // the indicator shows.
-        QTRY_VERIFY(indicator->property("loading").toBool());
-        QTRY_VERIFY(indicator->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(indicator->property("loading").toBool(), PageWaitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(indicator->isVisible(), PageWaitMs);
         QVERIFY(!itemNamed(host.get(), QStringLiteral("first")));
 
         m_incubator.setHeld(false);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == page);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == page, PageWaitMs);
         QVERIFY(!indicator->property("loading").toBool());
         QVERIFY(!indicator->isVisible());
     }
@@ -537,13 +544,13 @@ private Q_SLOTS:
         QQuickItem* const prompt = itemNamed(host.get(), QStringLiteral("page-host-select-page"));
         QVERIFY(unavailable);
         QVERIFY(prompt);
-        QTRY_VERIFY(unavailable->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(unavailable->isVisible(), PageWaitMs);
         // It is a page, so the page area does not ask for one.
         QVERIFY(!prompt->isVisible());
 
         // A good page shown instead takes the message away.
         controller.setCurrentPageId(QStringLiteral("q"));
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("first")));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("first")), PageWaitMs);
         QVERIFY(!unavailable->isVisible());
 
         // And it is back with the broken page, which is not loaded again.
@@ -574,7 +581,7 @@ private Q_SLOTS:
         QVERIFY(host);
         QQuickItem* const unavailable = itemNamed(host.get(), QStringLiteral("page-host-page-unavailable"));
         QVERIFY(unavailable);
-        QTRY_VERIFY(unavailable->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(unavailable->isVisible(), PageWaitMs);
         QVERIFY(!itemNamed(host.get(), QStringLiteral("required")));
         // Binding q makes every cached page read its registry entry again.
         QVERIFY(controller.bindPage(QStringLiteral("q"), new SimplePage(QStringLiteral("q"), &controller),
@@ -585,7 +592,7 @@ private Q_SLOTS:
         // A bind that brings a live controller creates the page with it.
         auto* const live = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), live, url(QStringLiteral("required"))));
-        QTRY_VERIFY(builtPageNamed(host.get(), QStringLiteral("required")));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageNamed(host.get(), QStringLiteral("required")), PageWaitMs);
         QCOMPARE(seenAtCompletion(host.get(), QStringLiteral("required"), "controllerAtCompletion"), live);
         QVERIFY(!unavailable->isVisible());
     }
@@ -598,16 +605,16 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(controllerOf(host.get(), QStringLiteral("first")) == placeholder);
+        QTRY_VERIFY_WITH_TIMEOUT(controllerOf(host.get(), QStringLiteral("first")) == placeholder, PageWaitMs);
 
         // The page on screen has no revealAnchor(), so it leaves the anchor
         // for the page that replaces it in place.
         controller.setPendingAnchor(QStringLiteral("p"), QStringLiteral("the-anchor"));
         auto* const real = new SimplePage(QStringLiteral("p"), &controller);
         QVERIFY(controller.bindPage(QStringLiteral("p"), real, url(QStringLiteral("reveal"))));
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("reveal")));
-        QTRY_COMPARE(itemNamed(host.get(), QStringLiteral("reveal"))->property("revealed").toString(),
-                     QStringLiteral("the-anchor"));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("reveal")), PageWaitMs);
+        QTRY_COMPARE_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("reveal"))->property("revealed").toString(),
+                                  QStringLiteral("the-anchor"), PageWaitMs);
         // Taken by the page that revealed it.
         QVERIFY(controller.takePendingAnchor(QStringLiteral("p")).isEmpty());
     }
@@ -622,23 +629,23 @@ private Q_SLOTS:
         controller.setCurrentPageId(QStringLiteral("p"));
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("first")));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("first")), PageWaitMs);
         QQuickItem* const hidden = itemNamed(host.get(), QStringLiteral("first"));
-        QTRY_VERIFY(hidden->width() > 0 && hidden->height() > 0);
+        QTRY_VERIFY_WITH_TIMEOUT(hidden->width() > 0 && hidden->height() > 0, PageWaitMs);
         controller.setCurrentPageId(QStringLiteral("q"));
-        QTRY_VERIFY(itemNamed(host.get(), QStringLiteral("second")));
+        QTRY_VERIFY_WITH_TIMEOUT(itemNamed(host.get(), QStringLiteral("second")), PageWaitMs);
         QQuickItem* const shown = itemNamed(host.get(), QStringLiteral("second"));
-        QTRY_COMPARE(shown->size(), hidden->size());
+        QTRY_COMPARE_WITH_TIMEOUT(shown->size(), hidden->size(), PageWaitMs);
         const QSizeF before = hidden->size();
 
         // The shown page follows the window. The hidden one is left alone.
         host->setSize(host->size() + QSizeF(200, 100));
-        QTRY_VERIFY(shown->width() > before.width() && shown->height() > before.height());
+        QTRY_VERIFY_WITH_TIMEOUT(shown->width() > before.width() && shown->height() > before.height(), PageWaitMs);
         QCOMPARE(hidden->size(), before);
 
         // Shown again, it follows the page area once more.
         controller.setCurrentPageId(QStringLiteral("p"));
-        QTRY_COMPARE(hidden->size(), shown->size());
+        QTRY_COMPARE_WITH_TIMEOUT(hidden->size(), shown->size(), PageWaitMs);
     }
 
     void theModulePageShowsItsModulesState_data()
@@ -683,7 +690,7 @@ private Q_SLOTS:
         placeholder->setState(failed, disabledAfterCrash, reason, canRetry);
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(builtPageControlledBy(host.get(), placeholder));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageControlledBy(host.get(), placeholder), PageWaitMs);
         QQuickItem* const page = builtPageControlledBy(host.get(), placeholder);
         // Created as every module page is, with the app as well.
         QCOMPARE(page->property("settingsApp").value<QObject*>(), &controller);
@@ -716,7 +723,7 @@ private Q_SLOTS:
         placeholder->setState(false, false, QString(), true);
         const std::unique_ptr<QQuickItem> host = createHost(controller);
         QVERIFY(host);
-        QTRY_VERIFY(builtPageControlledBy(host.get(), placeholder));
+        QTRY_VERIFY_WITH_TIMEOUT(builtPageControlledBy(host.get(), placeholder), PageWaitMs);
         QQuickItem* const page = builtPageControlledBy(host.get(), placeholder);
         QVERIFY(showsText(page, QStringLiteral("Mod is not loaded yet")));
 
