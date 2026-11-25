@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-FileCopyrightText: 2026 Phosphor Works Team
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # The folder every Phosphor app's files live under in each XDG root, defined

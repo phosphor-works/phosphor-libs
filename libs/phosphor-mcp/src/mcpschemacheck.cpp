@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // The check of a value against a compiled schema, in JSON Schema 2020-12:
