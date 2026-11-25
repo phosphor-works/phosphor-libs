@@ -1,19 +1,29 @@
 <!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
+<!-- BEGIN shared: tools/sync writes this block from workspace/sync/claude-header.md. Change it there. -->
 # phosphor-libs
+
+This file has two parts. The rules that every phosphor-works repository follows come first, from the conventions of
+the workspace repository, imported below. The sections after them belong to this repository only: what it is, its
+layout, how to build and test it, and its own rules, code, skills and agents, and links to the other repositories.
+A section here does not repeat a convention. When a section and the conventions disagree, change one of them so
+that they agree.
+
+The Claude Code tooling comes from the plugins that `.claude/settings.json` enables and `workspace/tools/setup`
+installs. The `phosphor-works` plugin has the command guard, the shared skills (`phosphor-works:build`, `debug`,
+`code-audit`, `record-lesson`, `new-repo`), the shared reviewers, and the lesson index, which adds the lessons that
+fit each prompt.
+
+@../workspace/claude/conventions.md
+<!-- END shared -->
+
+## Overview
 
 phosphor-libs is the core layer of the Phosphor libraries: LGPL Qt 6 and Wayland libraries for rendering, layer-shell
 surfaces, shader packs, configuration, IPC, scripting and the foundations that window placement builds on.
 PlasmaZones, Lambent and Afterglow build it from a pinned commit, and phosphor-engine-libs and phosphor-shell-libs
 build on it. The placement engines are not here. They are in phosphor-engine-libs.
-
-The rules every phosphor-works repository follows come from the workspace repository, imported below. This file adds
-phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor-works:build`, `phosphor-works:debug`,
-`phosphor-works:code-audit`, the shared reviewers, the lesson index) comes from the `phosphor-works` plugin, which
-`.claude/settings.json` enables and `workspace/tools/setup` installs.
-
-@../workspace/claude/conventions.md
 
 ## Layout
 
@@ -29,7 +39,16 @@ phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor
 - `data/schemas/` holds the JSON schemas of the shared pack contracts. PlasmaZones'
   `scripts/validate-json-schemas.py` reads them from the pinned commit.
 
-## Layering
+## Build and test
+
+- `cmake --workflow --preset dev` configures into `build/`, builds and tests. The other presets are `release` and
+  `relwithdebinfo`. Follow `phosphor-works:build` for the memory cap, jobs, the warning count and the non-unity gate.
+- CI is the shared C++ CI of the workspace repository (`cpp-ci.yml`): the `dev` preset on Arch and on Fedora 44 (older
+  Qt), and `nix flake check`. Tests run with `QT_QPA_PLATFORM=offscreen`.
+
+## Rules
+
+### Layering
 
 - This is the bottom layer. No library here links a phosphor-engine-libs, phosphor-shell-libs or app target, or
   names an app's data directories. The app passes each one in: the shader-preset subdir, the pointer-pack subdir to
@@ -38,19 +57,33 @@ phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor
 - phosphor-engine-libs fails to configure if an engine reaches `Qt6::Qml` or `Qt6::Quick` anywhere in its link
   closure. A new PUBLIC Qml link on a library the engines reach (`phosphor-registry`, `phosphor-layout-api`) breaks it.
 - The suite folder name, `phosphor-works`, is defined once in `cmake/PhosphorSuite.cmake`.
+
+### License
+
 - Everything here is `LGPL-2.1-or-later`, the tests and CMake modules included.
 
-## How apps consume it
+### Third-party pins and ABI
+
+- `cmake/PhosphorDependencies.cmake` is the only place the pins live: Luau, jsoncons, CPM.cmake and, for the tests,
+  phosphor-surface-packs. `nix/package.nix` repeats Luau and jsoncons. Offline builds use
+  `-DPHOSPHOR_DEPS_ARCHIVES=<dir>`, filled by `cmake -DPHOSPHOR_DEPS_FETCH=<dir> -P cmake/PhosphorDependencies.cmake`.
+- After a bump, run `PHOSPHOR_LIBS_DIR=<this checkout> scripts/check-conventions.py` in PlasmaZones. Its dep-pins
+  rule names every recipe there that misses the new pin.
+- Each shared library has `SOVERSION 0`, except `phosphor-channel`, whose soname carries `major.minor` below 1.0.
+  There is no ABI check yet.
+
+## Other repositories
+
+### How apps consume it
 
 - PlasmaZones, Lambent, Afterglow, phosphor-engine-libs and phosphor-shell-libs pin one commit of this repository
   (archive URL and SHA-256) in their `cmake/<Project>Dependencies.cmake` and add it with CPM. When an app adds a
   library tree after phosphor-libs, the app's phosphor-libs pin is the one in use.
 - After a change here merges, move each consumer's pin: VERSION, URL, FILE and SHA256 together, and the same archive
   in its nix or packaging recipe. Build a consumer against a local checkout with
-  `-DCPM_phosphor-libs_SOURCE=<absolute path>`, or use the `workspace` superbuild to change a library and an app
-  together.
+  `-DCPM_phosphor-libs_SOURCE=<absolute path>`.
 
-## As a subproject
+### As a subproject
 
 - Only when `PHOSPHOR_LIBS_TOP_LEVEL` is on does the tree set C++20, unity builds, `ENABLE_PCH`, ccache, ECM, the KDE
   settings, `BUILD_TESTING` (default `OFF`), `QT_NO_CAST_FROM_ASCII` and clang-format. As a subproject the app's
@@ -63,26 +96,6 @@ phosphor-libs' own. The shared Claude Code tooling (the command guard, `phosphor
 - With tests on, the tree fetches the pinned phosphor-surface-packs unless the app set `PHOSPHOR_SURFACE_PACKS_DIR`.
   `PHOSPHOR_LIBS_BUNDLED_PACKS_DIR` is empty here, so the animation and pointer tests that check an app's bundled packs
   skip. PlasmaZones sets it.
-
-## Build and test
-
-- `cmake --workflow --preset dev` configures into `build/`, builds and tests. The other presets are `release` and
-  `relwithdebinfo`. Follow `phosphor-works:build` for the memory cap, jobs, the warning count and the non-unity gate.
-- CI is the shared C++ CI of the workspace repository (`cpp-ci.yml`): the `dev` preset on Arch and on Fedora 44 (older
-  Qt), with a warning failing the build, clang-format and qmlformat on every tracked file, and `nix flake check`.
-  Tests run with `QT_QPA_PLATFORM=offscreen`.
-- The shared git hooks (`lefthook.yml`, set up by `lefthook install` or `workspace/tools/setup`) run clang-format and
-  qmlformat on the staged files and check the commit message.
-
-## Third-party pins and ABI
-
-- `cmake/PhosphorDependencies.cmake` is the only place the pins live: Luau, jsoncons, CPM.cmake and, for the tests,
-  phosphor-surface-packs. `nix/package.nix` repeats Luau and jsoncons. Offline builds use
-  `-DPHOSPHOR_DEPS_ARCHIVES=<dir>`, filled by `cmake -DPHOSPHOR_DEPS_FETCH=<dir> -P cmake/PhosphorDependencies.cmake`.
-- After a bump, run `PHOSPHOR_LIBS_DIR=<this checkout> scripts/check-conventions.py` in PlasmaZones. Its dep-pins
-  rule names every recipe there that misses the new pin.
-- Each shared library has `SOVERSION 0`, except `phosphor-channel`, whose soname carries `major.minor` below 1.0.
-  There is no ABI check yet.
 
 ## Where things are
 
