@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #pragma once
@@ -276,9 +276,11 @@ public:
         return m_error.empty() && !m_ended;
     }
     /// Why the stream failed. Empty while it works, and after a clean end.
+    /// A failed write names its reason at once, while open() stays true until
+    /// the input that the other end sent before it closed is read to its end.
     const std::string& error() const
     {
-        return m_error;
+        return m_error.empty() ? m_outputError : m_error;
     }
 
 private:
@@ -305,6 +307,7 @@ private:
         return m_error.empty() && !m_outputEnded;
     }
     void fail(std::string reason, Farewell farewell = Farewell::Send);
+    void outputFailed(std::string reason);
     void refusePeer(std::string reason);
     void sendFarewell();
     void endOutput();
@@ -349,6 +352,7 @@ private:
     bool m_helloWritten = false; ///< the hello reached the fd
     bool m_ended = false; ///< the input ended
     bool m_outputEnded = false; ///< this end ended its output
+    std::string m_outputError; ///< why a write failed: the stream's error once its input ends
     bool m_peerBroke = false; ///< the other end broke the protocol
     std::string m_error;
 };

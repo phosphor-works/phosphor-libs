@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #pragma once
@@ -88,7 +88,7 @@ public:
     /// compile time with a clear message rather than at link time with
     /// an opaque "undefined reference" error.
     template<typename T>
-    T read(const QString& group, const QString& key) const
+    T read(const QString& /*group*/, const QString& /*key*/) const
     {
         static_assert(sizeof(T) == 0,
                       "PhosphorConfig::Store::read<T> is only implemented for QString, int, bool, double, "

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #pragma once
@@ -12,8 +12,17 @@
 //
 // Centralized here so every C++ TU that needs the protocol header
 // includes it through one place — no duplicated #define/#undef blocks.
+// Clang warns about a macro that hides a keyword (-Wkeyword-macro), which is
+// what the workaround does on purpose.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wkeyword-macro"
+#endif
 extern "C" {
 #define namespace namespace_
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #undef namespace
 }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif

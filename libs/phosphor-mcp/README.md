@@ -1,4 +1,4 @@
-<!-- SPDX-FileCopyrightText: 2026 fuddlesworth
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
      SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-mcp
@@ -72,7 +72,7 @@ stderr itself is a terminal, or when the environment sets
 support, they go to the systemd journal. A server that an MCP client starts
 often has no terminal (a desktop client or a service does not pass one on),
 so a client that keeps the server's stderr as its log gets nothing unless
-the variable is set. `examples/wordcount.cpp` sets it before it creates its
+the variable is set. `examples/phosphor-mcp/wordcount.cpp` sets it before it creates its
 `QCoreApplication`, unless the environment already has it.
 
 ### Requests
@@ -446,7 +446,7 @@ int main(int argc, char** argv)
 a character device or a regular file. A closed stdin or stdout whose number
 the `QCoreApplication`'s own eventfd took is one such case.
 
-`examples/wordcount.cpp` is a whole server with one tool, which the test
+`examples/phosphor-mcp/wordcount.cpp` is a whole server with one tool, which the test
 `test_phosphor_mcp_example` runs as a client would.
 
 ### Answering later
@@ -758,5 +758,5 @@ A megabyte of schema 900 levels deep is refused at once.
   serves an agent that starts the application as a child instead.
 - [`phosphor-channel`](../phosphor-channel/README.md). Its `SigpipeBlock` is
   the original of the transport's copy, and the two are kept in step.
-- `examples/wordcount.cpp` and `tests/test_phosphor_mcp_example.cpp`. A
+- `examples/phosphor-mcp/wordcount.cpp` and `tests/test_phosphor_mcp_example.cpp`. A
   whole server, and a client that runs it.

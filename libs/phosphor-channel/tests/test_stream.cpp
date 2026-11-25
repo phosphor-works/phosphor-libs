@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #include <PhosphorChannel/Stream.h>
@@ -212,6 +212,7 @@ private Q_SLOTS:
     void channelIds_stayBelowThePeersLimit();
     void reopenBeforeRelease_isRefused();
     void endOfInput_closesReaders();
+    void failedWrite_stillReadsWhatThePeerSentBeforeItClosed();
     void endOfInput_reachesOnReadable();
     void failure_reachesOnReadable();
     void shutdown_endsADuplicatedSocket();
@@ -228,7 +229,7 @@ private Q_SLOTS:
     void write_timesOutAndClosesWhenThePeerGoes();
     void bothEndsFlushAtOnce();
     void flushZero_writesWhatFits();
-    void failedStream_wantsNoWriteAndReadsNoMore();
+    void failedOutput_wantsNoWriteAndReadsToTheEnd();
     void closedFd_failsInsteadOfSpinning();
     void refusesFdsThatCannotCarryAStream();
     void destruction_restoresFlagsAndKeepsStdioTaken();
@@ -680,6 +681,44 @@ void TestStream::endOfInput_closesReaders()
     QCOMPARE(b.reader(1)->read(frame), ReadResult::Closed);
     // Reading after the end sends nothing to an end that is gone.
     QVERIFY2(b.error().empty(), b.error().c_str());
+}
+
+void TestStream::failedWrite_stillReadsWhatThePeerSentBeforeItClosed()
+{
+    // The other end answers and closes at once, and this end writes before it
+    // reads: the write fails, and the answer in this end's input still
+    // arrives. aglow-mux lost a window's answer to a call this way.
+    int fb = -1;
+    const int fa = socketPair(fb);
+    auto a = std::make_unique<Stream>(fa);
+    Stream b(fb);
+    StreamWriter* toB = a->openWriter(1, "t.v1", nullptr);
+    StreamWriter* toA = b.openWriter(2, "t.v1", nullptr);
+    QVERIFY(pumpUntil(*a, b, [&] {
+        return toB->maxFrame() > 0 && toA->maxFrame() > 0;
+    }));
+    QCOMPARE(toB->tryWrite("the answer"), WriteResult::Written);
+    QVERIFY(a->flush(2000));
+    a.reset();
+
+    // The write fails in the call that tries it, or in the flush after it.
+    (void)toA->tryWrite("too late");
+    QVERIFY(!b.flush(2000));
+    QVERIFY2(b.error().find("output failed") != std::string::npos, b.error().c_str());
+    // The output ended, the input not yet.
+    QCOMPARE(toA->tryWrite("after"), WriteResult::Closed);
+    QVERIFY(b.open());
+
+    for (int i = 0; i < 50 && b.open(); ++i)
+        b.pump(10);
+    QVERIFY(!b.open());
+    std::string frame;
+    QCOMPARE(b.reader(1)->read(frame), ReadResult::Frame);
+    QCOMPARE(frame, std::string("the answer"));
+    // Every frame that the other end sent came whole: its channel ends
+    // cleanly, and only the stream reports the output that failed.
+    QCOMPARE(b.reader(1)->read(frame), ReadResult::Closed);
+    QVERIFY2(b.error().find("output failed") != std::string::npos, b.error().c_str());
 }
 
 void TestStream::endOfInput_reachesOnReadable()
@@ -1189,7 +1228,7 @@ void TestStream::flushZero_writesWhatFits()
     ::close(fb);
 }
 
-void TestStream::failedStream_wantsNoWriteAndReadsNoMore()
+void TestStream::failedOutput_wantsNoWriteAndReadsToTheEnd()
 {
     int raw = -1;
     const int fd = socketPair(raw);
@@ -1199,20 +1238,26 @@ void TestStream::failedStream_wantsNoWriteAndReadsNoMore()
         ++opened;
     };
     // The other end opens three channels and stops reading: the credit for
-    // them cannot go out, and the stream fails in the call that reads them.
+    // them cannot go out, and the output fails in the call that reads them.
     const std::string bytes = hello(ProtocolVersion) + open(1) + open(2) + open(3);
     ::shutdown(raw, SHUT_RD);
     ::send(raw, bytes.data(), bytes.size(), MSG_NOSIGNAL);
     pollfd p{fd, POLLIN, 0};
     QCOMPARE(::poll(&p, 1, 2000), 1);
-    const bool kept = stream.readable();
-    QVERIFY(!stream.error().empty());
-    QVERIFY(!kept);
-    QVERIFY(!stream.readable());
+    stream.readable();
+    QVERIFY2(stream.error().find("output failed") != std::string::npos, stream.error().c_str());
     QVERIFY(!stream.wantsWrite());
     // The channels opened before the failure were still announced.
     QCOMPARE(opened, 3);
+    // The input is read to its end, which the stream reports as the failure
+    // of its output.
+    QVERIFY(stream.open());
     ::close(raw);
+    QCOMPARE(::poll(&p, 1, 2000), 1);
+    QVERIFY(!stream.readable());
+    QVERIFY(!stream.open());
+    QVERIFY2(stream.error().find("output failed") != std::string::npos, stream.error().c_str());
+    QVERIFY(!stream.readable());
 }
 
 void TestStream::closedFd_failsInsteadOfSpinning()

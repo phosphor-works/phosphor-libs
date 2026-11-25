@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #include <PhosphorChannel/Stream.h>
@@ -322,6 +322,21 @@ void Stream::fail(std::string reason, Farewell farewell)
         sendFarewell();
 }
 
+void Stream::outputFailed(std::string reason)
+{
+    // A write fails when the other end closed, but what it sent before it
+    // closed is still in this end's input: an answer that it gave and then
+    // closed. The output ends, and the input is read to its end. The stream
+    // fails then, with this reason. A failure of the input fails it at once.
+    m_outputError = std::move(reason);
+    m_out.clear();
+    m_outHead = 0;
+    m_control.clear();
+    endOutput();
+    if (m_ended)
+        fail(m_outputError, Farewell::Skip);
+}
+
 void Stream::announceEnd()
 {
     // Every reader now reads to its end, Closed or Corrupt: an owner that
@@ -422,7 +437,8 @@ StreamWriter* Stream::openWriter(std::uint32_t id, std::string codec, std::strin
         return nullptr;
     };
     if (!canWrite())
-        return refuse("the stream cannot write: " + (m_error.empty() ? std::string("its output ended") : m_error));
+        return refuse("the stream cannot write: "
+                      + (this->error().empty() ? std::string("its output ended") : this->error()));
     if (!validCodec(codec))
         return refuse(codecRule());
     const auto it = m_writers.find(id);
@@ -444,7 +460,7 @@ StreamWriter* Stream::openWriter(std::uint32_t id, std::string codec, std::strin
     // The Open itself may be what found the output dead. Then nothing opened,
     // and the writer of an ended channel on this id stays as it was.
     if (!canWrite())
-        return refuse("the stream cannot write: " + m_error);
+        return refuse("the stream cannot write: " + this->error());
     // The Open went through m_control, which needs no writer: the record comes
     // now. A writer whose channel ended goes, since its id opens again.
     auto& writer = m_writers[id];
@@ -580,7 +596,7 @@ bool Stream::writable()
         if (n < 0 && errno == EAGAIN)
             return true;
         if (n <= 0) {
-            fail(std::string("the stream's output failed: ") + std::strerror(n < 0 ? errno : EPIPE), Farewell::Skip);
+            outputFailed(std::string("the stream's output failed: ") + std::strerror(n < 0 ? errno : EPIPE));
             return false;
         }
         m_outHead += std::size_t(n);
@@ -635,6 +651,10 @@ bool Stream::readable()
                 }
             }
         }
+        // The input ended whole, after the output failed: the stream fails
+        // now, as it would have at once without an input to read.
+        if (m_error.empty() && !m_outputError.empty())
+            fail(m_outputError, Farewell::Skip);
         // A clean end: a failure above already announced it.
         if (m_error.empty())
             announceEnd();

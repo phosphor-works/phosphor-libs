@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 fuddlesworth
+# SPDX-FileCopyrightText: 2026 Phosphor Works Team
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # PhosphorControl — reusable Qt6/QML/Kirigami settings-app framework
@@ -22,9 +22,9 @@
 #
 # Built standalone or as a subdirectory of Phosphor (or any consumer).
 
-# 3.21 floor: this file uses ${PROJECT_IS_TOP_LEVEL} (>= 3.21) for the
-# examples gate. A lower floor would fail mid-configure with an
-# empty-variable error instead of a clear minimum-version message.
+# 3.21 floor: the suite's minimum for PROJECT_IS_TOP_LEVEL. A lower floor
+# would fail mid-configure with an empty-variable error instead of a clear
+# minimum-version message.
 cmake_minimum_required(VERSION 3.21)
 
 set(PHOSPHORCONTROL_VERSION "0.1.0")
@@ -213,8 +213,8 @@ set(phosphorcontrol_SRCS
 # — missing entirely, so cc1plus fires before AUTOMOC recreates it.
 # Set at DIRECTORY level so every implicitly-generated sub-target picks
 # it up without enumerating the ever-changing list by name; placed before
-# the first target so it also propagates to the examples/ and tests/
-# subdirectories added below. Mirrors libs/phosphor-animation and
+# the first target so it also propagates to the tests/ subdirectory added
+# below. Mirrors libs/phosphor-animation and
 # plasmazones/src/shared — see those for the full rationale.
 set_property(DIRECTORY APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-include-dirs")
 
@@ -575,26 +575,6 @@ install(TARGETS phosphor-control-metadata
 )
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PhosphorControlModule.cmake)
 install(FILES cmake/PhosphorControlModule.cmake DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorControl)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Examples — opt-in via -DBUILD_PHOSPHOR_CONTROL_EXAMPLES=ON
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Default follows PROJECT_IS_TOP_LEVEL: ON when this lib is the outermost
-# project (standalone build), and also ON in-tree (PlasmaZones is top-level,
-# so the value propagates TRUE here) where examples/minimal is built and
-# expected. CAVEAT: a third party that vendors this lib via add_subdirectory
-# inside their OWN top-level project also gets the propagated TRUE and builds
-# these examples unintentionally — they should pass -DBUILD_PHOSPHOR_CONTROL_EXAMPLES=OFF.
-# (Requires CMake >= 3.21 for PROJECT_IS_TOP_LEVEL — see the minimum above.)
-option(BUILD_PHOSPHOR_CONTROL_EXAMPLES
-    "Build the phosphor-control example apps"
-    ${PROJECT_IS_TOP_LEVEL})
-
-if(BUILD_PHOSPHOR_CONTROL_EXAMPLES AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
-    add_subdirectory(examples)
-endif()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Install
