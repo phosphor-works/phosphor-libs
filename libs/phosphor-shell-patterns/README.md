@@ -1,52 +1,48 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-shell-patterns
 
-> UI-pattern recipes on top of `PhosphorLayer::Role`. The axis-2
-> vocabulary between wlr-layer-shell wire primitives (axis 1, in
-> phosphor-layer) and consumer-side application roles (axis 3, e.g.
-> Phosphor's `PhosphorRoles`).
+phosphor-shell-patterns gives named UI-pattern recipes on top of `PhosphorLayer::Role`. It is the axis-2 vocabulary
+between the wlr-layer-shell wire primitives (axis 1, in phosphor-layer) and the application roles of a consumer
+(axis 3, for example `PhosphorRoles` of Phosphor).
 
 ## Responsibility
 
-A `Role` in [`phosphor-layer`](../phosphor-layer/README.md) is a bundle
-of wlr-layer-shell parameters: `Layer`, `Anchors`, exclusive zone,
-keyboard interactivity, and scope prefix. It is intentionally
-domain-agnostic.
+A `Role` in [`phosphor-layer`](../phosphor-layer/README.md) is a bundle of wlr-layer-shell parameters: `Layer`,
+`Anchors`, exclusive zone, keyboard interactivity and scope prefix. It does not know about any domain.
 
-`phosphor-shell-patterns` names the *UI patterns* a shell wants
-(a wallpaper covers the background, a panel reserves an edge, a modal
-grabs the keyboard, a toast appears in a corner) as ready-to-use
-`Role` values, so consumers compose their public roles from named
-recipes instead of re-deriving the layer / anchor / keyboard combo each
-time.
+`phosphor-shell-patterns` gives a name to each *UI pattern* that a shell wants, as a `Role` value that is ready to
+use. For example, a wallpaper covers the background, a panel is attached to an edge, a modal grabs the keyboard and
+a toast shows in a corner. Consumers make their public roles from these named recipes. They do not derive the
+layer, anchor and keyboard combination again each time.
 
-## Vocabulary
+## Key types
 
 | Pattern | Signature | Purpose |
 |---------|-----------|---------|
 | `Wallpaper()`           | `const Role&` | Background layer, all anchors, exclusive zone 0, kbd None |
 | `Hud()`                 | `const Role&` | Overlay layer, all anchors, click-through, no exclusive zone |
-| `Modal()`               | `const Role&` | Top layer, no anchors (compositor centres), exclusive kbd grab |
-| `Floating()`            | `const Role&` | Overlay layer, no anchors, no kbd. Consumer positions via margins |
-| `Panel(Edge)`           | `Role`        | Edge-anchored, reserves space via exclusive zone, kbd OnDemand |
-| `Toast(Corner)`         | `Role`        | Corner-anchored, click-through, no exclusive zone |
+| `Modal()`               | `const Role&` | Top layer, no anchors (the compositor centers it), exclusive kbd grab |
+| `Floating()`            | `const Role&` | Overlay layer, no anchors, no kbd. The consumer sets the position with margins. |
+| `Panel(Edge)`           | `Role`        | Top layer, anchored to the edge and its two neighbor edges, exclusive zone 0, kbd OnDemand |
+| `Toast(Corner)`         | `Role`        | Top layer, corner-anchored, click-through, no exclusive zone |
 
 `Edge` is `Top | Bottom | Left | Right`. `Corner` is `TopLeft |
 TopRight | BottomLeft | BottomRight`.
 
-The four fixed presets are exposed as accessor functions that return a
-reference to a function-local static (Meyers singleton). The first call
-constructs the Role lazily, and subsequent calls return the same object.
-This makes the presets safe to use from any consumer's static
-initializer regardless of dynamic-init order across translation units
-or shared libraries.
+A panel that must reserve space sets the size of its exclusive zone with `withExclusiveZone()` of
+`PhosphorLayer::Role`.
 
-The parameterised `Panel` and `Toast` functions return a fresh `Role`
-per call so the scope prefix encodes the edge/corner variant.
+The four fixed presets are accessor functions. Each returns a reference to a function-local static (Meyers
+singleton). The first call constructs the Role lazily, and each subsequent call returns the same object. Thus a
+consumer can use the presets in its static initializer, whatever the dynamic-init order across translation units or
+shared libraries.
 
-## Typical use
+The parameterized `Panel` and `Toast` functions return a new `Role` for each call. The scope prefix of that role
+encodes the edge or corner variant.
+
+## Use
 
 ```cpp
 #include <PhosphorShellPatterns/Patterns.h>
@@ -69,31 +65,24 @@ inline const PhosphorLayer::Role MyAppToast =
 
 ## Design notes
 
-- **Three-axis separation.** Protocol (axis 1, on `Role` in
-  `phosphor-layer`), UI pattern (axis 2, here), app role (axis 3,
-  consumer-side). A consumer that wants to override one axis without
-  disturbing the others targets just that one. For example, swap `Hud`
-  for `Wallpaper` on a particular consumer role without retyping every
-  other field.
-- **Patterns are open vocabulary.** Adding a new pattern (e.g. `Card`
-  for in-place transient surfaces) costs one entry here and zero
-  changes to `phosphor-layer`. The library captures the recipes that
-  are actually reused, not an exhaustive set.
-- **No shell-specific words.** "Panel" / "Toast" / "Modal" / "Hud"
-  describe what something *is*, not which shell rendered it. Borrowed
-  words like "popup" or "notification" come from specific shell
-  vocabularies and are avoided.
-- **Scope prefixes are unique per pattern variation.** Each preset and
-  factory output carries a distinct scope prefix so compositors can
-  namespace surfaces independently.
+- **Three separate axes.** The protocol is axis 1 (on `Role` in `phosphor-layer`). The UI pattern is axis 2 (this
+  library). The app role is axis 3 (in the consumer). A consumer that overrides one axis changes only that axis.
+  For example, it can use `Wallpaper` instead of `Hud` for one consumer role, and keep every other field.
+- **The vocabulary is open.** A new pattern (for example `Card` for in-place transient surfaces) costs one entry
+  here and no change to `phosphor-layer`. The library holds the recipes that consumers use again, not a complete
+  set.
+- **No shell-specific words.** "Panel" / "Toast" / "Modal" / "Hud" tell what a surface *is*, not which shell
+  rendered it. The library does not use words such as "popup" or "notification", because they come from the
+  vocabulary of specific shells.
+- **Each pattern variation has its own scope prefix.** Each preset and each factory output carries a different scope
+  prefix. Thus compositors can put surfaces in separate namespaces.
 
 ## Dependencies
 
 - `QtCore`, `QtGui` (for `QMargins`)
-- [`phosphor-layer`](../phosphor-layer/README.md) — the `Role` struct
-  patterns produce.
+- [`phosphor-layer`](../phosphor-layer/README.md): the `Role` struct that the patterns produce.
 
 ## See also
 
-- [`phosphor-layer`](../phosphor-layer/README.md) — wlr-layer-shell
-  primitives (axis 1) this library composes.
+- [`phosphor-layer`](../phosphor-layer/README.md): the wlr-layer-shell primitives (axis 1) that this library
+  composes.

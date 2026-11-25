@@ -1,40 +1,38 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-identity
 
-> Stable, cross-process string formats for the IDs that flow through the
-> Phosphor stack: window IDs, screen IDs, and virtual-screen IDs.
+phosphor-identity defines the stable, cross-process string formats for window IDs, screen IDs and virtual-screen IDs.
+All IDs that go through the Phosphor stack use these formats.
 
 ## Responsibility
 
-Wayland doesn't expose a reliable numeric window ID the way X11 does, and
-each compositor surfaces "which window" differently. KWin scripts use
-`internalId`, the daemon's compositor-bridge D-Bus interface carries
-string IDs over the wire, and application QObjects own `QWindow` pointers.
+Wayland does not expose a reliable numeric window ID as X11 does. Each compositor identifies "which window" in a
+different way. KWin scripts use `internalId`, the compositor-bridge D-Bus interface of the daemon carries string IDs
+on the wire, and application QObjects own `QWindow` pointers.
 
-`phosphor-identity` owns the wire formats for those identities. It is an
-INTERFACE library where every helper is `inline` in the public header, so
-all consumers link the same definitions without an extra `.so`.
+`phosphor-identity` owns the wire formats for those identities. It is an INTERFACE library. Every helper is `inline`
+in the public header, so all consumers link the same definitions without an extra `.so`.
 
-The three identity formats it owns:
+It owns three identity formats:
 
-- **`WindowId`** — composite `"appId|instanceId"` strings. Helpers to
-  build, parse, and pattern-match against the canonical form.
-- **`ScreenId`** — EDID-derived stable identifier with connector-name
-  fallback when no EDID is available. Compositor-portable.
-- **`VirtualScreenId`** — `"<physicalId>/vs:<index>"` for the
-  user-defined sub-regions of a physical monitor.
+- **`WindowId`**: composite `"appId|instanceId"` strings. Helpers build, parse and pattern-match the canonical form.
+- **`ScreenId`**: a stable identifier from the EDID. It falls back to the connector name when no EDID is available.
+  It is portable across compositors.
+- **`VirtualScreenId`**: `"<physicalId>/vs:<index>"` for the user-defined sub-regions of a physical monitor.
 
 ## Key types
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorIdentity::WindowId`        | Helpers for the canonical `appId|instanceId` window-id format |
-| `PhosphorIdentity::ScreenId`        | EDID parsing + screen-id construction, cached across TUs |
-| `PhosphorIdentity::VirtualScreenId` | `<physicalId>/vs:<index>` make / parse / detect helpers |
+| `PhosphorIdentity::WindowId`        | Helpers for the canonical `appId\|instanceId` window-id format |
+| `PhosphorIdentity::ScreenId`        | EDID parsing and screen-id construction, with a cache shared across TUs |
+| `PhosphorIdentity::VirtualScreenId` | `<physicalId>/vs:<index>` make, parse and detect helpers |
 
-## Typical use
+Each of these is a namespace of `inline` functions, not a class.
+
+## Use
 
 ```cpp
 #include <PhosphorIdentity/WindowId.h>
@@ -59,17 +57,16 @@ if (VirtualScreenId::isVirtual(screenId)) {
 
 ## Design notes
 
-- **INTERFACE library.** No `.so` is shipped. Every function is `inline`
-  in the public header. Cross-process consumers all share one definition
-  by language rule, and nobody links a third copy.
-- **Header-only by design.** The function-local static caches in
-  `ScreenId.h` are guaranteed unique across translation units by the
-  C++17 inline-function-static rule.
-- **Wire format owns the spelling.** Every consumer uses these helpers
-  rather than hand-rolling the format. To change the format, change it
-  here once.
+- **INTERFACE library.** The library ships no `.so`. Every function is `inline` in the public header. By the
+  language rule, all cross-process consumers share one definition, and no consumer links a third copy.
+- **Header-only by design.** The C++17 rule for static variables in inline functions makes the function-local
+  static caches in `ScreenId.h` unique across translation units.
+- **The wire format owns the spelling.** Every consumer uses these helpers and does not write the format by hand. To
+  change the format, change it here, one time.
+- **Main thread only for `ScreenId`.** The sysfs cache has no synchronization, so call every `ScreenId` function
+  from the GUI thread.
 
 ## Dependencies
 
-- `QtCore` only. Zero Phosphor dependencies. This is the foundation
-  layer everything else builds on.
+- `QtCore` only. The library has no Phosphor dependencies. It is the foundation layer that everything else builds
+  on.
