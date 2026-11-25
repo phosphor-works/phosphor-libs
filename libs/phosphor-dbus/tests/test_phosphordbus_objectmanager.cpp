@@ -23,7 +23,6 @@ Q_DECLARE_METATYPE(ManagedObjectMap)
 
 namespace {
 constexpr auto kService = "org.phosphor_works.Test.ObjectManager";
-constexpr auto kObjectManagerIface = "org.freedesktop.DBus.ObjectManager";
 
 InterfaceMap makeInterfaces(const QString& iface, const QString& nameKey, const QString& nameValue)
 {
