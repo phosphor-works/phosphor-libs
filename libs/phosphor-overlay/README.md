@@ -1,33 +1,35 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-overlay
 
-> Per-screen layer-shell shell hosts, slot vocabulary, and animator-config
-> wiring for multi-slot overlays.
+phosphor-overlay hosts overlays with more than one slot on each screen. It supplies a layer-shell shell host for
+each screen, the slot terms, and the connection of animator configurations for overlays with many slots.
 
 ## Responsibility
 
-Helper layer on top of [`phosphor-layer`](../phosphor-layer/README.md),
-[`phosphor-surfaces`](../phosphor-surfaces/README.md), and
-[`phosphor-animation`](../phosphor-animation/README.md). Given a
-consumer-provided surface factory, `ShellHost` owns the per-screen
-layer-shell shell lifecycle (create / destroy / rekey), the slot map
-keyed by consumer-chosen slot names, animator-driven slot hides, and
-per-role animator-config registration. The library knows nothing about
-zones, layouts, or specific content. Consumers wire their slot
-vocabulary through callbacks.
+This is a helper layer on [`phosphor-layer`](../phosphor-layer/README.md),
+[`phosphor-surfaces`](../phosphor-surfaces/README.md) and [`phosphor-animation`](../phosphor-animation/README.md).
+The consumer supplies a surface factory. With it, `ShellHost` owns these parts:
+
+- the lifecycle of the layer-shell shell on each screen (create, destroy, rekey)
+- the slot map, keyed by slot names that the consumer chooses
+- slot hides that the animator drives
+- the registration of animator configurations for each role
+
+The library knows nothing about zones, layouts or specific content. Consumers connect their slot terms through
+callbacks.
 
 ## Key types
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorOverlay::ShellHost`             | Owns the per-screen `ShellState` map, lifecycle methods, animator wiring. |
-| `PhosphorOverlay::ShellState`            | Per-screen mechanism state: layer-shell surface, QQuickWindow, physical screen, slot map. |
-| `PhosphorOverlay::SlotEntry`             | One slot entry: `QPointer<QQuickItem> item` + `PhosphorLayer::Role role`. |
-| `PhosphorOverlay::makePerInstanceRole()` | Build a per-instance Role by appending `-{screenId}-{generation}` to a base scope prefix. |
+| `PhosphorOverlay::ShellHost`             | Owns the `ShellState` map of the screens, the lifecycle methods and the animator wiring |
+| `PhosphorOverlay::ShellState`            | Mechanism state for one screen: layer-shell surface, QQuickWindow, physical screen, slot map |
+| `PhosphorOverlay::SlotEntry`             | One slot entry: `QPointer<QQuickItem> item` + `PhosphorLayer::Role role` |
+| `PhosphorOverlay::makePerInstanceRole()` | Builds a Role for one instance. It appends `-{screenId}-{generation}` to a base scope prefix |
 
-## Typical use
+## Use
 
 ```cpp
 using namespace PhosphorOverlay;
@@ -62,64 +64,52 @@ host.destroyShell(screenId);
 
 ## Design notes
 
-- **Stable pointers via raw owning pointers.** `ShellState` entries are
-  heap-allocated, and the host stores `QHash<QString, ShellState*>`.
-  Consumers cache the `ShellState*` returned by `ensureShell` /
-  `stateFor` in parallel per-screen state and rely on the pointer
-  staying valid across rehashes. `QHash<QString, std::unique_ptr<ShellState>>`
-  would move the pointee but still rehash the bucket array, so
-  consumer-cached references are stable only by the indirection.
-  `std::shared_ptr` would add refcount overhead the lib does not need
-  (there is one owner, the host, plus any number of borrowed observers).
-  `ShellState` is non-copyable / non-movable to prevent accidental
-  `auto copy = host.stateFor(id)` (note the missing `&`) from
-  shallow-cloning the mechanism pointers and slot map.
-- **Callback-driven content boundary.** Three function-object hooks
-  (`SurfaceFactory`, `PostCreateCallback`, `PreDestroyCallback`) carry
-  every consumer-specific decision: which role / qmlSource the surface
-  uses, which slot QML object names to look up, which signal handlers
-  to wire, which parallel content state to clear at teardown. The
-  library owns surface lifecycle, and the consumer owns content.
-- **Slot role pinned at wire time.** Each `SlotEntry` carries the
-  `PhosphorLayer::Role` the slot animates as, so `hideSlot` can drive
-  `SurfaceAnimator::beginHide` without the caller re-specifying the
-  role at every dismiss / cancel call site.
-- **`syncSurfaceState` is mechanism-only.** Consumers compute
-  `visible` and `inputGrabbing` from their content slot
-  visibility (e.g. modal vs non-modal classification), and the library
-  decides surface mapping + `Qt::WindowTransparentForInput` toggling.
-  A third field, `keyboardGrabbing`, drives the layer surface's keyboard
-  interactivity between Exclusive and None at runtime — only content that
-  has to read typed characters should ask for it, since while it is held
-  the focused toplevel receives no keys. It is per-screen with no
-  cross-screen arbitration, so a consumer moving such content between
-  screens must sync the screen it left as well as the one it entered.
-- **Sticky per-screen creation failure.** When the surface factory
-  returns nullptr for a screen, the host flags it. Subsequent
-  `ensureShell` calls short-circuit until `clearFailure(screenId)` is
-  called, typically on hot-plug. `failureScreenIds()` exposes the
-  current set so consumers with their own id grammar (e.g. virtual-
-  screen prefixes) can clear by prefix without the library learning
-  the grammar.
+- **Raw owning pointers give stable pointers.** Each `ShellState` entry is on the heap, and the host stores
+  `QHash<QString, ShellState*>`. Consumers keep the `ShellState*` that `ensureShell` / `stateFor` returns in their
+  own state for each screen. They rely on the pointer to stay valid when the hash grows.
+  `QHash<QString, std::unique_ptr<ShellState>>` would move the pointee but still rehash the bucket array, so the
+  references that consumers keep are stable only through the indirection. `std::shared_ptr` would add a reference
+  count that the library does not need: there is one owner, the host, and any number of borrowed observers.
+  `ShellState` is not copyable and not movable. This prevents an accidental `auto copy = host.stateFor(id)` (note
+  the missing `&`), which would make a shallow copy of the mechanism pointers and the slot map.
+- **Callbacks set the content boundary.** Three function-object hooks (`SurfaceFactory`, `PostCreateCallback`,
+  `PreDestroyCallback`) carry every decision that is specific to the consumer:
+  - the role and qmlSource of the surface
+  - the slot QML object names to look up
+  - the signal handlers to connect
+  - the parallel content state to clear at teardown
+
+  The library owns the surface lifecycle, and the consumer owns the content.
+- **The slot role is fixed when the slot is connected.** Each `SlotEntry` holds the `PhosphorLayer::Role` that the
+  slot animates as. Thus `hideSlot` can call `SurfaceAnimator::beginHide`, and the caller does not give the role
+  again at each dismiss or cancel call site.
+- **`syncSurfaceState` is only mechanism.** Consumers calculate `visible` and `inputGrabbing` from the visibility of
+  their content slots (for example, a modal or non-modal classification). The library decides the surface mapping
+  and the `Qt::WindowTransparentForInput` toggle. A third field, `keyboardGrabbing`, sets the keyboard interactivity
+  of the layer surface to Exclusive or None at run time. Ask for it only for content that must read typed
+  characters, because while it is on, the focused toplevel gets no keys. It applies to one screen, with no
+  arbitration across screens. If a consumer moves such content to another screen, it must sync the screen that it
+  left and the screen that it entered.
+- **A creation failure on a screen stays.** When the surface factory returns nullptr for a screen, the host marks
+  that screen. Later `ensureShell` calls for it return immediately until a call to `clearFailure(screenId)`,
+  usually on hot-plug. `failureScreenIds()` gives the current set. Consumers with their own id grammar (for example,
+  virtual-screen prefixes) can then clear by prefix, and the library does not need to know the grammar.
 
 ## Dependencies
 
 - `QtCore`, `QtQuick`
-- [`phosphor-layer`](../phosphor-layer/README.md) — `Role`, `Surface`,
-  wlr-layer-shell wire primitives.
-- [`phosphor-shell-patterns`](../phosphor-shell-patterns/README.md) —
-  UI-pattern recipes the consumer composes base roles from.
-- [`phosphor-surfaces`](../phosphor-surfaces/README.md) — managed
-  surface lifecycle + scope-generation counter.
-- [`phosphor-animation`](../phosphor-animation/README.md) —
-  `SurfaceAnimator` that drives every overlay show / hide leg.
-- [`phosphor-screens`](../phosphor-screens/README.md) — screen
-  topology + stable identifiers (consumer-facing dep, since the lib itself
-  only forward-declares `QScreen`).
+- [`phosphor-layer`](../phosphor-layer/README.md): `Role`, `Surface` and the wlr-layer-shell wire primitives.
+- [`phosphor-shell-patterns`](../phosphor-shell-patterns/README.md): the UI-pattern recipes from which the consumer
+  makes base roles.
+- [`phosphor-surfaces`](../phosphor-surfaces/README.md): managed surface lifecycle and the scope-generation counter.
+- [`phosphor-animation`](../phosphor-animation/README.md): the `SurfaceAnimator` that drives each show and hide leg
+  of an overlay.
+- [`phosphor-screens`](../phosphor-screens/README.md): screen topology and stable identifiers. This is a dependency
+  for the consumer, because the library itself only forward-declares `QScreen`.
 
 ## See also
 
-- [`phosphor-layer`](../phosphor-layer/README.md) — lower-level
-  surface / role primitives this library coordinates.
-- [`phosphor-shell-patterns`](../phosphor-shell-patterns/README.md) —
-  axis-2 UI-pattern recipes consumers use to build their base roles.
+- [`phosphor-layer`](../phosphor-layer/README.md): the lower-level surface and role primitives that this library
+  coordinates.
+- [`phosphor-shell-patterns`](../phosphor-shell-patterns/README.md): axis-2 UI-pattern recipes that consumers use
+  to build their base roles.

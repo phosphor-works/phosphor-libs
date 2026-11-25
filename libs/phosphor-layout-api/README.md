@@ -1,64 +1,50 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-layout-api
 
-> Layout description interfaces. The `ILayoutSource` seam plus the value
-> types (algorithm metadata, edge gaps, aspect-ratio classes, layout IDs,
-> previews) that cross library boundaries.
+phosphor-layout-api defines the interfaces and value types that describe a layout across library boundaries. It
+holds the `ILayoutSource` seam, the provider contracts, and the value types for algorithm metadata, edge gaps,
+aspect-ratio classes, layout IDs and previews.
 
 ## Responsibility
 
-Both the zones library and the autotiling library produce "a layout for
-this screen at this moment". Zones come from a user-drawn JSON description,
-and autotiling from a dynamic algorithm over the current window set.
-Downstream consumers (snap engine, overlay, settings-UI preview)
-shouldn't care which source a layout came from.
+The zones library and the autotiling library both supply layouts. Zones come from a JSON description that the user
+draws. Autotiling comes from an algorithm that runs over the current window set. Consumers such as the snap engine,
+the overlay and the settings UI preview must not depend on the source of a layout.
 
-`phosphor-layout-api` is the shared vocabulary both sides agree on:
+`phosphor-layout-api` is the shared vocabulary of the two sides:
 
-- **`ILayoutSource`.** The interface every layout producer implements.
-  Given a screen and window-set, return a `Layout`.
-- **`ILayoutSourceFactory` / `ILayoutSourceRegistry`.** Provider-side
-  contracts so a registry (zones, tiles) can hand out layout sources by
-  ID without callers knowing the concrete type.
-- **`LayoutSourceProviderRegistry` / `LayoutSourceBundle`.** Composition-
-  root glue that lets a process advertise "I have these provider kinds"
-  once, and consumers ask the registry rather than the individual libs.
-- **`LayoutId`.** Stable string identifier that survives rename, because
-  consumers such as assignments and quick-layout slots reference layouts
-  across restarts.
-- **`AlgorithmMetadata`.** What a tiling algorithm declares about itself:
-  display name, description, and configurable parameters. A picker UI
-  uses this to render entries for autotile algorithms uniformly.
-- **`AspectRatioClass`.** The three buckets layouts declare for
-  screen-matching: narrow, normal, wide.
-- **`EdgeGaps` and `GapKeys`.** Spacing between zones (inner) and between
-  zones and the screen edge (outer), with well-known JSON key constants.
-- **`CompositeLayoutSource`.** Chains multiple sources (e.g. zones for
-  screen 1, autotile for screen 2) and presents them as one logical
-  source.
-- **`LayoutPreview`.** Lightweight struct plus free function that paints
-  a thumbnail of any layout for a picker UI.
+- Every layout producer implements `ILayoutSource`. A source lists the layouts that it can show with
+  `availableLayouts()`. It gives a `LayoutPreview` for one layout ID at a window count with `previewAt()`.
+- The provider contracts let a registry (zones, tiles) supply layout sources by ID. The caller does not know the
+  concrete type.
+- The composition-root glue lets a process declare its provider kinds one time. Consumers then ask the bundle, not
+  the individual libraries.
+- `CompositeLayoutSource` joins several sources (for example, zones and autotile) into one logical source.
 
 ## Key types
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorLayout::ILayoutSource`              | Abstract layout producer |
+| `PhosphorLayout::ILayoutSource`              | Abstract layout producer. Emits `contentsChanged` when its layouts change. |
 | `PhosphorLayout::ILayoutSourceFactory`       | Builds an `ILayoutSource` for a given layout-ID |
 | `PhosphorLayout::ILayoutSourceRegistry`      | Provider-side enumeration that emits `contentsChanged` |
-| `PhosphorLayout::LayoutSourceProviderRegistry` | Process-wide "which providers exist" registrar |
-| `PhosphorLayout::LayoutSourceBundle`         | Per-process bundle of resolved provider instances |
-| `PhosphorLayout::LayoutId`                   | Stable string identifier, value-semantic |
-| `PhosphorLayout::AlgorithmMetadata`          | Tiling algorithm self-description |
-| `PhosphorLayout::AspectRatioClass`           | Screen aspect bucket (Narrow / Normal / Wide) |
-| `PhosphorLayout::EdgeGaps`                   | Inner/outer spacing value type |
+| `PhosphorLayout::LayoutSourceProviderRegistrar` | Registers a provider at static-init time, so a process declares "which providers exist" one time |
+| `PhosphorLayout::FactoryContext`             | The registries that a composition root gives to each provider builder |
+| `PhosphorLayout::LayoutSourceBundle`         | Per-process bundle that builds every registered provider into one `CompositeLayoutSource` |
+| `PhosphorLayout::LayoutId`                   | Namespace of helpers that build, parse and classify layout IDs (`"autotile:"`, `"scrolling:"`) |
+| `PhosphorLayout::AlgorithmMetadata`          | Capability and display metadata of one autotile algorithm, for a picker UI |
+| `PhosphorLayout::AspectRatioClass`           | Screen aspect class (`Any`, `Standard`, `Ultrawide`, `SuperUltrawide`, `Portrait`) |
+| `PhosphorLayout::EdgeGaps`                   | Per-side outer gap value type (top, bottom, left, right) |
 | `PhosphorLayout::GapKeys`                    | JSON key constants for roundtrip |
 | `PhosphorLayout::CompositeLayoutSource`      | Multiplexes several `ILayoutSource`s |
-| `PhosphorLayout::LayoutPreview`              | Paint-a-thumbnail helper for pickers |
+| `PhosphorLayout::LayoutPreview`              | Plain data for one layout entry. Its zone rectangles are in 0.0 to 1.0 relative space, ready for a picker to scale. |
 
-## Typical use
+The library headers are in `include/PhosphorLayoutApi/`. `LayoutSourceProviderRegistry.h` declares the registrar,
+the factory context and the list of pending providers.
+
+## Use
 
 Implement a custom layout source:
 
@@ -84,7 +70,7 @@ public:
 };
 ```
 
-Chain two sources for screens with different preferences:
+Chain two sources, so that consumers hold one pointer for both:
 
 ```cpp
 CompositeLayoutSource composite;
@@ -94,25 +80,31 @@ composite.addSource(autotileSource);
 ILayoutSource *combined = &composite;            // consumers don't know the difference
 ```
 
+`availableLayouts()` on the composite returns the lists of its children, in the order that you added them.
+`previewAt()` returns the first non-empty preview of a child. The composite borrows its children. Keep each child
+alive while the composite exists.
+
 ## Design notes
 
-- **Zero Qt-GUI deps in the core.** Most of the contract is `QtCore`-only.
-  `QRect` brings in `QtGui`, but a headless test or a command-line tool
-  can still link against it without QML or Quick.
-- **Value-typed `LayoutId`.** `QString` would let two APIs disagree on
-  case-sensitivity. Wrapping enforces a single canonical form.
-- **`CompositeLayoutSource`** is how a daemon handles mixed-source setups
-  without special-casing per-screen logic in the snap or autotile engines.
-- **Provider registry pattern.** Both `phosphor-zones` and `phosphor-tiles`
-  implement `ILayoutSourceFactory` and register through
-  `LayoutSourceProviderRegistry`, so the daemon's composition root binds
-  providers once rather than knowing about them by name.
+- **No Qt GUI dependency.** The library links only `QtCore` and phosphor-registry. A headless test or a
+  command-line tool can link it without `QtGui`, QML or Quick.
+- **One set of `LayoutId` helpers.** IDs are `QString` values in three forms: a UUID for a manual layout,
+  `"autotile:<algorithmId>"` for an algorithm, and `"scrolling:"` for scrolling. Every consumer builds and
+  classifies IDs through `LayoutId`, so no other code writes these prefixes.
+- **`CompositeLayoutSource`** lets a daemon handle mixed-source setups. The snap and autotile engines do not need
+  special logic for each source.
+- **Provider registry pattern.** Both `phosphor-zones` and `phosphor-tiles` implement `ILayoutSourceFactory` and
+  register through `LayoutSourceProviderRegistrar`. The composition root of the daemon binds the providers one
+  time and does not know them by name.
 
 ## Dependencies
 
 - `QtCore`
+- [`phosphor-registry`](../phosphor-registry/README.md): the `Registry` and `IFactoryBase` that the factories use
 
 ## See also
 
-- [`phosphor-zones`](../phosphor-zones/README.md)   — primary `ILayoutSource` implementation (`ZonesLayoutSource`)
-- [`phosphor-tiles`](../phosphor-tiles/README.md)   — alternative implementation (`AutotileLayoutSource`)
+- [`phosphor-zones`](https://github.com/phosphor-works/phosphor-engine-libs/blob/main/libs/phosphor-zones/README.md):
+  the primary `ILayoutSource` implementation (`ZonesLayoutSource`)
+- [`phosphor-tiles`](https://github.com/phosphor-works/phosphor-engine-libs/blob/main/libs/phosphor-tiles/README.md):
+  the alternative implementation (`AutotileLayoutSource`)
