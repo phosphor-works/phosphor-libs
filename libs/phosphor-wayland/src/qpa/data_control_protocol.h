@@ -4,5 +4,6 @@
 #pragma once
 
 extern "C" {
+#include "ext-data-control-v1-client-protocol.h"
 #include "wlr-data-control-unstable-v1-client-protocol.h"
 }

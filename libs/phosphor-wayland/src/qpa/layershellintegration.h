@@ -155,10 +155,21 @@ public:
         return m_foreignToplevelManagerVersion;
     }
 
-    /// Client-side clipboard manager (`zwlr_data_control_manager_v1`). Bound at
-    /// version 1 (clipboard selection only; primary-selection is a v2 feature we
-    /// do not use). Returns nullptr when the compositor does not advertise it.
-    struct zwlr_data_control_manager_v1* dataControlManager() const
+    /// Client-side clipboard manager of the standard protocol
+    /// (`ext_data_control_manager_v1`). ClipboardDevice uses it when the
+    /// compositor advertises it. Returns nullptr when it does not.
+    struct ext_data_control_manager_v1* extDataControlManager() const
+    {
+        return m_extDataControlManagerAvailable ? m_extDataControlManager : nullptr;
+    }
+
+    /// Client-side clipboard manager of the older wlroots protocol
+    /// (`zwlr_data_control_manager_v1`), which upstream deprecates in favor of
+    /// the ext protocol. ClipboardDevice uses it only when the compositor has no
+    /// ext manager. Bound at version 1 (clipboard selection only;
+    /// primary-selection is a v2 feature we do not use). Returns nullptr when
+    /// the compositor does not advertise it.
+    struct zwlr_data_control_manager_v1* wlrDataControlManager() const
     {
         return m_dataControlManagerAvailable ? m_dataControlManager : nullptr;
     }
@@ -265,6 +276,9 @@ private:
     struct zwlr_data_control_manager_v1* m_dataControlManager = nullptr;
     uint32_t m_dataControlManagerId = 0;
     bool m_dataControlManagerAvailable = false;
+    struct ext_data_control_manager_v1* m_extDataControlManager = nullptr;
+    uint32_t m_extDataControlManagerId = 0;
+    bool m_extDataControlManagerAvailable = false;
 
     struct ext_session_lock_manager_v1* m_sessionLockManager = nullptr;
     uint32_t m_sessionLockManagerId = 0;

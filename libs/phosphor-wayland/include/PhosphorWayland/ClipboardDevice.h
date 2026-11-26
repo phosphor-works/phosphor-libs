@@ -15,10 +15,11 @@
 namespace PhosphorWayland {
 
 /**
- * @brief Client-side wrapper around `zwlr_data_control_device_v1`.
+ * @brief Client-side data-control device: `ext_data_control_device_v1`, or
+ * `zwlr_data_control_device_v1` on a compositor that has only the older protocol.
  *
  * Watches the session's clipboard selection (independent of keyboard focus, the
- * point of `wlr-data-control`), reports which MIME types the current selection
+ * point of data-control), reports which MIME types the current selection
  * offers, reads the selection content on demand, and can take ownership of the
  * selection to re-offer data (paste a history entry back). This is the
  * foundation primitive a clipboard-history service composes; it carries no
@@ -43,9 +44,10 @@ public:
     explicit ClipboardDevice(QObject* parent = nullptr);
     ~ClipboardDevice() override;
 
-    /// True iff the compositor advertises `zwlr_data_control_manager_v1`. The
-    /// constructor still succeeds when unsupported, but the device signals
-    /// nothing.
+    /// True iff the compositor advertises `ext_data_control_manager_v1` or
+    /// `zwlr_data_control_manager_v1`. The device uses the ext protocol when the
+    /// compositor has both. The constructor still succeeds when unsupported,
+    /// but the device signals nothing.
     static bool isSupported();
 
     /// MIME types offered by the current clipboard selection, or an empty list
