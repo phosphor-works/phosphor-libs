@@ -18,7 +18,6 @@
 #include <QLatin1StringView>
 #include <QMetaObject>
 #include <QPointer>
-#include <QRegularExpression>
 #include <QTimer>
 
 #include <cerrno>
@@ -95,13 +94,6 @@ QString idKey(const QJsonValue& id)
     const QCborValue number = QCborValue::fromJsonValue(id);
     const qint64 value = number.isInteger() ? number.toInteger() : static_cast<qint64>(id.toDouble());
     return QLatin1Char('n') + QString::number(value);
-}
-
-bool isValidToolName(const QString& name)
-{
-    // Anchored at the very end: "$" would also match before a final "\n".
-    static const QRegularExpression pattern(QRegularExpression::anchoredPattern(u"[A-Za-z0-9_.-]{1,128}"));
-    return pattern.match(name).hasMatch();
 }
 
 // Each capability that `required` names must be declared as an object, as
@@ -470,6 +462,51 @@ void McpServer::setMaxPendingWriteBytes(qint64 bytes)
     }
 }
 
+namespace {
+
+QString invalidToolNameText()
+{
+    return QStringLiteral("a tool name is 1 to 128 of A-Z, a-z, 0-9, '_', '-' and '.'");
+}
+
+// Compiles the schemas of a tool. The reason, or nothing, for a tool whose
+// required client capabilities or schemas the server cannot take.
+QString compileTool(const McpTool& tool, std::shared_ptr<McpSchema>* input, std::shared_ptr<McpSchema>* output)
+{
+    const QString notAnObject = capabilityThatIsNotAnObject(tool.requiredClientCapabilities(), QString());
+    if (!notAnObject.isEmpty()) {
+        return QStringLiteral("requiredClientCapabilities%1 is not an object, and no client could declare it")
+            .arg(notAnObject);
+    }
+    *input = std::make_shared<McpSchema>();
+    QString why = (*input)->compile(tool.inputSchema());
+    if (!why.isEmpty()) {
+        return QStringLiteral("inputSchema%1").arg(why);
+    }
+    if (!tool.outputSchema().isEmpty()) {
+        // Structured content may be any JSON value, so the root of an
+        // output schema may be any type.
+        *output = std::make_shared<McpSchema>();
+        why = (*output)->compile(tool.outputSchema(), McpSchema::Root::Any);
+        if (!why.isEmpty()) {
+            return QStringLiteral("outputSchema%1").arg(why);
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+QString McpServer::toolProblem(const McpTool& tool)
+{
+    if (!McpTool::isValidName(tool.name())) {
+        return invalidToolNameText();
+    }
+    std::shared_ptr<McpSchema> input;
+    std::shared_ptr<McpSchema> output;
+    return compileTool(tool, &input, &output);
+}
+
 bool McpServer::addTool(const McpTool& tool, Handler handler, QString* error)
 {
     const auto refuse = [&](const QString& why) {
@@ -482,8 +519,8 @@ bool McpServer::addTool(const McpTool& tool, Handler handler, QString* error)
     if (d->started) {
         return refuse(QStringLiteral("the server has started, and its tool list does not change"));
     }
-    if (!isValidToolName(tool.name())) {
-        return refuse(QStringLiteral("a tool name is 1 to 128 of A-Z, a-z, 0-9, '_', '-' and '.'"));
+    if (!McpTool::isValidName(tool.name())) {
+        return refuse(invalidToolNameText());
     }
     if (d->toolIndex.contains(tool.name())) {
         return refuse(QStringLiteral("another tool has the name"));
@@ -491,25 +528,11 @@ bool McpServer::addTool(const McpTool& tool, Handler handler, QString* error)
     if (!handler) {
         return refuse(QStringLiteral("the handler is empty"));
     }
-    const QString notAnObject = capabilityThatIsNotAnObject(tool.requiredClientCapabilities(), QString());
-    if (!notAnObject.isEmpty()) {
-        return refuse(QStringLiteral("requiredClientCapabilities%1 is not an object, and no client could declare it")
-                          .arg(notAnObject));
-    }
-    auto input = std::make_shared<McpSchema>();
-    QString why = input->compile(tool.inputSchema());
-    if (!why.isEmpty()) {
-        return refuse(QStringLiteral("inputSchema%1").arg(why));
-    }
+    std::shared_ptr<McpSchema> input;
     std::shared_ptr<McpSchema> output;
-    if (!tool.outputSchema().isEmpty()) {
-        // Structured content may be any JSON value, so the root of an
-        // output schema may be any type.
-        output = std::make_shared<McpSchema>();
-        why = output->compile(tool.outputSchema(), McpSchema::Root::Any);
-        if (!why.isEmpty()) {
-            return refuse(QStringLiteral("outputSchema%1").arg(why));
-        }
+    const QString why = compileTool(tool, &input, &output);
+    if (!why.isEmpty()) {
+        return refuse(why);
     }
     d->toolIndex.insert(tool.name(), d->tools.size());
     d->tools.append(ToolEntry{tool, std::move(handler), std::move(input), std::move(output)});

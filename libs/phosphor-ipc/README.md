@@ -24,14 +24,14 @@ The library owns these parts:
   `Q_INVOKABLE`-style functions directly on it. `IpcTarget.emitEvent("name", [args])` sends a JSON event to every
   subscriber on (target, name).
 - **`IpcSchemaGenerator`** converts a `QMetaObject` to a JSON Schema. Every documented QMetaType maps to a JSON Schema
-  fragment. An unknown type becomes `{"description": "<QMetaType::name>"}` without a `type` constraint.
+  fragment. An unknown type becomes `{"description": "custom QMetaType: <name>"}` without a `type` constraint.
 - **`IpcClient`** is an asynchronous client of the wire format. A C++ program uses it to drive a running application.
   See [Client](#client).
 - **`IpcEngine::install`** is a small bridge. It stores the application's `IpcRouter` on the `QQmlEngine`, so that
   `IpcTarget` instances find it in `componentComplete`.
 
-The **`phosphorctl`** CLI at `phosphor-shell/cli/phosphorctl/` is the client. It has the subcommands `call`, `list`,
-`schema` and `subscribe`.
+The **`phosphorctl`** CLI of Lambent (`lambent/cli/phosphorctl/`) is a client for the command line. It has the
+subcommands `call`, `list`, `schema` and `subscribe`.
 
 ## Key types
 
@@ -39,7 +39,7 @@ The **`phosphorctl`** CLI at `phosphor-shell/cli/phosphorctl/` is the client. It
 |------|---------|
 | `PhosphorIpc::IpcRouter` | The dispatcher of one application. It owns one `QLocalServer`, the registry of named targets, and the subscription set of each socket. It is single-threaded and runs on the thread that owns it, normally the GUI thread. |
 | `PhosphorIpc::IpcTarget` | QML element. Each instance binds to one target name. The functions declared on the instance become callable. The explicit `emitEvent(name, args)` sends wire events. |
-| `PhosphorIpc::IpcProtocol` | The wire-format constants, the parser and the serializer. The library (server) and the `phosphorctl` binary (client) share it. |
+| `IpcProtocol.h` | The wire-format constants, the parser and the serializer, in the namespace `PhosphorIpc`. The router, `IpcClient` and the `phosphorctl` binary share them. |
 | `PhosphorIpc::IpcEngine` | Bridge between an `IpcRouter` that the application owns and the `IpcTarget` instances in QML. |
 | `PhosphorIpc::IpcSchemaGenerator` | Converts a `QMetaObject` to a JSON Schema. The schema response uses it, and the CLI uses it to validate arguments on the client side. |
 | `PhosphorIpc::IpcCallContext` | Mixin for a C++ target. `sendErrorReply(message)` fails the running wire call with `CALL_FAILED`, as `QDBusContext` does for D-Bus. `deferReply()` gives the answer to an `IpcPendingReply` for later. `connectionId()` names the client connection that made the call, and `connectionPid()` names the process that opened it. |
@@ -59,9 +59,9 @@ The **`phosphorctl`** CLI at `phosphor-shell/cli/phosphorctl/` is the client. It
 
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
-    // Declare `router` BEFORE `engine` so reverse-order destruction
-    // tears the engine down FIRST; otherwise QML-side IpcTarget
-    // instances would unregister against a dead router.
+    // Declare `router` BEFORE `engine`. The engine is then destroyed
+    // first, and each IpcTarget unregisters from a router that is
+    // still alive.
     PhosphorIpc::IpcRouter router;
     if (!router.start()) {  // binds $XDG_RUNTIME_DIR/phosphor.sock
         qWarning("IPC router failed to start "
@@ -117,7 +117,7 @@ If a method cannot do what the client asked, it fails the call. The client then 
 reply:
 
 ```jsonc
-{"type":"error","id":42,"code":"CALL_FAILED","message":"no pane 7","detail":{}}
+{"type":"error","id":42,"code":"CALL_FAILED","message":"no pane 7"}
 ```
 
 A C++ target inherits `IpcCallContext` next to `QObject`, and calls `sendErrorReply` while its method runs:
@@ -328,8 +328,8 @@ phosphorctl subscribe count.countChanged   # optional: same events on stdout
 
 ## Wire protocol
 
-Each message is one JSON object on one line, UTF-8, terminated by `\n`. This is the same NDJSON shape as niri-ipc and
-hyprland-ipc. The protocol is stable across protocol version 1.
+Each message is one JSON object on one line, UTF-8, terminated by `\n`. This shape is newline-delimited JSON
+(NDJSON). The protocol is stable across protocol version 1.
 
 The version is a build-time invariant only. A `static_assert` in `IpcProtocol.h` checks the
 `PHOSPHOR_IPC_PROTOCOL_VERSION` compile definition. The version is NOT sent on the wire, and there is no handshake to
@@ -359,8 +359,11 @@ agree on a version. An incompatible change shows as malformed-request errors wit
 {"type":"event","subscriptionId":45,"args":[7]}
 // Event to one connection (IpcRouter::sendEvent), with no subscription
 {"type":"event","target":"pkg","signal":"output","args":["fetching"]}
-{"type":"error","id":42,"code":"NO_SUCH_TARGET","message":"...","detail":{}}
+{"type":"error","id":42,"code":"NO_SUCH_TARGET","message":"..."}
 ```
+
+An error can also have a `detail` object. The member is absent when the object is empty, and the router sends none
+today.
 
 ### Error codes
 
@@ -384,21 +387,44 @@ A client that keeps more than one request in flight gives each request its own i
 the id of each live subscription on the connection, because the error that ends a subscription has the subscription
 id. All data that the router writes to one connection arrives in the order that the router wrote it.
 
+An id is an integer from -2^53 to 2^53. Each JSON reader has the same value for an integer in that range. The router
+refuses another id with `MALFORMED_REQUEST`. When the router refuses a request whose id it could read, the error has
+that id. The error for a line that it could not read has no id.
+
+A subscribe needs no id. A subscription without one has the id 0, which no unsubscribe can name. It ends with its
+connection.
+
+### Limits
+
+| Limit | Value | Past the limit |
+| --- | --- | --- |
+| Length of one request line | 1 MiB (1,048,576 bytes) | The router closes the connection. |
+| Consecutive lines that are not requests | 16 | The router closes the connection at line 17. |
+| Values in `args` | 4096 | `MALFORMED_REQUEST` |
+| Arguments of one method | 10 | `INVALID_ARG` |
+| A number argument | The range of the parameter's type | `INVALID_ARG` |
+| Subscriptions on one connection | 256 | `MALFORMED_REQUEST` |
+| Subscriptions to one signal of a target on one connection | 1 | `MALFORMED_REQUEST` |
+| Deferred calls that wait on one connection | 256 | `CALL_FAILED` when the method returns |
+| Event bytes that a connection has not read | 16 MiB | The router closes the connection. |
+
 ## Client
 
-`IpcClient` speaks the wire format from the other end, for a C++
-program that drives a running application, such as an MCP server that
-offers the application's calls to an agent. It never blocks the event
-loop.
+`IpcClient` is a client of the wire format for a C++ program that drives a running application. An example is
+[phosphor-mcp-ipc](../phosphor-mcp-ipc/README.md), which offers the calls of an application to an agent. The client
+never blocks the event loop. Each request returns immediately, and its callback runs when the answer comes.
 
 ```cpp
 #include <PhosphorIpc/IpcClient.h>
+#include <PhosphorIpc/IpcRouter.h>
+
+#include <QDebug>
 
 PhosphorIpc::IpcClient client;
 QObject::connect(&client, &PhosphorIpc::IpcClient::closed, [](const QString& reason) {
     qWarning() << "IPC connection ended:" << reason;
 });
-client.connectToServer(path);
+client.connectToServer(PhosphorIpc::IpcRouter::defaultSocketPath());
 client.call(QStringLiteral("theme"), QStringLiteral("setMode"), {QStringLiteral("dark")},
             [](const PhosphorIpc::IpcReply& reply) {
                 if (reply.isError()) {
@@ -409,56 +435,78 @@ client.call(QStringLiteral("theme"), QStringLiteral("setMode"), {QStringLiteral(
             });
 ```
 
-The rules:
+The comment of the class in `IpcClient.h` is the full contract. The parts below are what a program meets first.
 
-- **Ids.** Each request gets an id of its own, and the client matches the
-  answer to it. Any number of requests may be in flight, and they may be
-  answered in any order (a deferred call answers after later ones). Ids
-  only grow, so a request never takes the id of a live subscription.
-- **Callbacks.** Each callback runs once, from the event loop, never
-  from inside the call that made the request. `IpcReply` holds the
-  result, or an error with its code, message and detail. The code is
-  the server's (`ErrorCode`, or a target's own code for a deferred call)
-  or one of the client's own (`ClientErrorCode`), which never travel on
-  the wire:
+### Requests
 
-  | Code | When |
-  |------|------|
-  | `NOT_CONNECTED` | The request was made without a connection. |
-  | `CONNECTION_CLOSED` | The connection ended before the answer came. |
-  | `WRITE_QUEUE_FULL` | The request would pass the write cap (below). |
-  | `MALFORMED_REPLY` | The server sent an error without a code. |
+`call`, `list`, `schema`, `subscribe` and `unsubscribe` each make one request.
 
-- **Connecting.** Requests made while the client connects wait, and go
-  out once it is connected. A connection that fails at once (no socket
-  at the path) leaves the client unconnected when `connectToServer`
-  returns. `connected()` and `closed(reason)` come from the event loop.
-- **The end.** When the connection ends (the server went away, a read
-  failed, `close()` ran), every request still waiting fails with
-  `CONNECTION_CLOSED`, and then `closed(reason)` comes, once. The live
-  subscriptions end with it. `connectToServer` may then start another
-  connection.
-- **Events.** A subscription's events come as
-  `eventReceived(subscriptionId, target, signal, args)` from the answer of
-  `subscribe` until `unsubscribe`, after which none comes, not even one
-  already on its way. An error that the server sends under a
-  subscription's id (`NO_SUCH_TARGET` when the target went away) ends it
-  with `subscriptionEnded`. Events that a target sends to the connection
-  (`IpcRouter::sendEvent`) come with subscription id 0.
-- **Bounded memory.** The bytes that the server has not read yet,
-  requests that wait for the connection included, are capped at
-  `MaxPendingWriteBytes` (16 MiB, the router's own cap on a connection
-  that is behind). A request past it fails with `WRITE_QUEUE_FULL`, so a
-  server that stops reading cannot grow the client without bound. A line
-  from the server longer than `MaxLineBytes` (64 MiB) ends the
-  connection.
-- **Lifetime.** Destroying the client drops the callbacks that wait,
-  unrun, since they may hold objects that are gone by then. Never destroy
-  it from inside one of its callbacks or signals. `deleteLater()` is fine
-  there. Single-threaded, like the router.
+| Subject | Rule |
+| --- | --- |
+| Ids | Each request gets its own id, and the function returns it. A request from another thread gets no id and returns 0. Ids only grow, also from one connection to the next. Thus a request never takes the id of a live subscription. The id of `subscribe` is the id of the subscription. |
+| Order | Any number of requests can be in flight. The answers can come in any order, because a deferred call answers after later calls. |
+| Callbacks | Each callback runs one time, from the event loop. It never runs inside the function that made the request. A callback can be empty. |
+| A request while the client connects | The request waits, and the client sends it when the connection is made. It fails with `CONNECTION_CLOSED` when the connection is not made. |
+| A request that the server would refuse | The client does not send it. It fails with `INVALID_REQUEST` or `REQUEST_TOO_LARGE`. |
+| Time | The client has no timeout for an answer. A deferred call can take as long as its work. The caller decides how long to wait, and `close()` ends each wait. |
+| A callback that runs an event loop | While that loop runs, the client handles no further line of the server. A loop that waits for another answer of the same client never ends. The end of the connection does not wait. Its failures and `closed()` come inside that loop. |
 
-The client has no timeout. A deferred call may take as long as its work,
-so the caller decides how long to wait, and `close()` ends the wait.
+`IpcReply` holds the result, or an error with its code, message and detail. The code is the server's (`ErrorCode`, or
+the code that a target gave a deferred call) or one of the client's. The client's codes never travel on the wire. A
+target can choose any code, also one that reads like a code of the client. `IpcReply::fromClient` tells the two
+apart.
+
+| Code of the client | When |
+| --- | --- |
+| `NOT_CONNECTED` | The client had no connection and was not making one. |
+| `CONNECTION_CLOSED` | The connection ended before the answer came. The request can have reached the server and run. |
+| `WRITE_QUEUE_FULL` | The request does not fit in the queue of bytes that the client has not written yet. |
+| `REQUEST_TOO_LARGE` | The request line is longer than 1 MiB, the most that the server reads. |
+| `INVALID_REQUEST` | The request has an empty target, method or signal name, more than 4096 arguments, or arguments nested deeper than a JSON line holds. Or it is an `unsubscribe` with the id 0 or an id outside -2^53 to 2^53. Also a request from another thread. |
+| `MALFORMED_REPLY` | The server sent an error that has no code. |
+
+### Connection
+
+- `connectToServer(path)` takes an absolute path. `IpcRouter::defaultSocketPath()` gives the path that a router
+  takes by default. A name without a leading `/` is a file in the temporary directory, as `QLocalSocket` takes it.
+- `connectToServer` returns `false` while a connection is open or in progress.
+- `connected()` and `closed(reason)` come from the event loop. A connection that fails immediately (no socket at the
+  path) leaves the client unconnected when `connectToServer` returns.
+- A connection that is not made within the connect timeout ends as a failed connection.
+- A line of the server that is not a JSON object ends the connection. So does a line with an id that is not an
+  integer. The client drops the lines that came after such a line. The client ignores an object of a type that it
+  does not know.
+- When the connection ends, each request that still waits fails with `CONNECTION_CLOSED`. An answer that the client
+  received before the end, and before a line that it cannot read, still reaches its callback. Then `closed(reason)`
+  comes, one time for each connection.
+- The subscriptions end with the connection, without `subscriptionEnded`.
+- `connectToServer` can start a new connection when `state()` is `Unconnected`.
+
+### Events
+
+- The events of a subscription come as `eventReceived(subscriptionId, target, signal, args)`. They start after the
+  answer to `subscribe`.
+- No event of a subscription comes after `unsubscribe`. That holds also for an event that the server had already
+  sent. It holds also for an event that waits in the event loop after the end of a connection.
+- An error that the server sends under the id of a subscription ends the subscription with `subscriptionEnded`. An
+  example is `NO_SUCH_TARGET` when the target goes away.
+- Events that a target sends to the connection (`IpcRouter::sendEvent`) come with the subscription id 0.
+
+### Limits of the client
+
+| Setting | Default | Past the limit |
+| --- | --- | --- |
+| `setMaxPendingWriteBytes` | 16 MiB | The request fails with `WRITE_QUEUE_FULL`. A server that stops reading cannot grow the client's memory. The least value is 1 byte. |
+| `setMaxReplyLineBytes` | 64 MiB | The client ends the connection. A server that never ends a line cannot grow the client's memory. The value is from 1 byte to the largest `qint64` less 1. |
+| `setConnectTimeout` | 5000 ms | The connection attempt fails. A value of 0 or less waits without a limit. |
+
+### Lifetime
+
+- The client is single-threaded, as the router is. Each function runs in the thread of the client.
+- The destruction of the client drops the callbacks that wait, and does not run them. They can hold objects that are
+  gone by then.
+- Never destroy the client inside one of its callbacks or signals. `deleteLater()` is safe there, except inside an
+  event loop that such a callback runs.
 
 ## Arbitration and lifecycle
 
@@ -480,6 +528,9 @@ so the caller decides how long to wait, and `close()` ends the wait.
   on the stack.
 - **Disconnect removes subscriptions.** When a subscriber socket disconnects, the router drops all its subscriptions
   and the deferred calls of the connection. `connectionClosed(id)` follows.
+- **Socket path.** `start()` without a path takes `IpcRouter::defaultSocketPath()`, which is
+  `$XDG_RUNTIME_DIR/phosphor.sock`. Give `start(socketPath)` an absolute path. A name without a leading `/` is a file
+  in the temporary directory, as `QLocalServer` takes it.
 - **Stale socket files.** On `start`, if a file is at the socket path, the router tries a quick connect. If the
   connect is refused, the router unlinks the stale path and takes it. The router does not change a live listener
   (busy or not) or a file that is not a socket. In that case, `start` fails cleanly.
@@ -495,12 +546,16 @@ so the caller decides how long to wait, and `close()` ends the wait.
 ## Dependencies
 
 - `QtCore` (always)
-- `QtGui` (transitive, only through the static QML plugin `PhosphorIpcQml`. The runtime library does not use QtGui.)
-- `QtQml` (for the QML registration of `IpcTarget`)
+- `QtQml` (for the QML registration of `IpcTarget`, and for the JavaScript values that the serializer turns into
+  JSON)
 - `QtNetwork` (for `QLocalServer` / `QLocalSocket`)
+
+The library does not use QtGui, and the static QML module `PhosphorIpcQml` does not need it.
 
 ## See also
 
-- `phosphor-shell/cli/phosphorctl/`: the typed CLI that is the client of the library.
+- `lambent/cli/phosphorctl/` in Lambent: the typed CLI for the socket.
+- [phosphor-mcp-ipc](../phosphor-mcp-ipc/README.md): an MCP server that offers the calls of a socket to an agent,
+  built on `IpcClient`.
 - `phosphor-shell-libs/examples/phosphor-ipc-demo/`: the acceptance harness. Three `IpcTarget` instances
   (greet / count / set-value) use all of the wire interface: call, list, schema and subscribe.

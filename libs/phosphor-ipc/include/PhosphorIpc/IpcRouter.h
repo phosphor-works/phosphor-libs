@@ -87,7 +87,7 @@ namespace PhosphorIpc {
 //     missing XDG dir). The application logs the reason and
 //     continues without IPC; failure is non-fatal.
 //   - All wire-level errors are reported back to the client as
-//     {"type":"error",...} responses (see IpcProtocol::ErrorCode).
+//     {"type":"error",...} responses (see PhosphorIpc::ErrorCode).
 class PHOSPHORIPC_EXPORT IpcRouter : public QObject
 {
     Q_OBJECT
@@ -104,11 +104,18 @@ public:
     // the close of the connection, makes room.
     static constexpr int MaxPendingCallsPerConnection = 256;
 
-    // Bind the listening socket. Defaults to
-    // $XDG_RUNTIME_DIR/phosphor.sock when socketPath is empty. The socket
-    // file has mode 0600, and the process umask stays as it is (it is one
-    // for every thread). A stale socket at the path (one that refuses a
-    // connection) is replaced; anything else there makes start() fail.
+    // The socket path that start() uses when it gets none:
+    // $XDG_RUNTIME_DIR/phosphor.sock, and nothing when XDG_RUNTIME_DIR is
+    // not set. A client of that socket connects to this path.
+    [[nodiscard]] static QString defaultSocketPath();
+
+    // Bind the listening socket at `socketPath`, or at defaultSocketPath()
+    // when it is empty. Give an absolute path: a name that does not start
+    // with '/' is a file in the temporary directory, as QLocalServer takes
+    // it, and other users can write there. The socket file has mode 0600,
+    // and the process umask stays as it is (it is one for every thread). A
+    // stale socket at the path (one that refuses a connection) is
+    // replaced. Anything else there makes start() fail.
     // Returns false on bind failure; safe to retry after stop().
     bool start(const QString& socketPath = QString());
 
@@ -198,7 +205,7 @@ public:
     [[nodiscard]] QJsonObject schemaFor(const QString& target) const;
 
     // Structured outcome of an invoke() call. The wire dispatcher
-    // maps these onto IpcProtocol::ErrorCode strings without
+    // maps these onto PhosphorIpc::ErrorCode strings without
     // string-matching the human-readable message.
     enum class InvokeOutcome {
         Ok,

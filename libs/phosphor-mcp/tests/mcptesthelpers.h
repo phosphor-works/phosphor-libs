@@ -13,14 +13,20 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QDeadlineTimer>
+#include <QDebug>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QJsonValue>
 #include <QLatin1StringView>
 #include <QList>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QString>
+#include <QStringList>
+#include <QTest>
 #include <QtCore/qtclasshelpermacros.h>
 
 #include <cerrno>
@@ -327,5 +333,116 @@ inline QString firstText(const QJsonObject& message)
         .value(QLatin1StringView("text"))
         .toString();
 }
+
+// The JSON object of a literal in a test. A literal that is no JSON object
+// is a mistake of the test, and ends it: an empty object in its place
+// would compare equal to the result of a reply that never came.
+inline QJsonObject parseObject(const char* json)
+{
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(json, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        qFatal("a JSON literal of the test is not an object (%s): %s", qPrintable(error.errorString()), json);
+    }
+    return document.object();
+}
+
+// The name and the version of the server, which each result holds.
+inline QJsonObject serverInfo(const QJsonObject& reply)
+{
+    return resultOf(reply).value(QLatin1StringView("_meta")).toObject().value(PhosphorMcp::MetaServerInfo).toObject();
+}
+
+// A server program, run as an MCP client runs it. It is a child process
+// with pipes for stdin and stdout, in its own session without a terminal.
+// Its stderr goes to the test's output when a check fails, and the process
+// is killed if it still runs at the end. The waits run the event loop of
+// the test, so that objects of the test can answer the child meanwhile.
+class ChildServer
+{
+public:
+    // `label` names the program in the test's output.
+    ChildServer(const QString& program, const QString& label)
+        : m_program(program)
+        , m_label(label)
+    {
+        // Without QT_FORCE_STDERR_LOGGING, as a client starts it: the
+        // diagnostics of the program then reach stderr only because it asks
+        // Qt for that itself. Without the logging rules of the person who
+        // runs the test, which can turn those diagnostics off.
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.remove(QStringLiteral("QT_FORCE_STDERR_LOGGING"));
+        environment.remove(QStringLiteral("QT_LOGGING_RULES"));
+        environment.remove(QStringLiteral("QT_LOGGING_CONF"));
+        m_process.setProcessEnvironment(environment);
+        m_process.setUnixProcessParameters(QProcess::UnixProcessFlag::CreateNewSession);
+    }
+    ~ChildServer()
+    {
+        if (m_process.state() != QProcess::NotRunning) {
+            m_process.kill();
+            m_process.waitForFinished(5000);
+        }
+        if (QTest::currentTestFailed()) {
+            qWarning().noquote() << "stderr of" << m_label << ":\n" << QString::fromUtf8(standardError());
+        }
+    }
+    Q_DISABLE_COPY_MOVE(ChildServer)
+
+    [[nodiscard]] bool start(const QStringList& arguments = {})
+    {
+        m_process.start(m_program, arguments);
+        return m_process.waitForStarted(5000);
+    }
+
+    // True when the whole line went into the pipe's buffer.
+    [[nodiscard]] bool write(const QJsonObject& message)
+    {
+        const QByteArray line = QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n';
+        return m_process.write(line) == line.size();
+    }
+
+    // Up to `count` replies, fewer when the process ends or 10 s pass first.
+    [[nodiscard]] QList<QJsonObject> readReplies(int count)
+    {
+        QList<QJsonObject> replies;
+        spinUntil(
+            [&] {
+                while (m_process.canReadLine() && replies.size() < count) {
+                    replies.append(QJsonDocument::fromJson(m_process.readLine()).object());
+                }
+                return replies.size() == count || m_process.state() == QProcess::NotRunning;
+            },
+            10000);
+        return replies;
+    }
+
+    [[nodiscard]] bool waitForExit()
+    {
+        return spinUntil(
+            [&] {
+                return m_process.state() == QProcess::NotRunning;
+            },
+            10000);
+    }
+
+    // Everything the process wrote to stderr so far.
+    [[nodiscard]] QByteArray standardError()
+    {
+        m_standardError += m_process.readAllStandardError();
+        return m_standardError;
+    }
+
+    [[nodiscard]] QProcess& process()
+    {
+        return m_process;
+    }
+
+private:
+    QString m_program;
+    QString m_label;
+    QProcess m_process;
+    QByteArray m_standardError;
+};
 
 } // namespace PhosphorMcpTests

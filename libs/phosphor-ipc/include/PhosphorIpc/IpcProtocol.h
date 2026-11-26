@@ -10,19 +10,20 @@
 #include <QString>
 #include <QVariant>
 #include <QVariantList>
+#include <QtTypes>
 
 #include <optional>
 
 // Wire-format definitions for the JSON-over-Unix-socket protocol the
-// IpcRouter speaks. Shared between libs/phosphor-ipc
-// (server) and phosphor-shell/cli/phosphorctl (client); both link this
-// library so the constants and parsers stay in lockstep. Mirrors the
-// split of libs/phosphor-protocol (PhosphorProtocol/
-// WindowTypes.h and WindowMarshalling.h); JSON is self-describing so we
-// ship the type constants only, no Qt-marshalling boilerplate.
+// IpcRouter speaks. The router, IpcClient and the phosphorctl program of
+// Lambent share them, so the constants and parsers stay in lockstep.
+// Mirrors the split of libs/phosphor-protocol (PhosphorProtocol/
+// WindowTypes.h and WindowMarshalling.h). JSON is self-describing, so
+// the header holds the type constants only, no Qt-marshalling code.
 //
-// Wire shape: one JSON object per line, '\n'-terminated, UTF-8.
-// (Same NDJSON shape as niri-ipc, hyprland-ipc.)
+// Wire shape: one JSON object per line, '\n'-terminated, UTF-8. A line
+// holds at most 1024 levels of nested arrays and objects, which is the
+// limit of the JSON parser on both sides.
 //
 // CMake mirrors the protocol-version constant via the
 // PHOSPHOR_IPC_PROTOCOL_VERSION compile definition so this header
@@ -32,6 +33,20 @@
 namespace PhosphorIpc {
 
 constexpr int ProtocolVersion = 1;
+
+// The longest request line that the router reads, its newline included.
+// The router closes a connection that sends a longer one, which fails
+// every request of that connection, so a client refuses such a request
+// before it sends it. IpcClient does.
+inline constexpr qint64 MaxRequestLineBytes = 1024 * 1024;
+
+// The most arguments of a call. A method with more parameters cannot be
+// called through the router, which answers such a call with INVALID_ARG.
+inline constexpr int MaxCallArgs = 10;
+
+// The most entries that the `args` of a request holds. A line with more
+// is malformed. No valid call comes near it, see MaxCallArgs.
+inline constexpr qsizetype MaxRequestArgs = 4096;
 
 #ifdef PHOSPHOR_IPC_PROTOCOL_VERSION
 static_assert(PHOSPHOR_IPC_PROTOCOL_VERSION == ProtocolVersion,
@@ -73,7 +88,10 @@ constexpr auto Reply = "reply"; // call / list / schema result, subscribe / unsu
 // to one connection through IpcRouter::sendEvent (carries `target` and
 // `signal` in place of a subscriptionId).
 constexpr auto Event = "event";
-constexpr auto Error = "error"; // request-correlated failure
+// A failure. It has the id of the request that failed. It has no id for
+// a line that the router could not read. Under the id of a subscription
+// it ends that subscription.
+constexpr auto Error = "error";
 } // namespace ResponseType
 
 // Error `code` strings the server returns. Stable across protocol
@@ -98,18 +116,17 @@ constexpr auto CallAbandoned = "CALL_ABANDONED";
 } // namespace ErrorCode
 
 // Parsed request shape, populated by parseRequest from a single
-// JSON line. All fields are optional and only set when present;
-// callers should inspect type and validate the corresponding fields.
+// JSON line. A field that the line does not hold keeps its default.
+// parseRequest checks the fields that each known type needs. The caller
+// checks only that `type` is one it knows.
 struct PHOSPHORIPC_EXPORT Request
 {
     QString type;
     qint64 id = 0;
     QString target;
     QString fn;
-    // Spelled `signalName` (not just `signal`) because `signal` is
-    // a Qt macro that vanishes under `-DQT_NO_KEYWORDS` builds; the
-    // rename keeps the field accessible regardless of keyword mode
-    // and avoids confusing Qt-pseudo-keyword shadowing.
+    // Spelled `signalName`, not `signal`, to stay clear of the Qt keyword
+    // `signals` and of signal() from <csignal>.
     QString signalName;
     qint64 subscriptionId = 0;
     QVariantList args;
@@ -120,11 +137,26 @@ struct PHOSPHORIPC_EXPORT Request
 // required `type` field, missing per-type required fields (`target`
 // for call/schema/subscribe, `fn` for call, `signal` for subscribe,
 // non-zero `subscriptionId` for unsubscribe), an `id` or
-// `subscriptionId` that isn't a finite integer in the range
-// exactly representable as both a JSON double and a qint64, or an
-// `args` value that isn't an array of size ≤ 4096. Callers are
-// expected to reply with a MALFORMED_REQUEST error.
-[[nodiscard]] PHOSPHORIPC_EXPORT std::optional<Request> parseRequest(const QByteArray& line, QString* parseError);
+// `subscriptionId` that integerId() refuses, or an `args` value that is
+// not an array of at most MaxRequestArgs entries. An `id`, a
+// `subscriptionId` or `args` that is absent or null takes its default.
+// Callers are expected to reply with a MALFORMED_REQUEST error.
+//
+// `requestId`, when given, gets the id of the line, also when a later
+// check refuses the request, so that the error can name the request it
+// answers. It is 0 for a line without a valid id.
+//
+// A subscribe needs no id. A subscription made without one has the id 0,
+// which no unsubscribe can name: it ends with its connection.
+[[nodiscard]] PHOSPHORIPC_EXPORT std::optional<Request> parseRequest(const QByteArray& line, QString* parseError,
+                                                                     qint64* requestId = nullptr);
+
+// The integer that a JSON `id` or `subscriptionId` holds. Nothing for a
+// value that is not a number, has a fraction, or is outside the range
+// from -2^53 to 2^53. In that range every JSON reader has the same
+// integer for a number. Outside it a reader that keeps numbers as
+// doubles rounds, and two ids become one.
+[[nodiscard]] PHOSPHORIPC_EXPORT std::optional<qint64> integerId(const QJsonValue& value);
 
 // Encoders, build the QJsonObject body for each response variant.
 // The router serialises the object to bytes via writeLine() below.
@@ -142,15 +174,28 @@ struct PHOSPHORIPC_EXPORT Request
 // QLocalSocket.
 [[nodiscard]] PHOSPHORIPC_EXPORT QByteArray writeLine(const QJsonObject& obj);
 
-// Convert a QVariant to a JSON value. Recursive on QVariantList /
-// QVariantMap. Numeric / bool / string / list / map types map
-// naturally; QJsonValue / QJsonObject / QJsonArray pass through; a
-// QJSValue (what an untyped QML function returns) converts as its
-// JavaScript value, objects and arrays included;
-// invalid QVariant and std::nullptr_t map to null; any other metatype degrades to
-// the toString() representation. Shared between the router's
-// call-return path and IpcTarget's emitEvent broadcast path so
-// the wire JSON shape stays identical across the two.
+// Convert a QVariant to a JSON value. The router's call-return path and
+// IpcTarget's emitEvent path share it, so the wire JSON has one shape.
+//
+// | Value | JSON |
+// | --- | --- |
+// | bool | boolean |
+// | every integer type, char, signed char and unsigned char included | number |
+// | float, double, qfloat16 | number, and null for NaN and the infinities |
+// | QString, QChar, char16_t, char32_t | string |
+// | QByteArray | string, the bytes read as UTF-8 |
+// | QDateTime | string, ISO 8601 in UTC with milliseconds and a `Z` |
+// | QStringList, QVariantList, a list or set that Qt can iterate | array |
+// | QVariantMap, QVariantHash, a map with string keys | object |
+// | QJsonValue, QJsonObject, QJsonArray, QJsonDocument | themselves |
+// | QJSValue (what an untyped QML function returns) | its JavaScript value |
+// | an invalid QVariant, std::nullptr_t | null |
+// | any other type | string, QVariant::toString() |
+//
+// A JavaScript object becomes an object, an array becomes an array, and
+// a function becomes null. QVariant::toString() is empty for a type without a string form, such
+// as a QObject pointer, a QPointF or a QRegularExpression. An integer
+// above 2^53 loses precision, as every JSON number does.
 [[nodiscard]] PHOSPHORIPC_EXPORT QJsonValue variantToJson(const QVariant& v);
 
 } // namespace PhosphorIpc

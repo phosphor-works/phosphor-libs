@@ -7,17 +7,28 @@
 // live in test_phosphor_ipc_e2e.cpp.
 
 #include <PhosphorIpc/IpcCallContext.h>
+#include <PhosphorIpc/IpcProtocol.h>
 #include <PhosphorIpc/IpcRouter.h>
 #include <PhosphorIpc/IpcTarget.h>
 
+#include <QByteArray>
+#include <QChar>
+#include <QFloat16>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QObject>
 #include <QSignalSpy>
 #include <QString>
 #include <QStringList>
 #include <QTest>
+#include <QVariant>
+#include <QVariantList>
 #include <QtCore/qtclasshelpermacros.h>
+#include <QtEnvironmentVariables>
+
+#include <limits>
 
 using namespace PhosphorIpc;
 
@@ -70,6 +81,137 @@ protected:
 
 private:
     QString m_lastNoReturn;
+};
+
+// A class and a subclass that declares some of its methods again.
+class LayeredBase : public QObject
+{
+    Q_OBJECT
+public:
+    explicit LayeredBase(QObject* parent = nullptr)
+        : QObject(parent)
+    {
+    }
+    Q_DISABLE_COPY_MOVE(LayeredBase)
+
+    Q_INVOKABLE virtual QString overridden(int)
+    {
+        return QStringLiteral("base-overridden");
+    }
+    Q_INVOKABLE QString redeclared(int)
+    {
+        return QStringLiteral("base-redeclared");
+    }
+    Q_INVOKABLE QString grown(int)
+    {
+        return QStringLiteral("base-grown");
+    }
+    Q_INVOKABLE QString retyped(int)
+    {
+        return QStringLiteral("base-retyped");
+    }
+    Q_INVOKABLE QString inherited()
+    {
+        return QStringLiteral("base-inherited");
+    }
+    Q_INVOKABLE QString withdrawn()
+    {
+        return QStringLiteral("base-withdrawn");
+    }
+};
+
+class LayeredDerived : public LayeredBase
+{
+    Q_OBJECT
+public:
+    explicit LayeredDerived(QObject* parent = nullptr)
+        : LayeredBase(parent)
+    {
+    }
+    Q_DISABLE_COPY_MOVE(LayeredDerived)
+
+    Q_INVOKABLE QString overridden(int) override
+    {
+        return QStringLiteral("derived-overridden");
+    }
+    // Hides the method of the base, which is not virtual.
+    Q_INVOKABLE QString redeclared(int)
+    {
+        return QStringLiteral("derived-redeclared");
+    }
+    // Another count of parameters, and another type for the same count.
+    Q_INVOKABLE QString grown(int, int)
+    {
+        return QStringLiteral("derived-grown");
+    }
+    Q_INVOKABLE QString retyped(const QString&)
+    {
+        return QStringLiteral("derived-retyped");
+    }
+
+protected:
+    // A subclass that takes a method off the wire.
+    Q_INVOKABLE QString withdrawn()
+    {
+        return QStringLiteral("derived-withdrawn");
+    }
+};
+
+// Methods that give their argument back, one for each number type.
+class Numbers : public QObject
+{
+    Q_OBJECT
+public:
+    explicit Numbers(QObject* parent = nullptr)
+        : QObject(parent)
+    {
+    }
+    Q_DISABLE_COPY_MOVE(Numbers)
+
+    Q_INVOKABLE int takesInt(int value)
+    {
+        return value;
+    }
+    Q_INVOKABLE uint takesUInt(uint value)
+    {
+        return value;
+    }
+    Q_INVOKABLE short takesShort(short value)
+    {
+        return value;
+    }
+    Q_INVOKABLE quint8 takesByte(quint8 value)
+    {
+        return value;
+    }
+    Q_INVOKABLE char takesChar(char value)
+    {
+        return value;
+    }
+    Q_INVOKABLE qint64 takesLong(qint64 value)
+    {
+        return value;
+    }
+    Q_INVOKABLE quint64 takesULong(quint64 value)
+    {
+        return value;
+    }
+    Q_INVOKABLE float takesFloat(float value)
+    {
+        return value;
+    }
+    Q_INVOKABLE double takesDouble(double value)
+    {
+        return value;
+    }
+    Q_INVOKABLE qfloat16 takesHalf(qfloat16 value)
+    {
+        return value;
+    }
+    Q_INVOKABLE qulonglong takesUnsignedLong(unsigned long value)
+    {
+        return value;
+    }
 };
 
 // A target that fails its own calls through the call context.
@@ -164,6 +306,12 @@ private Q_SLOTS:
     void invoke_overloadDispatchesByArity();
     void invoke_overloadNoMatchingArityReturnsArgCountMismatch();
     void invoke_protectedQInvokableRejected();
+    void invoke_derivedDeclarationHidesTheBase();
+    void invoke_nameIsComparedAsText();
+    void invoke_numberInRange_data();
+    void invoke_numberInRange();
+    void invoke_numberOutOfRange_data();
+    void invoke_numberOutOfRange();
     void invoke_ipcTargetWrapperMethodsRejected();
     void invoke_callContextFailsTheCall();
     void invoke_callContextOnlyDuringTheCall();
@@ -172,6 +320,9 @@ private Q_SLOTS:
     void schemaFor_unknownReturnsEmpty();
     void schemaFor_listsFunctions();
     void schemaFor_skipsProtectedQInvokable();
+    void schemaFor_listsAHiddenNameOnce();
+    void schemaFor_charTypesAreIntegers();
+    void defaultSocketPath_isInTheRuntimeDirectory();
 };
 
 void TestPhosphorIpcRouter::register_addsAndEmits()
@@ -651,6 +802,259 @@ void TestPhosphorIpcRouter::invoke_ipcTargetSendErrorReply()
     // sendErrorReply is IpcTarget's own method: not callable over the wire.
     router.invoke(QStringLiteral("q"), QStringLiteral("sendErrorReply"), {QStringLiteral("x")}, &outcome);
     QCOMPARE(outcome, IpcRouter::InvokeOutcome::NoSuchFn);
+}
+
+void TestPhosphorIpcRouter::invoke_derivedDeclarationHidesTheBase()
+{
+    // A method that a subclass declares again hides every declaration of
+    // that name in its base classes, as in C++. The router calls what a
+    // caller of the object itself would reach.
+    IpcRouter router;
+    LayeredDerived target;
+    QVERIFY(router.registerTarget(QStringLiteral("layers"), &target));
+    const auto call = [&](const QString& fn, const QVariantList& args, IpcRouter::InvokeOutcome* outcome) {
+        QString message;
+        const QVariant result = router.invoke(QStringLiteral("layers"), fn, args, outcome, &message);
+        return result.isValid() ? result.toString() : message;
+    };
+    IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::NoSuchFn;
+
+    QCOMPARE(call(QStringLiteral("overridden"), {1}, &outcome), QStringLiteral("derived-overridden"));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+    QCOMPARE(call(QStringLiteral("redeclared"), {1}, &outcome), QStringLiteral("derived-redeclared"));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+    QCOMPARE(call(QStringLiteral("retyped"), {QStringLiteral("x")}, &outcome), QStringLiteral("derived-retyped"));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+
+    // The base declaration with one parameter is hidden, so one argument
+    // matches nothing.
+    QCOMPARE(call(QStringLiteral("grown"), {1, 2}, &outcome), QStringLiteral("derived-grown"));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+    const QString mismatch = call(QStringLiteral("grown"), {1}, &outcome);
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::ArgCountMismatch);
+    QVERIFY2(mismatch.contains(QStringLiteral("expects 2, got 1")), qPrintable(mismatch));
+
+    // A method that the subclass does not declare stays callable.
+    QCOMPARE(call(QStringLiteral("inherited"), {}, &outcome), QStringLiteral("base-inherited"));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+
+    // A protected declaration in the subclass takes the method off the
+    // wire, although the base declares it public.
+    call(QStringLiteral("withdrawn"), {}, &outcome);
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::NoSuchFn);
+
+    // An object of the base class alone has its own methods.
+    LayeredBase base;
+    QVERIFY(router.registerTarget(QStringLiteral("base"), &base));
+    QCOMPARE(router.invoke(QStringLiteral("base"), QStringLiteral("grown"), {1}, &outcome).toString(),
+             QStringLiteral("base-grown"));
+    QCOMPARE(router.invoke(QStringLiteral("base"), QStringLiteral("withdrawn"), {}, &outcome).toString(),
+             QStringLiteral("base-withdrawn"));
+}
+
+void TestPhosphorIpcRouter::invoke_nameIsComparedAsText()
+{
+    // A name with a lone surrogate has the same UTF-8 bytes as the name
+    // without it once the surrogate is dropped. It is another name.
+    IpcRouter router;
+    FakeTarget target;
+    QVERIFY(router.registerTarget(QStringLiteral("greet"), &target));
+    IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::Ok;
+    QString name = QStringLiteral("readLast");
+    name.append(QChar(0xD800));
+    router.invoke(QStringLiteral("greet"), name, {}, &outcome);
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::NoSuchFn);
+    router.invoke(QStringLiteral("greet"), QStringLiteral("readLast"), {}, &outcome);
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::Ok);
+}
+
+void TestPhosphorIpcRouter::invoke_numberInRange_data()
+{
+    QTest::addColumn<QString>("fn");
+    QTest::addColumn<QVariant>("argument");
+    QTest::addColumn<QVariant>("expected");
+
+    // JSON numbers arrive as qlonglong or double.
+    QTest::newRow("int max") << QStringLiteral("takesInt") << QVariant(qlonglong(2147483647)) << QVariant(2147483647);
+    QTest::newRow("int min") << QStringLiteral("takesInt") << QVariant(qlonglong(-2147483647) - 1)
+                             << QVariant(-2147483647 - 1);
+    QTest::newRow("int from a whole double") << QStringLiteral("takesInt") << QVariant(7.0) << QVariant(7);
+    QTest::newRow("uint max") << QStringLiteral("takesUInt") << QVariant(qlonglong(4294967295LL))
+                              << QVariant(4294967295U);
+    QTest::newRow("uint zero") << QStringLiteral("takesUInt") << QVariant(qlonglong(0)) << QVariant(0U);
+    QTest::newRow("short max") << QStringLiteral("takesShort") << QVariant(qlonglong(32767)) << QVariant(32767);
+    QTest::newRow("byte max") << QStringLiteral("takesByte") << QVariant(qlonglong(255)) << QVariant(255);
+    QTest::newRow("char") << QStringLiteral("takesChar") << QVariant(qlonglong(65)) << QVariant(65);
+    QTest::newRow("long 2^53") << QStringLiteral("takesLong") << QVariant(qlonglong(9007199254740992LL))
+                               << QVariant(qlonglong(9007199254740992LL));
+    QTest::newRow("ulong 2^53") << QStringLiteral("takesULong") << QVariant(qlonglong(9007199254740992LL))
+                                << QVariant(qulonglong(9007199254740992ULL));
+    QTest::newRow("float") << QStringLiteral("takesFloat") << QVariant(1.5) << QVariant(1.5);
+    // A JSON number above the largest qint64 arrives as a double. QVariant
+    // alone would make 2^63 - 1 of each of these.
+    QTest::newRow("ulong 2^63 from a double") << QStringLiteral("takesULong") << QVariant(9223372036854775808.0)
+                                              << QVariant(qulonglong(9223372036854775808ULL));
+    QTest::newRow("ulong 2^63 from a float") << QStringLiteral("takesULong") << QVariant(9223372036854775808.0f)
+                                             << QVariant(qulonglong(9223372036854775808ULL));
+    QTest::newRow("ulong 1e19 from a double")
+        << QStringLiteral("takesULong") << QVariant(1e19) << QVariant(qulonglong(10000000000000000000ULL));
+    QTest::newRow("ulong under 2^64 from a double") << QStringLiteral("takesULong") << QVariant(18446744073709549568.0)
+                                                    << QVariant(qulonglong(18446744073709549568ULL));
+    if (sizeof(unsigned long) == sizeof(qulonglong)) {
+        QTest::newRow("unsigned long 1e19 from a double")
+            << QStringLiteral("takesUnsignedLong") << QVariant(1e19) << QVariant(qulonglong(10000000000000000000ULL));
+    }
+    QTest::newRow("float from a large double") << QStringLiteral("takesFloat") << QVariant(1e30) << QVariant(1e30f);
+    QTest::newRow("half") << QStringLiteral("takesHalf") << QVariant(1.5) << QVariant(1.5);
+    QTest::newRow("half from an integer") << QStringLiteral("takesHalf") << QVariant(qlonglong(3)) << QVariant(3.0);
+    // The least qint64 as a double, which a JSON number with a fraction
+    // or an exponent is. Half a unit below it is the same double.
+    QTest::newRow("long min from a double") << QStringLiteral("takesLong") << QVariant(-9223372036854775808.0)
+                                            << QVariant(std::numeric_limits<qlonglong>::min());
+    QTest::newRow("double") << QStringLiteral("takesDouble") << QVariant(1e300) << QVariant(1e300);
+    // A string that holds a number converts as before.
+    QTest::newRow("int from a string") << QStringLiteral("takesInt") << QVariant(QStringLiteral("12")) << QVariant(12);
+}
+
+void TestPhosphorIpcRouter::invoke_numberInRange()
+{
+    QFETCH(QString, fn);
+    QFETCH(QVariant, argument);
+    QFETCH(QVariant, expected);
+
+    IpcRouter router;
+    Numbers target;
+    QVERIFY(router.registerTarget(QStringLiteral("numbers"), &target));
+    IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::NoSuchFn;
+    QString message;
+    const QVariant result = router.invoke(QStringLiteral("numbers"), fn, {argument}, &outcome, &message);
+    QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+    // Through the wire form, where every number is a JSON number.
+    QCOMPARE(variantToJson(result), variantToJson(expected));
+    // The wire form is a double, which has 2^63 for 2^63 - 1 too. An
+    // unsigned result of 64 bits is compared as it is.
+    if (expected.typeId() == QMetaType::ULongLong) {
+        QCOMPARE(result.toULongLong(), expected.toULongLong());
+    }
+}
+
+void TestPhosphorIpcRouter::invoke_numberOutOfRange_data()
+{
+    QTest::addColumn<QString>("fn");
+    QTest::addColumn<QVariant>("argument");
+
+    // Each of these converted with success before, to another number: 0,
+    // 4294967295, 4464, 44, and infinity for the float.
+    QTest::newRow("int above") << QStringLiteral("takesInt") << QVariant(qlonglong(1099511627776LL));
+    QTest::newRow("int just above") << QStringLiteral("takesInt") << QVariant(qlonglong(2147483648LL));
+    QTest::newRow("int just below") << QStringLiteral("takesInt") << QVariant(qlonglong(-2147483649LL));
+    QTest::newRow("int from a large double") << QStringLiteral("takesInt") << QVariant(1e30);
+    QTest::newRow("uint negative") << QStringLiteral("takesUInt") << QVariant(qlonglong(-1));
+    QTest::newRow("uint above") << QStringLiteral("takesUInt") << QVariant(qlonglong(4294967296LL));
+    QTest::newRow("short above") << QStringLiteral("takesShort") << QVariant(qlonglong(70000));
+    QTest::newRow("byte above") << QStringLiteral("takesByte") << QVariant(qlonglong(300));
+    QTest::newRow("byte negative") << QStringLiteral("takesByte") << QVariant(qlonglong(-1));
+    QTest::newRow("char above") << QStringLiteral("takesChar") << QVariant(qlonglong(300));
+    QTest::newRow("ulong negative") << QStringLiteral("takesULong") << QVariant(qlonglong(-1));
+    QTest::newRow("long from a large double") << QStringLiteral("takesLong") << QVariant(1e19);
+    QTest::newRow("float above") << QStringLiteral("takesFloat") << QVariant(1e300);
+    QTest::newRow("ulong 2^64 from a double") << QStringLiteral("takesULong") << QVariant(18446744073709551616.0);
+    QTest::newRow("half above") << QStringLiteral("takesHalf") << QVariant(1e10);
+    QTest::newRow("half above from an integer") << QStringLiteral("takesHalf") << QVariant(qlonglong(100000));
+    QTest::newRow("long 2^63 from a double") << QStringLiteral("takesLong") << QVariant(9223372036854775808.0);
+    QTest::newRow("long below from a double") << QStringLiteral("takesLong") << QVariant(-9223372036854777856.0);
+}
+
+void TestPhosphorIpcRouter::invoke_numberOutOfRange()
+{
+    QFETCH(QString, fn);
+    QFETCH(QVariant, argument);
+
+    IpcRouter router;
+    Numbers target;
+    QVERIFY(router.registerTarget(QStringLiteral("numbers"), &target));
+    IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::Ok;
+    QString message;
+    const QVariant result = router.invoke(QStringLiteral("numbers"), fn, {argument}, &outcome, &message);
+    QVERIFY2(!result.isValid(), qPrintable(result.toString()));
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::ArgConvertFailed);
+    QVERIFY2(message.contains(QStringLiteral("out of the range")), qPrintable(message));
+}
+
+void TestPhosphorIpcRouter::schemaFor_listsAHiddenNameOnce()
+{
+    // The schema lists what the router calls: one entry for a method that
+    // a subclass declares again, and none for one that it withdrew.
+    IpcRouter router;
+    LayeredDerived target;
+    QVERIFY(router.registerTarget(QStringLiteral("layers"), &target));
+    QStringList signatures;
+    const QJsonArray functions =
+        router.schemaFor(QStringLiteral("layers")).value(QStringLiteral("functions")).toArray();
+    for (const QJsonValue function : functions) {
+        const QJsonObject entry = function.toObject();
+        QStringList types;
+        const QJsonArray params = entry.value(QStringLiteral("params")).toArray();
+        for (const QJsonValue param : params) {
+            types.append(param.toObject().value(QStringLiteral("type")).toString());
+        }
+        signatures.append(
+            QStringLiteral("%1(%2)").arg(entry.value(QStringLiteral("name")).toString(), types.join(QLatin1Char(','))));
+    }
+    signatures.sort();
+    QCOMPARE(signatures,
+             (QStringList{
+                 QStringLiteral("grown(integer,integer)"),
+                 QStringLiteral("inherited()"),
+                 QStringLiteral("overridden(integer)"),
+                 QStringLiteral("redeclared(integer)"),
+                 QStringLiteral("retyped(string)"),
+             }));
+}
+
+void TestPhosphorIpcRouter::schemaFor_charTypesAreIntegers()
+{
+    IpcRouter router;
+    Numbers target;
+    QVERIFY(router.registerTarget(QStringLiteral("numbers"), &target));
+    QHash<QString, QJsonObject> byName;
+    const QJsonArray functions =
+        router.schemaFor(QStringLiteral("numbers")).value(QStringLiteral("functions")).toArray();
+    for (const QJsonValue function : functions) {
+        byName.insert(function.toObject().value(QStringLiteral("name")).toString(), function.toObject());
+    }
+    const QJsonObject integer{{QStringLiteral("type"), QStringLiteral("integer")}};
+    const QJsonObject integerValue{{QStringLiteral("type"), QStringLiteral("integer")},
+                                   {QStringLiteral("name"), QStringLiteral("value")}};
+    for (const QString& fn : {QStringLiteral("takesByte"), QStringLiteral("takesChar"), QStringLiteral("takesShort")}) {
+        QVERIFY2(byName.contains(fn), qPrintable(fn));
+        QCOMPARE(byName.value(fn).value(QStringLiteral("returns")).toObject(), integer);
+        QCOMPARE(byName.value(fn).value(QStringLiteral("params")).toArray(), QJsonArray{integerValue});
+    }
+}
+
+void TestPhosphorIpcRouter::defaultSocketPath_isInTheRuntimeDirectory()
+{
+    // The variable of this process, which the last lines put back.
+    const bool wasSet = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    const QByteArray before = qgetenv("XDG_RUNTIME_DIR");
+
+    qputenv("XDG_RUNTIME_DIR", QByteArrayLiteral("/run/user/phosphor-ipc-test"));
+    const QString set = IpcRouter::defaultSocketPath();
+    qunsetenv("XDG_RUNTIME_DIR");
+    const QString unset = IpcRouter::defaultSocketPath();
+    // A router has no path to start on then.
+    IpcRouter router;
+    QTest::ignoreMessage(QtWarningMsg,
+                         "PhosphorIpc::IpcRouter::start: no socket path (XDG_RUNTIME_DIR unset and no explicit path)");
+    const bool started = router.start();
+
+    if (wasSet) {
+        qputenv("XDG_RUNTIME_DIR", before);
+    }
+    QCOMPARE(set, QStringLiteral("/run/user/phosphor-ipc-test/phosphor.sock"));
+    QCOMPARE(unset, QString());
+    QVERIFY(!started);
 }
 
 QTEST_GUILESS_MAIN(TestPhosphorIpcRouter)

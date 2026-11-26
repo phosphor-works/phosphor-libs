@@ -1,17 +1,24 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 #include <PhosphorMcpIpc/McpIpcManifest.h>
 
+#include <PhosphorMcp/McpTool.h>
+
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QJsonValue>
 #include <QLatin1StringView>
 #include <QSet>
+
+#include <cerrno>
+#include <system_error>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace PhosphorMcpIpc {
 
@@ -28,6 +35,42 @@ const QSet<QString>& toolKeys()
         QStringLiteral("description"), QStringLiteral("params"), QStringLiteral("annotations"),
     };
     return keys;
+}
+
+QString errnoText(int error)
+{
+    return QString::fromStdString(std::generic_category().message(error));
+}
+
+// What is wrong with the values of one tool, or nothing. parse() and
+// McpIpcManifest::problem() share it, so that a manifest from a file and
+// one that code built have one set of rules.
+QString toolProblem(const McpIpcManifestTool& tool)
+{
+    if (tool.target.isEmpty() || tool.method.isEmpty() || tool.method.contains(QLatin1Char('.'))) {
+        return QStringLiteral("\"call\" is not of the form TARGET.METHOD");
+    }
+    if (!PhosphorMcp::McpTool::isValidName(tool.name)) {
+        return QStringLiteral("\"name\" must be 1 to 128 of A-Z, a-z, 0-9, '_', '-' and '.'");
+    }
+    // The model reads only the description to choose a tool, so a tool
+    // without one is a mistake of the manifest.
+    if (tool.description.isEmpty()) {
+        return QStringLiteral("\"description\" must not be empty");
+    }
+    if (tool.params) {
+        QStringList names;
+        for (const QString& name : *tool.params) {
+            if (name.isEmpty()) {
+                return QStringLiteral("\"params\" holds an empty name");
+            }
+            if (names.contains(name)) {
+                return QStringLiteral("\"params\" names \"%1\" twice").arg(name);
+            }
+            names.append(name);
+        }
+    }
+    return {};
 }
 
 // Reads one optional boolean hint of "annotations".
@@ -55,6 +98,10 @@ bool readTool(const QJsonObject& object, McpIpcManifestTool* tool, QString* erro
     }
 
     const QJsonValue call = object.value(QLatin1StringView("call"));
+    if (call.isUndefined()) {
+        *error = QStringLiteral("there is no \"call\"");
+        return false;
+    }
     const QString callText = call.toString();
     const qsizetype dot = callText.lastIndexOf(QLatin1Char('.'));
     if (!call.isString() || dot <= 0 || dot == callText.size() - 1) {
@@ -62,27 +109,39 @@ bool readTool(const QJsonObject& object, McpIpcManifestTool* tool, QString* erro
         return false;
     }
     tool->target = callText.left(dot);
-    tool->function = callText.mid(dot + 1);
+    tool->method = callText.mid(dot + 1);
 
     const QJsonValue name = object.value(QLatin1StringView("name"));
-    if (!name.isString() || name.toString().isEmpty()) {
-        *error = QStringLiteral("\"name\" is not a string that is not empty");
+    if (name.isUndefined()) {
+        *error = QStringLiteral("there is no \"name\"");
+        return false;
+    }
+    if (!name.isString()) {
+        *error = QStringLiteral("\"name\" is not a string");
         return false;
     }
     tool->name = name.toString();
 
     const QJsonValue title = object.value(QLatin1StringView("title"));
-    if (!title.isUndefined() && !title.isString()) {
-        *error = QStringLiteral("\"title\" is not a string");
-        return false;
+    if (!title.isUndefined()) {
+        if (!title.isString()) {
+            *error = QStringLiteral("\"title\" is not a string");
+            return false;
+        }
+        if (title.toString().isEmpty()) {
+            *error = QStringLiteral("\"title\" must not be empty");
+            return false;
+        }
     }
     tool->title = title.toString();
 
-    // The model reads only the description to choose a tool, so a tool
-    // without one is a mistake of the manifest.
     const QJsonValue description = object.value(QLatin1StringView("description"));
-    if (!description.isString() || description.toString().isEmpty()) {
-        *error = QStringLiteral("\"description\" is not a string that is not empty");
+    if (description.isUndefined()) {
+        *error = QStringLiteral("there is no \"description\"");
+        return false;
+    }
+    if (!description.isString()) {
+        *error = QStringLiteral("\"description\" is not a string");
         return false;
     }
     tool->description = description.toString();
@@ -94,13 +153,10 @@ bool readTool(const QJsonObject& object, McpIpcManifestTool* tool, QString* erro
             return false;
         }
         QStringList names;
-        for (const QJsonValue param : params.toArray()) {
-            if (!param.isString() || param.toString().isEmpty()) {
-                *error = QStringLiteral("\"params\" holds a value that is not a string that is not empty");
-                return false;
-            }
-            if (names.contains(param.toString())) {
-                *error = QStringLiteral("\"params\" names \"%1\" twice").arg(param.toString());
+        const QJsonArray entries = params.toArray();
+        for (const QJsonValue param : entries) {
+            if (!param.isString()) {
+                *error = QStringLiteral("\"params\" holds a value that is not a string");
                 return false;
             }
             names.append(param.toString());
@@ -129,14 +185,31 @@ bool readTool(const QJsonObject& object, McpIpcManifestTool* tool, QString* erro
             return false;
         }
     }
-    return true;
+
+    *error = toolProblem(*tool);
+    return error->isEmpty();
 }
 
 } // namespace
 
+QString McpIpcManifest::problem() const
+{
+    QSet<QString> names;
+    for (qsizetype i = 0; i < tools.size(); ++i) {
+        const QString reason = toolProblem(tools.at(i));
+        if (!reason.isEmpty()) {
+            return QStringLiteral("tools[%1]: %2").arg(QString::number(i), reason);
+        }
+        if (names.contains(tools.at(i).name)) {
+            return QStringLiteral("tools[%1]: another tool is named \"%2\"").arg(QString::number(i), tools.at(i).name);
+        }
+        names.insert(tools.at(i).name);
+    }
+    return {};
+}
+
 std::optional<McpIpcManifest> McpIpcManifest::parse(const QByteArray& json, QString* error)
 {
-    QString reason;
     const auto refuse = [&](const QString& message) -> std::optional<McpIpcManifest> {
         if (error) {
             *error = message;
@@ -144,21 +217,27 @@ std::optional<McpIpcManifest> McpIpcManifest::parse(const QByteArray& json, QStr
         return std::nullopt;
     };
 
+    // QJsonValue reads any JSON text, where QJsonDocument takes only an
+    // object or an array and would call a number at the root "not JSON".
     QJsonParseError parseError{};
-    const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
+    const QJsonValue value = QJsonValue::fromJson(json, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
-        return refuse(QStringLiteral("not JSON at offset %1: %2").arg(parseError.offset).arg(parseError.errorString()));
+        return refuse(QStringLiteral("not JSON at offset %1: %2")
+                          .arg(QString::number(parseError.offset), parseError.errorString()));
     }
-    if (!document.isObject()) {
+    if (!value.isObject()) {
         return refuse(QStringLiteral("the root is not an object"));
     }
-    const QJsonObject root = document.object();
+    const QJsonObject root = value.toObject();
     for (auto it = root.begin(); it != root.end(); ++it) {
         if (it.key() != QLatin1StringView("tools")) {
             return refuse(QStringLiteral("unknown member \"%1\" at the root").arg(it.key()));
         }
     }
     const QJsonValue tools = root.value(QLatin1StringView("tools"));
+    if (tools.isUndefined()) {
+        return refuse(QStringLiteral("the root has no \"tools\""));
+    }
     if (!tools.isArray()) {
         return refuse(QStringLiteral("\"tools\" is not an array"));
     }
@@ -167,18 +246,23 @@ std::optional<McpIpcManifest> McpIpcManifest::parse(const QByteArray& json, QStr
     QSet<QString> names;
     const QJsonArray entries = tools.toArray();
     for (qsizetype i = 0; i < entries.size(); ++i) {
+        const QString index = QString::number(i);
         if (!entries.at(i).isObject()) {
-            return refuse(QStringLiteral("tools[%1] is not an object").arg(i));
+            return refuse(QStringLiteral("tools[%1] is not an object").arg(index));
         }
         McpIpcManifestTool tool;
+        QString reason;
         if (!readTool(entries.at(i).toObject(), &tool, &reason)) {
-            return refuse(QStringLiteral("tools[%1]: %2").arg(i).arg(reason));
+            return refuse(QStringLiteral("tools[%1]: %2").arg(index, reason));
         }
         if (names.contains(tool.name)) {
-            return refuse(QStringLiteral("tools[%1]: another tool is named \"%2\"").arg(i).arg(tool.name));
+            return refuse(QStringLiteral("tools[%1]: another tool is named \"%2\"").arg(index, tool.name));
         }
         names.insert(tool.name);
         manifest.tools.append(tool);
+    }
+    if (error) {
+        error->clear();
     }
     return manifest;
 }
@@ -188,30 +272,65 @@ std::optional<McpIpcManifest> McpIpcManifest::load(const QString& path, QString*
     if (missing) {
         *missing = false;
     }
-    if (!QFileInfo::exists(path)) {
-        if (missing) {
-            *missing = true;
-        }
-        return McpIpcManifest();
-    }
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    const auto refuse = [&](const QString& message) -> std::optional<McpIpcManifest> {
         if (error) {
-            *error = QStringLiteral("cannot read %1: %2").arg(path, file.errorString());
+            *error = message;
         }
         return std::nullopt;
+    };
+    if (path.isEmpty()) {
+        return refuse(QStringLiteral("the path of the manifest is empty"));
+    }
+
+    // Without waiting: a plain open() of a FIFO waits for a writer, and
+    // the server would never start. The flag changes nothing for a file.
+    // O_NOCTTY, so that a terminal device at the path does not become the
+    // terminal of this process before the check below refuses it.
+    const QByteArray name = QFile::encodeName(path);
+    const int descriptor = ::open(name.constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOCTTY);
+    if (descriptor < 0) {
+        const int openError = errno;
+        if (openError == ENOENT) {
+            // No file, or a link to no file. Only the first is "no manifest":
+            // a link shows that someone meant a manifest to be here.
+            struct stat link = {};
+            if (::lstat(name.constData(), &link) != 0) {
+                if (missing) {
+                    *missing = true;
+                }
+                if (error) {
+                    error->clear();
+                }
+                return McpIpcManifest();
+            }
+            return refuse(QStringLiteral("cannot read %1: it is a link to a file that does not exist").arg(path));
+        }
+        return refuse(QStringLiteral("cannot read %1: %2").arg(path, errnoText(openError)));
+    }
+    struct stat status = {};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode)) {
+        ::close(descriptor);
+        return refuse(QStringLiteral("%1 is not a regular file").arg(path));
+    }
+    QFile file;
+    if (!file.open(descriptor, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+        ::close(descriptor);
+        return refuse(QStringLiteral("cannot read %1: %2").arg(path, file.errorString()));
     }
     const QByteArray json = file.read(MaxManifestBytes + 1);
+    if (file.error() != QFileDevice::NoError) {
+        return refuse(QStringLiteral("cannot read %1: %2").arg(path, file.errorString()));
+    }
     if (json.size() > MaxManifestBytes) {
-        if (error) {
-            *error = QStringLiteral("%1 is larger than %2 bytes").arg(path).arg(MaxManifestBytes);
-        }
-        return std::nullopt;
+        return refuse(QStringLiteral("%1 is larger than %2 bytes").arg(path, QString::number(MaxManifestBytes)));
     }
     QString reason;
     std::optional<McpIpcManifest> manifest = parse(json, &reason);
-    if (!manifest && error) {
-        *error = QStringLiteral("%1: %2").arg(path, reason);
+    if (!manifest) {
+        return refuse(QStringLiteral("%1: %2").arg(path, reason));
+    }
+    if (error) {
+        error->clear();
     }
     return manifest;
 }

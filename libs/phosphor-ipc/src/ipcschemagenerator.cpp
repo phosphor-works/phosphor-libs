@@ -35,8 +35,9 @@ QJsonObject customTypeDescription(const char* typeName)
 
 // Map a QMetaType ID to a JSON Schema fragment. Per IpcSchemaGenerator.h's
 // documented table. Unknown / custom types degrade to a
-// {"description": "<typename>"} fragment without a "type" constraint;
-// the CLI will accept any value and let the server decide.
+// {"description": "custom QMetaType: <typename>"} fragment without a
+// "type" constraint; the CLI will accept any value and let the server
+// decide.
 QJsonObject typeToSchema(int metaTypeId)
 {
     QJsonObject obj;
@@ -52,10 +53,16 @@ QJsonObject typeToSchema(int metaTypeId)
     case QMetaType::UShort:
     case QMetaType::LongLong:
     case QMetaType::ULongLong:
+    case QMetaType::Char:
+    case QMetaType::SChar:
+    case QMetaType::UChar:
+        // A char is an integer on the wire, as in variantToJson and in the
+        // router's conversion of an argument.
         obj.insert(QStringLiteral("type"), QStringLiteral("integer"));
         return obj;
     case QMetaType::Double:
     case QMetaType::Float:
+    case QMetaType::Float16:
         obj.insert(QStringLiteral("type"), QStringLiteral("number"));
         return obj;
     case QMetaType::QString:
@@ -144,8 +151,13 @@ QJsonObject schemaFor(const QString& targetName, const QObject* object)
             signals_.append(describeMethod(m));
             continue;
         }
-        // Q_INVOKABLE methods + public slots both surface here.
+        // Q_INVOKABLE methods + public slots both surface here. A method
+        // that a nearer class hides is left out, as the router does not
+        // call it: the schema then lists each callable function once.
         if (m.methodType() == QMetaMethod::Method || m.methodType() == QMetaMethod::Slot) {
+            if (detail::isHiddenMethod(meta, m)) {
+                continue;
+            }
             QJsonObject entry = describeMethod(m);
             const int retType = m.returnMetaType().id();
             if (retType == QMetaType::Void) {

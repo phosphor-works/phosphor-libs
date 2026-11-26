@@ -4,7 +4,7 @@
 // Full socket roundtrip. Spins up an IpcRouter on a temp socket
 // path, opens a QLocalSocket client in the same process, sends
 // NDJSON requests, and asserts response bytes. Exercises the same
-// wire bytes that phosphor-shell/cli/phosphorctl produces.
+// wire bytes that a command-line client such as phosphorctl produces.
 
 #include "ipctesthelpers.h"
 
@@ -159,6 +159,7 @@ private Q_SLOTS:
     void roundtrip_unknownTargetError();
     void roundtrip_callFailedError();
     void roundtrip_malformedRequest();
+    void roundtrip_refusedRequestKeepsItsId();
     void start_failsWhenPathConflict();
     void start_replacesStaleSocket();
     void start_keepsBusyListener();
@@ -306,7 +307,32 @@ void TestPhosphorIpcE2e::roundtrip_malformedRequest()
     const QJsonObject resp = QJsonDocument::fromJson(line).object();
     QCOMPARE(resp.value(QStringLiteral("type")).toString(), QStringLiteral("error"));
     QCOMPARE(resp.value(QStringLiteral("code")).toString(), QStringLiteral("MALFORMED_REQUEST"));
+    // The line held no id that the router could read.
+    QVERIFY(!resp.contains(QStringLiteral("id")));
     socket.disconnectFromServer();
+}
+
+void TestPhosphorIpcE2e::roundtrip_refusedRequestKeepsItsId()
+{
+    // A request with a valid id that a later check refuses gets its error
+    // under that id. A client that matches answers by id would otherwise
+    // wait for this request without end.
+    RouterFixture fx;
+    QVERIFY(fx.valid());
+    QVERIFY(fx.router.start(fx.sockPath));
+
+    // A call with an empty target.
+    QJsonObject emptyTarget = makeCallReq(7, QStringLiteral("x"), QStringLiteral("fn"));
+    emptyTarget.insert(QStringLiteral("target"), QString());
+    ROUNDTRIP_OR_FAIL(first, fx.sockPath, emptyTarget);
+    QCOMPARE(first.value(QStringLiteral("type")).toString(), QStringLiteral("error"));
+    QCOMPARE(first.value(QStringLiteral("code")).toString(), QStringLiteral("MALFORMED_REQUEST"));
+    QCOMPARE(first.value(QStringLiteral("id")), QJsonValue(7));
+
+    // An unsubscribe without a subscription id.
+    ROUNDTRIP_OR_FAIL(second, fx.sockPath, makeReq(QStringLiteral("unsubscribe"), 8));
+    QCOMPARE(second.value(QStringLiteral("code")).toString(), QStringLiteral("MALFORMED_REQUEST"));
+    QCOMPARE(second.value(QStringLiteral("id")), QJsonValue(8));
 }
 
 void TestPhosphorIpcE2e::start_failsWhenPathConflict()

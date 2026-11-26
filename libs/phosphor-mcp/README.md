@@ -35,8 +35,8 @@ needs it. Content blocks other than text, image and audio have no typed construc
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorMcp::McpServer` | The server. `setServerInfo`, `setInstructions`, `setCache`, `setMaxLineBytes`, `setMaxPendingWriteBytes`, `addTool(tool, handler)`, `tools()`, `handleTerminationSignals()`, `start()`, `isRunning()`, and `transport()` for the read-only state of the transport. Signal `finished(reason)`. Single-threaded. |
-| `PhosphorMcp::McpTool` | A tool definition. Name, title, description, input and output schemas, the four behavior hints, and the client capabilities that a call needs. |
+| `PhosphorMcp::McpServer` | The server. `setServerInfo`, `setInstructions`, `setCache`, `setMaxLineBytes`, `setMaxPendingWriteBytes`, `addTool(tool, handler)`, `toolProblem(tool)`, `tools()`, `handleTerminationSignals()`, `start()`, `isRunning()`, and `transport()` for the read-only state of the transport. Signal `finished(reason)`. Single-threaded. |
+| `PhosphorMcp::McpTool` | A tool definition. Name, title, description, input and output schemas, the four behavior hints, and the client capabilities that a call needs. `McpTool::isValidName(name)` checks a name against the rule of the server. |
 | `PhosphorMcp::McpCall` | One `tools/call`, given to the handler. The arguments, the request id and `_meta`, `finish(result)`, `fail(text)`, `progress(value, total, message)`, `onCancelled(callback)`. Move-only. |
 | `PhosphorMcp::McpResult` | The answer of a tool. Text, image and audio content, any other block through `McpContent::fromJson`, structured content of any JSON type, and if the call failed. |
 | `PhosphorMcp::McpContent` | One content block. Text, an image or audio clip as bytes and a MIME type, or a block given as JSON. |
@@ -148,9 +148,9 @@ answers the first three requests of the session above with these lines, byte for
 object in the order of their names.
 
 ```json
-{"id":1,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.1.0"}},"cacheScope":"public","capabilities":{"tools":{}},"instructions":"count_words counts the words and characters of a text.","resultType":"complete","supportedVersions":["2026-07-28"],"ttlMs":3600000}}
-{"id":2,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.1.0"}},"cacheScope":"public","resultType":"complete","tools":[{"annotations":{"destructiveHint":false,"idempotentHint":true,"openWorldHint":false,"readOnlyHint":true},"description":"Counts the words (runs of characters that are not spaces) and the characters (Unicode code points) of a text.","inputSchema":{"additionalProperties":false,"properties":{"text":{"description":"The text to count","maxLength":1000000,"type":"string"}},"required":["text"],"type":"object"},"name":"count_words","outputSchema":{"properties":{"characters":{"type":"integer"},"words":{"type":"integer"}},"required":["words","characters"],"type":"object"},"title":"Count words"}],"ttlMs":3600000}}
-{"id":3,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.1.0"}},"content":[{"text":"{\"characters\":7,\"words\":2}","type":"text"}],"resultType":"complete","structuredContent":{"characters":7,"words":2}}}
+{"id":1,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.2.0"}},"cacheScope":"public","capabilities":{"tools":{}},"instructions":"count_words counts the words and characters of a text.","resultType":"complete","supportedVersions":["2026-07-28"],"ttlMs":3600000}}
+{"id":2,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.2.0"}},"cacheScope":"public","resultType":"complete","tools":[{"annotations":{"destructiveHint":false,"idempotentHint":true,"openWorldHint":false,"readOnlyHint":true},"description":"Counts the words (runs of characters that are not spaces) and the characters (Unicode code points) of a text.","inputSchema":{"additionalProperties":false,"properties":{"text":{"description":"The text to count","maxLength":1000000,"type":"string"}},"required":["text"],"type":"object"},"name":"count_words","outputSchema":{"properties":{"characters":{"type":"integer"},"words":{"type":"integer"}},"required":["words","characters"],"type":"object"},"title":"Count words"}],"ttlMs":3600000}}
+{"id":3,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"wordcount","version":"0.2.0"}},"content":[{"text":"{\"characters\":7,\"words\":2}","type":"text"}],"resultType":"complete","structuredContent":{"characters":7,"words":2}}}
 ```
 
 While a call runs, if its request had a `progressToken`, each `progress()` sends a notification in this form:
@@ -730,7 +730,9 @@ In a build directory of the library alone, nothing reads them.
   Thus it keeps its own checker, with a check before it that refuses what a handler would read incorrectly, an exact
   bound on the work, and a short list of errors in plain words.
 - [`phosphor-ipc`](../phosphor-ipc/README.md): JSON over a Unix socket, for scripts and shells that control a running
-  Phosphor application. This library serves an agent that starts the application as a child.
+  Phosphor application. This library serves an agent that starts its server as a child.
+- [`phosphor-mcp-ipc`](../phosphor-mcp-ipc/README.md): a server made with this library. It offers the calls of a
+  running application's phosphor-ipc socket to an agent.
 - [`phosphor-channel`](../phosphor-channel/README.md): its `SigpipeBlock` is the original of the copy in the
   transport, and the two are kept the same.
 - `examples/phosphor-mcp/wordcount.cpp` and `tests/test_phosphor_mcp_example.cpp`: a full server, and a client that

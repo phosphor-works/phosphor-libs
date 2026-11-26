@@ -18,6 +18,7 @@
 #include <QJsonObject>
 #include <QLatin1StringView>
 #include <QtEnvironmentVariables>
+#include <QtLogging>
 
 using namespace PhosphorMcp;
 
@@ -105,7 +106,9 @@ int main(int argc, char** argv)
 
     // SIGTERM from the client ends the server at once, and the replies still
     // queued are dropped. The end of stdin sends them first.
-    server.handleTerminationSignals();
+    if (!server.handleTerminationSignals()) {
+        qWarning("wordcount: cannot handle the signals that end the server");
+    }
     using Reason = McpServer::FinishReason;
     QObject::connect(&server, &McpServer::finished, &app, [&app](Reason reason) {
         // A failed read or write is an error. The other reasons are ends.

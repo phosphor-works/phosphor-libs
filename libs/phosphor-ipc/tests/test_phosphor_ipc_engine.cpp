@@ -6,16 +6,21 @@
 // componentComplete. The unit here exercises the install / uninstall
 // / routerFor surface against bogus inputs (null engine, null router,
 // replacement, foreign property values) so misconfiguration surfaces
-// as a qWarning rather than a silent dead binding.
+// as a qWarning rather than a silent dead binding. The last tests call
+// functions that an IpcTarget declares in QML through the router.
 
 #include <PhosphorIpc/IpcEngine.h>
 #include <PhosphorIpc/IpcProtocol.h>
 #include <PhosphorIpc/IpcRouter.h>
 #include <PhosphorIpc/IpcTarget.h>
 
+#include <QByteArray>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QList>
+#include <QMetaObject>
 #include <QObject>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -36,6 +41,7 @@ public:
     Q_DISABLE_COPY_MOVE(TestPhosphorIpcEngine)
     TestPhosphorIpcEngine() = default;
 private Q_SLOTS:
+    void initTestCase();
     void install_storesRouterOnEngine();
     void install_idempotentSameRouterSameEngine();
     void install_replacesPriorRouterWithWarning();
@@ -43,15 +49,20 @@ private Q_SLOTS:
     void install_rejectsNullRouter();
     void uninstall_clearsBinding();
     void uninstall_nullEngineIsNoOp();
-    void routerFor_returnsInstalled();
     void routerFor_nullEngineReturnsNullptr();
-    void routerFor_returnsNullptrAfterUninstall();
     void routerFor_returnsNullptrForForeignProperty();
     void routerFor_returnsNullptrAfterRouterDestroyed();
-    void install_uninstall_install_doesNotLeakDestroyedWatcher();
+    void install_afterUninstallStillWatchesTheRouter();
     void qmlFunctionFailsItsCall();
     void qmlUntypedAndTypedFunctionsAreCallable();
+    void qmlFunctionOfADerivedComponentHidesTheBase();
 };
+
+void TestPhosphorIpcEngine::initTestCase()
+{
+    // The type that the QML tests import, one time for the process.
+    qmlRegisterType<IpcTarget>("PhosphorIpcTest", 1, 0, "IpcTarget");
+}
 
 void TestPhosphorIpcEngine::install_storesRouterOnEngine()
 {
@@ -69,6 +80,7 @@ void TestPhosphorIpcEngine::install_idempotentSameRouterSameEngine()
     // Re-installing the SAME router on the SAME engine must NOT
     // emit any warning; if it did, repeated startup paths (e.g.
     // engine reload) would spam the console.
+    QTest::failOnWarning();
     IpcEngine::install(&engine, &router);
     QCOMPARE(IpcEngine::routerFor(&engine), &router);
 }
@@ -95,14 +107,20 @@ void TestPhosphorIpcEngine::install_rejectsNullEngine()
 
 void TestPhosphorIpcEngine::install_rejectsNullRouter()
 {
+    const char* const warning =
+        "PhosphorIpc::IpcEngine::install: null router; call uninstall() to drop the binding explicitly";
     QQmlEngine engine;
-    QTest::ignoreMessage(
-        QtWarningMsg, "PhosphorIpc::IpcEngine::install: null router; call uninstall() to drop the binding explicitly");
+    QTest::ignoreMessage(QtWarningMsg, warning);
     IpcEngine::install(&engine, nullptr);
-    // Null-router install must NOT silently uninstall a previously
-    // installed binding; the routerFor lookup stays at whatever it
-    // was before (nullptr in this fresh-engine case).
     QCOMPARE(IpcEngine::routerFor(&engine), nullptr);
+
+    // Null-router install must NOT silently uninstall a previously
+    // installed binding.
+    IpcRouter router;
+    IpcEngine::install(&engine, &router);
+    QTest::ignoreMessage(QtWarningMsg, warning);
+    IpcEngine::install(&engine, nullptr);
+    QCOMPARE(IpcEngine::routerFor(&engine), &router);
 }
 
 void TestPhosphorIpcEngine::uninstall_clearsBinding()
@@ -119,26 +137,9 @@ void TestPhosphorIpcEngine::uninstall_nullEngineIsNoOp()
     IpcEngine::uninstall(nullptr); // must not crash
 }
 
-void TestPhosphorIpcEngine::routerFor_returnsInstalled()
-{
-    QQmlEngine engine;
-    IpcRouter router;
-    IpcEngine::install(&engine, &router);
-    QCOMPARE(IpcEngine::routerFor(&engine), &router);
-}
-
 void TestPhosphorIpcEngine::routerFor_nullEngineReturnsNullptr()
 {
     QCOMPARE(IpcEngine::routerFor(nullptr), nullptr);
-}
-
-void TestPhosphorIpcEngine::routerFor_returnsNullptrAfterUninstall()
-{
-    QQmlEngine engine;
-    IpcRouter router;
-    IpcEngine::install(&engine, &router);
-    IpcEngine::uninstall(&engine);
-    QCOMPARE(IpcEngine::routerFor(&engine), nullptr);
 }
 
 void TestPhosphorIpcEngine::routerFor_returnsNullptrForForeignProperty()
@@ -152,7 +153,24 @@ void TestPhosphorIpcEngine::routerFor_returnsNullptrForForeignProperty()
     // might deref the held pointer at engine teardown).
     QObject foreign;
     QQmlEngine engine;
-    engine.setProperty("phosphorIpcRouter", QVariant::fromValue<QObject*>(&foreign));
+    // The name of the slot is the library's own. install() shows it, so
+    // the test still writes the right slot after a rename.
+    const QList<QByteArray> before = engine.dynamicPropertyNames();
+    QByteArray slot;
+    {
+        IpcRouter router;
+        IpcEngine::install(&engine, &router);
+        const QList<QByteArray> during = engine.dynamicPropertyNames();
+        for (const QByteArray& name : during) {
+            if (!before.contains(name)) {
+                slot = name;
+            }
+        }
+        IpcEngine::uninstall(&engine);
+    }
+    QVERIFY(!slot.isEmpty());
+    engine.setProperty(slot.constData(), QVariant::fromValue<QObject*>(&foreign));
+    QCOMPARE(engine.property(slot.constData()).value<QObject*>(), &foreign);
     QCOMPARE(IpcEngine::routerFor(&engine), nullptr);
 }
 
@@ -171,19 +189,11 @@ void TestPhosphorIpcEngine::routerFor_returnsNullptrAfterRouterDestroyed()
     QCOMPARE(IpcEngine::routerFor(&engine), nullptr);
 }
 
-void TestPhosphorIpcEngine::install_uninstall_install_doesNotLeakDestroyedWatcher()
+void TestPhosphorIpcEngine::install_afterUninstallStillWatchesTheRouter()
 {
-    // Repeated install/uninstall/install cycles must not accumulate
-    // engine-destroyed handlers on the engine. Each cycle clears the
-    // per-engine bookkeeping; the engine-destroyed handler should be
-    // attached exactly once per engine across the engine's lifetime,
-    // not once per install() call. A regression that re-attached
-    // would still pass this test functionally (the extra lambdas
-    // are no-ops on map removal), but the leak would surface as a
-    // growing connection count we can't easily assert here. What we
-    // CAN assert: the destroyed-watcher contract continues to work
-    // after the cycle, i.e. a router destroyed post-cycle still
-    // clears the engine property.
+    // After an install/uninstall cycle the destroyed-watcher contract
+    // continues to work: a router destroyed after the second install
+    // still clears the engine property.
     QQmlEngine engine;
     {
         auto routerA = std::make_unique<IpcRouter>();
@@ -201,7 +211,6 @@ void TestPhosphorIpcEngine::qmlFunctionFailsItsCall()
 {
     // A function declared in QML runs through the QML engine's own
     // metaobject. sendErrorReply must still reach the router's call.
-    qmlRegisterType<IpcTarget>("PhosphorIpcTest", 1, 0, "IpcTarget");
     IpcRouter router;
     QQmlEngine engine;
     IpcEngine::install(&engine, &router);
@@ -240,7 +249,6 @@ void TestPhosphorIpcEngine::qmlUntypedAndTypedFunctionsAreCallable()
 {
     // An untyped QML function takes and returns QVariant. The router hands
     // the incoming variant over as it is and reads the returned one.
-    qmlRegisterType<IpcTarget>("PhosphorIpcTest", 1, 0, "IpcTarget");
     IpcRouter router;
     QQmlEngine engine;
     IpcEngine::install(&engine, &router);
@@ -277,6 +285,82 @@ IpcTarget {
 
     router.invoke(QStringLiteral("calc"), QStringLiteral("nothing"), {QStringLiteral("x")}, &outcome, &message);
     QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+}
+
+void TestPhosphorIpcEngine::qmlFunctionOfADerivedComponentHidesTheBase()
+{
+    // A component that declares a function of its base component again
+    // replaces it for every caller in QML, whatever the parameters. The
+    // router must call the same function, not the one of the base.
+    IpcRouter router;
+    QQmlEngine engine;
+    IpcEngine::install(&engine, &router);
+    QQmlComponent component(&engine);
+    component.setData(R"(import QtQml
+import PhosphorIpcTest
+QtObject {
+    component Base: IpcTarget {
+        function same(pane) { return "base-same" }
+        function retyped(pane: int): string { return "base-retyped" }
+        function grown(a) { return "base-grown" }
+        function inherited() { return "base-inherited" }
+    }
+    component Derived: Base {
+        function same(pane) { return "derived-same" }
+        function retyped(pane: string): string { return "derived-retyped" }
+        function grown(a, b) { return "derived-grown" }
+    }
+    property Derived item: Derived { target: "layers" }
+    function viaQml() { return [item.same(1), item.retyped("x"), item.grown(1, 2), item.inherited()] }
+})",
+                      QUrl());
+    std::unique_ptr<QObject> object(component.create());
+    QVERIFY2(object, qPrintable(component.errorString()));
+    QVERIFY(router.target(QStringLiteral("layers")));
+
+    // What QML itself calls.
+    QVariant viaQml;
+    QVERIFY(QMetaObject::invokeMethod(object.get(), "viaQml", Q_RETURN_ARG(QVariant, viaQml)));
+    const QStringList expected{QStringLiteral("derived-same"), QStringLiteral("derived-retyped"),
+                               QStringLiteral("derived-grown"), QStringLiteral("base-inherited")};
+    QCOMPARE(variantToJson(viaQml).toVariant().toStringList(), expected);
+
+    // The router calls the same functions.
+    IpcRouter::InvokeOutcome outcome = IpcRouter::InvokeOutcome::NoSuchFn;
+    QString message;
+    const auto call = [&](const QString& fn, const QVariantList& args) {
+        return router.invoke(QStringLiteral("layers"), fn, args, &outcome, &message).toString();
+    };
+    QCOMPARE(call(QStringLiteral("same"), {1}), expected.at(0));
+    QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+    QCOMPARE(call(QStringLiteral("retyped"), {QStringLiteral("x")}), expected.at(1));
+    QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+    QCOMPARE(call(QStringLiteral("grown"), {1, 2}), expected.at(2));
+    QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+    QCOMPARE(call(QStringLiteral("inherited"), {}), expected.at(3));
+    QVERIFY2(outcome == IpcRouter::InvokeOutcome::Ok, qPrintable(message));
+
+    // The function of the base with one parameter is hidden, so one
+    // argument matches nothing: the router does not call a function that
+    // QML itself would never reach.
+    call(QStringLiteral("grown"), {1});
+    QCOMPARE(outcome, IpcRouter::InvokeOutcome::ArgCountMismatch);
+
+    // The schema lists each name one time, with the parameters of the
+    // derived component.
+    QHash<QString, int> parameterCounts;
+    const QJsonArray functions =
+        router.schemaFor(QStringLiteral("layers")).value(QStringLiteral("functions")).toArray();
+    for (const QJsonValue function : functions) {
+        const QString name = function.toObject().value(QStringLiteral("name")).toString();
+        QVERIFY2(!parameterCounts.contains(name), qPrintable(name));
+        parameterCounts.insert(name, int(function.toObject().value(QStringLiteral("params")).toArray().size()));
+    }
+    QCOMPARE(parameterCounts,
+             (QHash<QString, int>{{QStringLiteral("same"), 1},
+                                  {QStringLiteral("retyped"), 1},
+                                  {QStringLiteral("grown"), 2},
+                                  {QStringLiteral("inherited"), 0}}));
 }
 
 QTEST_GUILESS_MAIN(TestPhosphorIpcEngine)

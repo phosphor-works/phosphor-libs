@@ -1,11 +1,12 @@
-// SPDX-FileCopyrightText: 2026 fuddlesworth
+// SPDX-FileCopyrightText: 2026 Phosphor Works Team
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #pragma once
 
 // The application side of the tests: an IpcRouter on a socket in a
-// temporary directory, with a C++ target that has overloads and a target
-// that fails calls, and a QML IpcTarget whose untyped parameter takes any
-// value. Header-only, like the helpers of phosphor-ipc and phosphor-mcp.
+// temporary directory, with two targets. "panes" is a C++ object with
+// overloads and with methods that fail or answer later. "script" is a QML
+// IpcTarget whose untyped parameter takes any value. Header-only, like the
+// helpers of phosphor-ipc and phosphor-mcp.
 
 #include "ipctesthelpers.h"
 
@@ -16,7 +17,9 @@
 #include <PhosphorIpc/IpcTarget.h>
 
 #include <QByteArray>
+#include <QDebug>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QQmlComponent>
@@ -24,6 +27,8 @@
 #include <QString>
 #include <QStringList>
 #include <QUrl>
+#include <QVariantList>
+#include <QVariantMap>
 #include <QtCore/qtclasshelpermacros.h>
 
 #include <list>
@@ -35,7 +40,10 @@ class Panes : public QObject, protected PhosphorIpc::IpcCallContext
 {
     Q_OBJECT
 public:
-    Panes() = default;
+    explicit Panes(PhosphorIpc::IpcRouter& router)
+        : m_router(router)
+    {
+    }
     Q_DISABLE_COPY_MOVE(Panes)
 
     Q_INVOKABLE QJsonObject describe(int pane) const
@@ -66,16 +74,16 @@ public:
     {
         return {QStringLiteral("a"), QStringLiteral("b")};
     }
-    // Answers only when the test says so.
+    // Answers when the test finishes the reply in waiting().
     Q_INVOKABLE void wait(int pane)
     {
         Q_UNUSED(pane)
-        waiting.push_back(deferReply());
+        m_waiting.push_back(deferReply());
     }
     // In no manifest of the tests.
     Q_INVOKABLE void secret()
     {
-        ++secretCalls;
+        ++m_secretCalls;
     }
     // Two overloads with one parameter each: the router cannot tell them
     // apart, so no manifest may choose one.
@@ -87,11 +95,63 @@ public:
     {
         return title;
     }
+    // A default argument. The method is then callable with one argument
+    // and with two, as two overloads.
+    Q_INVOKABLE QString zoom(int pane, int factor = 2)
+    {
+        return QStringLiteral("zoom %1 by %2").arg(pane).arg(factor);
+    }
+    // An overload without parameters beside one with a parameter.
+    Q_INVOKABLE QString layout()
+    {
+        return QStringLiteral("the layout");
+    }
+    Q_INVOKABLE QString layout(const QString& name)
+    {
+        return QStringLiteral("the layout %1").arg(name);
+    }
+    // One parameter of each kind that the schema can describe. The last is
+    // a type without a JSON form.
+    Q_INVOKABLE bool kinds(bool flag, double ratio, const QStringList& tags, const QVariantList& items,
+                           const QVariantMap& options, const QUrl& link)
+    {
+        return flag && ratio > 0 && tags.size() == 2 && items.size() == 2
+            && options.value(QStringLiteral("k")).toInt() == 1 && link.host() == QLatin1String("example.org");
+    }
+    Q_INVOKABLE void nothing()
+    {
+    }
+    // Sends an event to its caller ahead of the reply.
+    Q_INVOKABLE QString install(const QString& name)
+    {
+        m_router.sendEvent(connectionId(), QStringLiteral("panes"), QStringLiteral("output"),
+                           QJsonArray{QStringLiteral("fetching %1").arg(name)});
+        return QStringLiteral("installed %1").arg(name);
+    }
+    // More parameters than a call takes.
+    Q_INVOKABLE int eleven(int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k)
+    {
+        return a + b + c + d + e + f + g + h + i + j + k;
+    }
+    // A parameter without a name, which no argument can name.
+    Q_INVOKABLE int unnamed(int)
+    {
+        return 0;
+    }
 
-    std::list<PhosphorIpc::IpcPendingReply> waiting;
-    int secretCalls = 0;
+    std::list<PhosphorIpc::IpcPendingReply>& waiting()
+    {
+        return m_waiting;
+    }
+    int secretCalls() const
+    {
+        return m_secretCalls;
+    }
 
 private:
+    PhosphorIpc::IpcRouter& m_router;
+    std::list<PhosphorIpc::IpcPendingReply> m_waiting;
+    int m_secretCalls = 0;
     QHash<int, QString> m_titles;
 };
 
@@ -101,7 +161,9 @@ class Application
 public:
     Application()
     {
-        qmlRegisterType<PhosphorIpc::IpcTarget>("PhosphorMcpIpcTest", 1, 0, "IpcTarget");
+        // The registration is for the process. One is enough for every test.
+        static const int registered = qmlRegisterType<PhosphorIpc::IpcTarget>("PhosphorMcpIpcTest", 1, 0, "IpcTarget");
+        Q_UNUSED(registered)
         PhosphorIpc::IpcEngine::install(&m_engine, &m_fixture.router);
     }
     ~Application()
@@ -114,7 +176,7 @@ public:
     // Starts the router with both targets. False on any failure.
     bool start()
     {
-        if (!m_fixture.valid() || !m_fixture.router.registerTarget(QStringLiteral("panes"), &panes)) {
+        if (!m_fixture.valid() || !m_fixture.router.registerTarget(QStringLiteral("panes"), &m_panes)) {
             return false;
         }
         QQmlComponent component(&m_engine);
@@ -143,17 +205,21 @@ IpcTarget {
     {
         return m_fixture.sockPath;
     }
-
-    Panes panes;
+    Panes& panes()
+    {
+        return m_panes;
+    }
 
 private:
+    // The router first: the panes target sends events through it.
     PhosphorIpcTests::RouterFixture m_fixture;
+    Panes m_panes{m_fixture.router};
     QQmlEngine m_engine;
     std::unique_ptr<QObject> m_script;
 };
 
 // The manifest of most tests: some calls of each target, a target the
-// socket does not have, and a function its target does not have. Neither
+// socket does not have, and a method its target does not have. Neither
 // panes.secret nor panes.focus is in it.
 inline QByteArray manifestJson()
 {
@@ -169,7 +235,7 @@ inline QByteArray manifestJson()
     {"call": "script.run", "name": "run_script", "description": "Runs a script."},
     {"call": "script.greet", "name": "greet", "description": "Greets someone."},
     {"call": "ghost.haunt", "name": "haunt", "description": "A target the socket does not have."},
-    {"call": "panes.nothing", "name": "nothing", "description": "A function the target does not have."}
+    {"call": "panes.missing", "name": "missing", "description": "A method the target does not have."}
 ]})");
 }
 

@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFloat16>
 #include <QGenericArgument>
 #include <QGenericReturnArgument>
 #include <QJsonArray>
@@ -32,7 +33,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib> // mkdtemp
+#include <limits>
 #include <system_error>
 
 #include <sys/socket.h> // getsockopt, SO_PEERCRED
@@ -73,6 +76,125 @@ QString socketFilePath(const QString& name)
         return name;
     }
     return QDir::cleanPath(QDir::tempPath()) + QLatin1Char('/') + name;
+}
+
+// False when `value` is a number that the integer or float type
+// `expected` cannot hold. QVariant::convert() succeeds for such a number
+// and wraps it: 4294967297 becomes 1 for an int, and -1 becomes
+// 4294967295 for an unsigned int. True for a value that is no number,
+// and for a type that is no number type: convert() judges those.
+bool numberFits(const QVariant& value, QMetaType expected)
+{
+    bool fromSigned = false;
+    bool fromUnsigned = false;
+    switch (value.typeId()) {
+    case QMetaType::Int:
+    case QMetaType::Short:
+    case QMetaType::Long:
+    case QMetaType::LongLong:
+    case QMetaType::SChar:
+    case QMetaType::Char:
+        fromSigned = true;
+        break;
+    case QMetaType::UInt:
+    case QMetaType::UShort:
+    case QMetaType::ULong:
+    case QMetaType::ULongLong:
+    case QMetaType::UChar:
+        fromUnsigned = true;
+        break;
+    case QMetaType::Double:
+    case QMetaType::Float:
+    case QMetaType::Float16:
+        break;
+    default:
+        return true;
+    }
+
+    // The range of an integer type: its minimum as a signed number and
+    // its maximum as an unsigned one, which between them hold every
+    // 64-bit limit.
+    struct Range
+    {
+        qint64 min;
+        quint64 max;
+    };
+    const auto rangeOf = [](auto limits) {
+        return Range{static_cast<qint64>(limits.min()), static_cast<quint64>(limits.max())};
+    };
+    Range range{};
+    switch (expected.id()) {
+    case QMetaType::Int:
+        range = rangeOf(std::numeric_limits<int>());
+        break;
+    case QMetaType::UInt:
+        range = rangeOf(std::numeric_limits<unsigned int>());
+        break;
+    case QMetaType::Short:
+        range = rangeOf(std::numeric_limits<short>());
+        break;
+    case QMetaType::UShort:
+        range = rangeOf(std::numeric_limits<unsigned short>());
+        break;
+    case QMetaType::Long:
+        range = rangeOf(std::numeric_limits<long>());
+        break;
+    case QMetaType::ULong:
+        range = rangeOf(std::numeric_limits<unsigned long>());
+        break;
+    case QMetaType::LongLong:
+        range = rangeOf(std::numeric_limits<qlonglong>());
+        break;
+    case QMetaType::ULongLong:
+        range = rangeOf(std::numeric_limits<qulonglong>());
+        break;
+    case QMetaType::SChar:
+        range = rangeOf(std::numeric_limits<signed char>());
+        break;
+    case QMetaType::UChar:
+        range = rangeOf(std::numeric_limits<unsigned char>());
+        break;
+    case QMetaType::Char:
+        range = rangeOf(std::numeric_limits<char>());
+        break;
+    case QMetaType::Float: {
+        if (fromSigned || fromUnsigned) {
+            return true;
+        }
+        const double d = value.toDouble();
+        return !std::isfinite(d) || std::fabs(d) <= static_cast<double>(std::numeric_limits<float>::max());
+    }
+    case QMetaType::Float16: {
+        // Also for an integer: the largest qfloat16 is 65504.
+        const double d = value.toDouble();
+        return !std::isfinite(d) || std::fabs(d) <= static_cast<double>(std::numeric_limits<qfloat16>::max());
+    }
+    default:
+        return true;
+    }
+
+    if (fromSigned) {
+        const qint64 number = value.toLongLong();
+        return number >= range.min && (number < 0 || static_cast<quint64>(number) <= range.max);
+    }
+    if (fromUnsigned) {
+        return value.toULongLong() <= range.max;
+    }
+    // convert() rounds a number with a fraction to the nearest integer.
+    // The bounds are open by half a unit, so that a number passes exactly
+    // when its rounded value is in the range.
+    const double d = value.toDouble();
+    if (!std::isfinite(d)) {
+        return false;
+    }
+    // For a 64-bit type the half unit is lost in the bound itself. The
+    // lower bound, -2^63, is then a double that fits, so it is closed.
+    // The upper bound rounds up to 2^64 or 2^63, which does not fit, so
+    // it stays open.
+    const long double number = d;
+    const long double lower = static_cast<long double>(range.min) - 0.5L;
+    const bool lowerIsExact = lower == static_cast<long double>(range.min);
+    return (lowerIsExact ? number >= lower : number > lower) && number < static_cast<long double>(range.max) + 0.5L;
 }
 
 QString errnoMessage(int error)
@@ -150,18 +272,6 @@ bool listenPrivately(QLocalServer& server, const QString& path, struct stat* bou
     return true;
 }
 
-// Resolve the default socket path. $XDG_RUNTIME_DIR/phosphor.sock
-// when XDG_RUNTIME_DIR is set, otherwise empty (caller logs and
-// fails start()).
-QString resolveDefaultSocketPath()
-{
-    const QString xdg = QProcessEnvironment::systemEnvironment().value(QStringLiteral("XDG_RUNTIME_DIR"));
-    if (xdg.isEmpty()) {
-        return {};
-    }
-    return QDir(xdg).filePath(QStringLiteral("phosphor.sock"));
-}
-
 // The id of a new client connection. One counter for the process, so that
 // an id is never reused, not even by another router (which may live on
 // another thread, hence the atomic). 0 is never handed out: it means "no
@@ -188,6 +298,15 @@ IpcRouter::~IpcRouter()
     announceClosedConnections();
 }
 
+QString IpcRouter::defaultSocketPath()
+{
+    const QString xdg = QProcessEnvironment::systemEnvironment().value(QStringLiteral("XDG_RUNTIME_DIR"));
+    if (xdg.isEmpty()) {
+        return {};
+    }
+    return QDir(xdg).filePath(QStringLiteral("phosphor.sock"));
+}
+
 bool IpcRouter::start(const QString& socketPath)
 {
     Q_ASSERT(thread() == QThread::currentThread());
@@ -195,7 +314,7 @@ bool IpcRouter::start(const QString& socketPath)
         qWarning("PhosphorIpc::IpcRouter::start: already started on '%s'", qPrintable(m_socketPath));
         return false;
     }
-    const QString resolved = socketPath.isEmpty() ? resolveDefaultSocketPath() : socketPath;
+    const QString resolved = socketPath.isEmpty() ? defaultSocketPath() : socketPath;
     if (resolved.isEmpty()) {
         qWarning("PhosphorIpc::IpcRouter::start: no socket path (XDG_RUNTIME_DIR unset and no explicit path)");
         return false;
@@ -487,10 +606,9 @@ QVariant IpcRouter::invokeCall(const QString& targetName, const QString& fn, con
     // QGenericArgument slots; QML-declared functions rarely exceed
     // this in practice. For each arg, coerce the incoming QVariant
     // to the method's expected parameter type.
-    constexpr int MaxArgs = 10;
-    if (args.size() > MaxArgs) {
+    if (args.size() > MaxCallArgs) {
         return fail(InvokeOutcome::ArgCountMismatch,
-                    QStringLiteral("argument count exceeds dispatch limit of %1").arg(MaxArgs));
+                    QStringLiteral("argument count exceeds dispatch limit of %1").arg(MaxCallArgs));
     }
     // reserve() is load-bearing: the second loop below builds
     // QGenericArgument values holding const T* pointers into each
@@ -507,6 +625,22 @@ QVariant IpcRouter::invokeCall(const QString& targetName, const QString& fn, con
         QVariant v = args.at(i);
         const QMetaType expected(method.parameterType(i));
         if (expected != variantType && v.metaType() != expected) {
+            if (!numberFits(v, expected)) {
+                return fail(InvokeOutcome::ArgConvertFailed,
+                            QStringLiteral("arg %1 for '%2.%3': %4 is out of the range of %5")
+                                .arg(i)
+                                .arg(targetName, fn, v.toString(), QLatin1String(expected.name())));
+            }
+            // QVariant converts a double or a float through qint64, so one
+            // from 2^63 up would become 2^63 - 1 in an unsigned parameter
+            // of 64 bits. numberFits() passed it, so it is under 2^64 and
+            // the cast is defined.
+            const bool toUnsigned64 = expected.id() == QMetaType::ULongLong
+                || (expected.id() == QMetaType::ULong && sizeof(unsigned long) == sizeof(qulonglong));
+            const bool fromFloating = v.metaType().id() == QMetaType::Double || v.metaType().id() == QMetaType::Float;
+            if (toUnsigned64 && fromFloating && v.toDouble() >= 9223372036854775808.0) {
+                v = QVariant::fromValue(static_cast<qulonglong>(v.toDouble()));
+            }
             if (!v.convert(expected)) {
                 // typeName() can return nullptr for a default-
                 // constructed QVariant (e.g. JSON null in an args
@@ -522,7 +656,9 @@ QVariant IpcRouter::invokeCall(const QString& targetName, const QString& fn, con
         coerced.append(std::move(v));
     }
 
-    QGenericArgument g[MaxArgs];
+    // The invoke below names ten arguments.
+    static_assert(MaxCallArgs == 10);
+    QGenericArgument g[MaxCallArgs];
     for (int i = 0; i < coerced.size(); ++i) {
         g[i] = QMetaType(method.parameterType(i)) == variantType
             ? QGenericArgument("QVariant", &coerced.at(i))
@@ -831,9 +967,12 @@ void IpcRouter::closeWithMalformedDiagnostic(QLocalSocket* socket, const QString
 void IpcRouter::dispatch(QLocalSocket* socket, const QByteArray& line)
 {
     QString parseError;
-    const auto reqOpt = parseRequest(line, &parseError);
+    qint64 requestId = 0;
+    const auto reqOpt = parseRequest(line, &parseError, &requestId);
     if (!reqOpt) {
-        const QJsonObject err = buildError(0, QString::fromUtf8(ErrorCode::MalformedRequest), parseError);
+        // With the id of the line when it has a valid one, so that the
+        // client can give the error to the request that it answers.
+        const QJsonObject err = buildError(requestId, QString::fromUtf8(ErrorCode::MalformedRequest), parseError);
         socket->write(writeLine(err));
         // Increment per-socket malformed-frame counter. If the peer
         // keeps streaming garbage past detail::MaxConsecutiveMalformedFrames
