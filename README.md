@@ -56,7 +56,7 @@ The build needs these tools and libraries:
 | --- | --- |
 | CMake | 3.23. The presets below and Qt 6.12 (its CMake packages ask for it) need 3.25. |
 | Qt | 6.10, with its private headers (Gui, Quick, ShaderTools, WaylandClient) |
-| extra-cmake-modules | Required |
+| extra-cmake-modules | 6.26.0 |
 | Wayland | Required |
 | Vulkan headers | Required only when Qt was built with Vulkan support. Most distributions build Qt that way. |
 

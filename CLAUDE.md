@@ -41,8 +41,9 @@ build on it. The placement engines are not here. They are in phosphor-engine-lib
 
 ## Build and test
 
-- `cmake --workflow --preset dev` configures into `build/`, builds and tests. The other presets are `release` and
-  `relwithdebinfo`. Follow `phosphor-works:build` for the memory cap, jobs, the warning count and the non-unity gate.
+- `cmake --workflow --preset dev` configures into `build/`, builds and tests. The other presets are `release`,
+  `relwithdebinfo` and `asan`. Follow `phosphor-works:build` for the memory cap, jobs, the warning count and the
+  non-unity gate.
 - CI is the shared C++ CI of the workspace repository (`cpp-ci.yml`): the `dev` preset on Arch and on Fedora 44 (older
   Qt), and `nix flake check`. Tests run with `QT_QPA_PLATFORM=offscreen`.
 
@@ -111,10 +112,11 @@ build on it. The placement engines are not here. They are in phosphor-engine-lib
 | `phosphor-fsloader` | Watched-directory loader scaffolding with live reload |
 | `phosphor-geometry` | Pure geometry math, Qt Core only |
 | `phosphor-identity` | Composite window id (`appId\|uuid`) and app-id matching, header-only |
-| `phosphor-ipc` | JSON-over-Unix-socket `IpcRouter`, `Phosphor.Ipc` QML type |
+| `phosphor-ipc` | JSON-over-Unix-socket `IpcRouter` and `IpcClient`, `Phosphor.Ipc` QML type |
 | `phosphor-layer` | wlr-layer-shell surface lifecycle |
 | `phosphor-layout-api` | Shared layout contract (`LayoutPreview`, `ILayoutSource`, layout-file keys) |
 | `phosphor-mcp` | Model Context Protocol server over stdio |
+| `phosphor-mcp-ipc` | MCP server for the phosphor-ipc calls that a manifest lists, and its program |
 | `phosphor-overlay` | Per-screen layer-shell host and slot mechanism for overlays |
 | `phosphor-paths` | Where every Phosphor app's files live (the `phosphor-works` folder, app dirs) |
 | `phosphor-pointer` | Pointer-shader packs (contract, effect, registry, `PointerHistory`) |

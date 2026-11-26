@@ -207,9 +207,9 @@ add_subdirectory(libs/phosphor-surface-quick) # Qt Quick consumer of surface pac
 add_subdirectory(libs/phosphor-layer)       # wlr-layer-shell surface lifecycle management
 add_subdirectory(libs/phosphor-shell-patterns) # UI-pattern recipes (axis 2) built on PhosphorLayer::Role
 add_subdirectory(libs/phosphor-shortcuts)   # global shortcut backends + domain-free Registry
-add_subdirectory(libs/phosphor-ipc)         # JSON-over-Unix-socket IpcRouter + IpcTarget QML type
+add_subdirectory(libs/phosphor-ipc)         # JSON-over-Unix-socket IpcRouter and IpcClient, IpcTarget QML type
 add_subdirectory(libs/phosphor-mcp)         # Model Context Protocol server over stdio (tools, its own JSON Schema 2020-12 argument checks) - Core-only
-add_subdirectory(libs/phosphor-mcp-ipc)     # MCP server that offers the calls of a phosphor-ipc socket that a manifest allows (library + phosphor-mcp-ipc program) - after phosphor-ipc and phosphor-mcp
+add_subdirectory(libs/phosphor-mcp-ipc)     # MCP server for the calls of a phosphor-ipc socket that a manifest lists (library and the phosphor-mcp-ipc program). After phosphor-ipc and phosphor-mcp.
 # The org.phosphor.animation QML module is built with the rest of this tree,
 # and its plugin's QtQuickClockManager constructs QtQuickClock directly.
 # QtQuickClock is gated behind PHOSPHOR_ANIMATION_QUICK in phosphor-animation's
