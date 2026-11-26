@@ -167,9 +167,11 @@ private Q_SLOTS:
         QVERIFY(f.peer.send(request(1, QStringLiteral("server/discover"))));
         const QJsonObject reply = f.peer.readOne();
         checkResult(reply, 1);
-        QCOMPARE(resultOf(reply).value(QLatin1StringView("capabilities")).toObject(), QJsonObject());
+        // The members themselves: a reply without them would convert to an
+        // empty object and an empty array too.
+        QCOMPARE(resultOf(reply).value(QLatin1StringView("capabilities")), QJsonValue(QJsonObject()));
         QVERIFY(f.peer.send(request(2, QStringLiteral("tools/list"))));
-        QCOMPARE(resultOf(f.peer.readOne()).value(QLatin1StringView("tools")).toArray(), QJsonArray());
+        QCOMPARE(resultOf(f.peer.readOne()).value(QLatin1StringView("tools")), QJsonValue(QJsonArray()));
     }
 
     void serverInfoDefaultsToTheApplication()
@@ -705,6 +707,37 @@ private Q_SLOTS:
                 .setRequiredClientCapabilities(QJsonObject{
                     {QLatin1StringView("experimental"), QJsonObject{{QLatin1StringView("x"), QJsonObject()}}}}),
             answerAtOnce, &error));
+    }
+
+    void toolProblemGivesTheRefusalWithoutAServer()
+    {
+        // The refusals of addTool() that do not depend on a server, with
+        // the same texts and without a warning: init() fails each test of
+        // this class on a warning that it does not expect.
+        QCOMPARE(McpServer::toolProblem(McpTool(QStringLiteral("t"))), QString());
+        QCOMPARE(McpServer::toolProblem(McpTool(QStringLiteral("has space"))),
+                 QStringLiteral("a tool name is 1 to 128 of A-Z, a-z, 0-9, '_', '-' and '.'"));
+        const McpTool requirement =
+            McpTool(QStringLiteral("t"))
+                .setRequiredClientCapabilities(
+                    QJsonObject{{QLatin1StringView("experimental"), QJsonObject{{QLatin1StringView("x"), 1}}}});
+        QCOMPARE(McpServer::toolProblem(requirement),
+                 QStringLiteral("requiredClientCapabilities/experimental/x is not an object, and no client could "
+                                "declare it"));
+        const McpTool input = McpTool(QStringLiteral("t")).setInputSchema(QJsonObject{{QLatin1StringView("type"), 5}});
+        const QString inputProblem = McpServer::toolProblem(input);
+        QVERIFY2(inputProblem.startsWith(QLatin1StringView("inputSchema")), qPrintable(inputProblem));
+        const McpTool output =
+            McpTool(QStringLiteral("t")).setOutputSchema(QJsonObject{{QLatin1StringView("type"), 5}});
+        const QString outputProblem = McpServer::toolProblem(output);
+        QVERIFY2(outputProblem.startsWith(QLatin1StringView("outputSchema")), qPrintable(outputProblem));
+
+        // addTool() gives the same text.
+        McpServer server;
+        QString error;
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("McpServer::addTool")));
+        QVERIFY(!server.addTool(input, answerAtOnce, &error));
+        QCOMPARE(error, inputProblem);
     }
 
     void outputClosedFinishes()

@@ -17,7 +17,7 @@
 # 3.21 floor, as phosphor-control's.
 cmake_minimum_required(VERSION 3.21)
 
-set(PHOSPHORMCP_VERSION "0.1.0")
+set(PHOSPHORMCP_VERSION "0.2.0")
 
 # The Qt floor this library requires AND advertises in its generated
 # PhosphorMcpConfig.cmake. Taken from the top-level QT_MIN_VERSION when built

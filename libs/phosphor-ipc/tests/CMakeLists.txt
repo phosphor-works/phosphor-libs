@@ -31,9 +31,13 @@ else()
 endif()
 function(phosphoripc_add_test name)
     add_executable(${name} ${name}.cpp)
-    # Qt6::Network is propagated transitively by PhosphorIpc (PUBLIC, for
-    # QLocalServer/QLocalSocket) — only the socket suites (e2e, subscribe,
-    # deferred) actually use it, so it is not linked explicitly here.
+    # Each test is one source. In a unity build that source is an included
+    # file, and GCC then warns (-Wsubobject-linkage) about a test class
+    # whose lambda names a fixture of the anonymous namespace.
+    set_target_properties(${name} PROPERTIES UNITY_BUILD OFF)
+    # Qt6::Network comes with PhosphorIpc, which links it PUBLIC for
+    # QLocalServer and QLocalSocket. The suites that use a socket need no
+    # link of their own.
     target_link_libraries(${name}
         PRIVATE
             PhosphorIpc::PhosphorIpc
@@ -57,8 +61,19 @@ phosphoripc_add_test(test_phosphor_ipc_e2e)
 phosphoripc_add_test(test_phosphor_ipc_subscribe)
 phosphoripc_add_test(test_phosphor_ipc_engine)
 phosphoripc_add_test(test_phosphor_ipc_deferred)
+phosphoripc_add_test(test_phosphor_ipc_client)
+
+# The Phosphor.Ipc QML module, linked as an application links it. That is
+# the static module and the plugin that qt_add_qml_module makes for it.
+phosphoripc_add_test(test_phosphor_ipc_qmlmodule)
+target_link_libraries(test_phosphor_ipc_qmlmodule
+    PRIVATE
+        PhosphorIpc::PhosphorIpcQml
+        PhosphorIpcQmlplugin
+)
+
 phosphoripc_add_test(test_phosphor_ipc_umask)
-# The test defines umask() to count the calls. Exported (with default
+# The umask test defines umask() to count the calls. Exported (with default
 # visibility in the source), it is the one that the dynamic linker binds for
 # libPhosphorIpc too, which a definition that stays inside the executable
 # is not.

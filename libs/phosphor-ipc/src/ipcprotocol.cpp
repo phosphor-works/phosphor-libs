@@ -3,72 +3,54 @@
 
 #include <PhosphorIpc/IpcProtocol.h>
 
+#include <QCborValue>
+#include <QDateTime>
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QLatin1String>
 #include <QMetaType>
+#include <QVariantHash>
 #include <QVariantList>
 #include <QVariantMap>
 
 #include <cmath>
-#include <limits>
 
 namespace PhosphorIpc {
 
-namespace {
-// Cap on the request `args` array size. Realistic shell methods
-// take ≤ ~10 positional args; 4096 is far above that ceiling and
-// well under any QJsonArray operational limit. Without a cap a
-// peer could send a multi-megabyte `args` array and force the
-// router to materialise it before any validation runs. Declared
-// as qsizetype to match QJsonArray::size()'s return type without
-// triggering -Wsign-compare on the bounds check.
-constexpr qsizetype MaxArgsLength = 4096;
-
-// Parse a JSON number as an integral qint64. JSON numbers are
-// doubles; we reject fractional values and out-of-range magnitudes
-// explicitly so the protocol's "id is an integer" contract is
-// honored at the parser level. Returns std::nullopt on rejection;
-// the caller produces the MALFORMED_REQUEST error frame.
-//
-// Precision boundary: doubles cover integer values exactly up to
-// 2^53. Past that, the representable values are spaced 2 apart
-// (then 4, etc.). qint64's positive range extends to 2^63 - 1, but
-// that exact integer is NOT representable as a double — the closest
-// representable value is 2^63 itself. So the practical accepted
-// range is [-2^63, 2^63 - 1024] (the largest exact double below
-// 2^63 is 9223372036854774784 = 2^63 - 1024), even though qint64
-// formally extends to 2^63 - 1. Negative bound is exact:
-// -2^63 = INT64_MIN is exactly representable as a double.
-std::optional<qint64> parseIntegralJsonNumber(double d)
+std::optional<qint64> integerId(const QJsonValue& value)
 {
-    if (!std::isfinite(d)) {
+    if (!value.isDouble()) {
         return std::nullopt;
     }
-    // 2^63 (Int64MaxExclusiveD) IS exactly representable as a
-    // double and equals the rounded value of INT64_MAX; reject it
-    // and anything above as "not strictly less than qint64's
-    // positive overflow boundary". INT64_MIN is exact as a double
-    // (single-bit mantissa at 2^63 with negative sign) so the
-    // static_cast lowers without precision loss; using the
-    // numeric_limits value rather than a literal sidesteps the
-    // "integer literal too large to be represented in any integer
-    // type" warning some compilers emit for `-9223372036854775808`.
-    constexpr double Int64MinD = static_cast<double>(std::numeric_limits<qint64>::min());
-    constexpr double Int64MaxExclusiveD = 9223372036854775808.0;
-    if (d < Int64MinD || d >= Int64MaxExclusiveD) {
-        return std::nullopt;
+    // 2^53: up to it a double holds every integer, so a reader that keeps
+    // JSON numbers as doubles has the same id as one that keeps integers.
+    constexpr qint64 MaxExactInteger = qint64(1) << 53;
+    // QJsonValue keeps a number written as an integer exactly, where
+    // toDouble() would round one above 2^53 to a neighbor inside the test
+    // below.
+    const QCborValue number = QCborValue::fromJsonValue(value);
+    if (number.isInteger()) {
+        const qint64 integer = number.toInteger();
+        if (integer < -MaxExactInteger || integer > MaxExactInteger) {
+            return std::nullopt;
+        }
+        return integer;
     }
-    if (std::trunc(d) != d) {
+    // A number written with a fraction or an exponent, such as 5.0 or 1e2.
+    const double d = value.toDouble();
+    if (!std::isfinite(d) || std::trunc(d) != d || std::fabs(d) > static_cast<double>(MaxExactInteger)) {
         return std::nullopt;
     }
     return static_cast<qint64>(d);
 }
-} // namespace
 
-std::optional<Request> parseRequest(const QByteArray& line, QString* parseError)
+std::optional<Request> parseRequest(const QByteArray& line, QString* parseError, qint64* requestId)
 {
+    if (requestId) {
+        *requestId = 0;
+    }
     QJsonParseError err{};
     const QJsonDocument doc = QJsonDocument::fromJson(line, &err);
     if (err.error != QJsonParseError::NoError) {
@@ -86,33 +68,37 @@ std::optional<Request> parseRequest(const QByteArray& line, QString* parseError)
     const QJsonObject obj = doc.object();
 
     Request req;
-    req.type = obj.value(QLatin1String(Field::Type)).toString();
-    if (req.type.isEmpty()) {
-        if (parseError) {
-            *parseError = QStringLiteral("missing or non-string 'type' field");
-        }
-        return std::nullopt;
-    }
-    // `id` correlates request to response. Absent → 0 (clients
-    // that don't care about correlation can omit it, e.g. one-
-    // shot CLI invocations). Present-but-non-numeric is a
-    // malformed request, not a silent fallback to 0, otherwise
-    // clients that send a bogus id type get error frames with
-    // mysteriously-missing ids (id=0 collides with the omission
-    // sentinel in buildError).
+    // `id` correlates request to response. Absent or null gives 0: a
+    // client that needs no correlation can leave it out, as a one-shot
+    // CLI call does. An id of another type is a malformed request, not a
+    // silent fallback to 0. Otherwise a client that sends a wrong id type
+    // gets error frames without an id, since 0 is the "no id" value of
+    // buildError.
     const QJsonValue idValue = obj.value(QLatin1String(Field::Id));
     if (idValue.isDouble()) {
-        const auto parsed = parseIntegralJsonNumber(idValue.toDouble());
+        const auto parsed = integerId(idValue);
         if (!parsed) {
             if (parseError) {
-                *parseError = QStringLiteral("'id' must be a finite integer within JSON-double-precision int64 range");
+                *parseError = QStringLiteral("'id' must be an integer from -2^53 to 2^53");
             }
             return std::nullopt;
         }
         req.id = *parsed;
+        if (requestId) {
+            *requestId = req.id;
+        }
     } else if (!idValue.isUndefined() && !idValue.isNull()) {
         if (parseError) {
             *parseError = QStringLiteral("'id' must be a number if present");
+        }
+        return std::nullopt;
+    }
+    // After the id, so that the error for a line without a type can name
+    // the request.
+    req.type = obj.value(QLatin1String(Field::Type)).toString();
+    if (req.type.isEmpty()) {
+        if (parseError) {
+            *parseError = QStringLiteral("missing or non-string 'type' field");
         }
         return std::nullopt;
     }
@@ -121,11 +107,10 @@ std::optional<Request> parseRequest(const QByteArray& line, QString* parseError)
     req.signalName = obj.value(QLatin1String(Field::Signal)).toString();
     const QJsonValue subIdValue = obj.value(QLatin1String(Field::SubscriptionId));
     if (subIdValue.isDouble()) {
-        const auto parsed = parseIntegralJsonNumber(subIdValue.toDouble());
+        const auto parsed = integerId(subIdValue);
         if (!parsed) {
             if (parseError) {
-                *parseError = QStringLiteral(
-                    "'subscriptionId' must be a finite integer within JSON-double-precision int64 range");
+                *parseError = QStringLiteral("'subscriptionId' must be an integer from -2^53 to 2^53");
             }
             return std::nullopt;
         }
@@ -173,15 +158,16 @@ std::optional<Request> parseRequest(const QByteArray& line, QString* parseError)
         }
         return std::nullopt;
     }
-    // Args may be missing entirely (for no-arg calls) or an array.
-    // Anything else is a malformed-request signal.
+    // Args are absent or null (a call without arguments) or an array.
+    // Any other value is a malformed request. The cap spares the router
+    // the QVariantList of an array that no method could take.
     const QJsonValue argsValue = obj.value(QLatin1String(Field::Args));
     if (argsValue.isArray()) {
         const QJsonArray argsArray = argsValue.toArray();
-        if (argsArray.size() > MaxArgsLength) {
+        if (argsArray.size() > MaxRequestArgs) {
             if (parseError) {
                 *parseError =
-                    QStringLiteral("'args' length %1 exceeds limit of %2").arg(argsArray.size()).arg(MaxArgsLength);
+                    QStringLiteral("'args' length %1 exceeds limit of %2").arg(argsArray.size()).arg(MaxRequestArgs);
             }
             return std::nullopt;
         }
@@ -240,6 +226,30 @@ QJsonObject buildError(qint64 id, const QString& code, const QString& message, c
     return obj;
 }
 
+namespace {
+
+QJsonArray listToJson(const QVariantList& list)
+{
+    QJsonArray arr;
+    for (const QVariant& item : list) {
+        arr.append(variantToJson(item));
+    }
+    return arr;
+}
+
+QJsonObject mapToJson(const QVariantMap& map)
+{
+    QJsonObject obj;
+    // cbegin/cend, so that the implicitly shared map does not detach on
+    // each event broadcast in the hot path.
+    for (auto it = map.cbegin(); it != map.cend(); ++it) {
+        obj.insert(it.key(), variantToJson(it.value()));
+    }
+    return obj;
+}
+
+} // namespace
+
 QByteArray writeLine(const QJsonObject& obj)
 {
     QByteArray bytes = QJsonDocument(obj).toJson(QJsonDocument::Compact);
@@ -252,22 +262,40 @@ QJsonValue variantToJson(const QVariant& v)
     if (!v.isValid()) {
         return QJsonValue::Null;
     }
+    // An untyped QML function returns a JavaScript value, and an object or
+    // array from it would otherwise go out as its toString(), "".
+    if (v.metaType() == QMetaType::fromType<QJSValue>()) {
+        const QVariant converted = v.value<QJSValue>().toVariant(QJSValue::ConvertJSObjects);
+        // The conversion gives a function back as it is. JSON has no form
+        // for one, and converting it again would never end.
+        if (converted.metaType() == QMetaType::fromType<QJSValue>()) {
+            return QJsonValue::Null;
+        }
+        return variantToJson(converted);
+    }
     switch (v.typeId()) {
+    case QMetaType::Nullptr:
+        // A JSON null that came in as an argument, or a JavaScript null.
+        return QJsonValue::Null;
     case QMetaType::Bool:
         return v.toBool();
     case QMetaType::Int:
     case QMetaType::Short:
-    case QMetaType::UShort:
     case QMetaType::Long:
     case QMetaType::LongLong:
+    case QMetaType::SChar:
+    case QMetaType::Char:
         // Signed integer metatypes (≤64-bit). JSON numbers are IEEE
         // 754 doubles with 53 bits of integer precision; values
         // above 2^53 lose precision on the wire, but values that
-        // fit in 53 bits round-trip exactly.
+        // fit in 53 bits round-trip exactly. A char is a number here,
+        // as the router takes a number for a char parameter.
         return static_cast<double>(v.toLongLong());
     case QMetaType::UInt:
+    case QMetaType::UShort:
     case QMetaType::ULong:
     case QMetaType::ULongLong:
+    case QMetaType::UChar:
         // Unsigned variants must NOT route through toLongLong: on
         // LP64 systems ULong is 64-bit unsigned, and values above
         // LLONG_MAX wrap to negative when cast to qint64. Route
@@ -276,9 +304,17 @@ QJsonValue variantToJson(const QVariant& v)
         return static_cast<double>(v.toULongLong());
     case QMetaType::Double:
     case QMetaType::Float:
+    case QMetaType::Float16:
         return v.toDouble();
     case QMetaType::QString:
         return v.toString();
+    case QMetaType::QDateTime: {
+        // QVariant::toString() gives local time with no offset, which a
+        // reader in another time zone cannot place.
+        const QDateTime dateTime = v.toDateTime();
+        return dateTime.isValid() ? QJsonValue(dateTime.toUTC().toString(Qt::ISODateWithMs))
+                                  : QJsonValue(QJsonValue::Null);
+    }
     case QMetaType::QStringList: {
         QJsonArray arr;
         // toStringList() returns an owned copy, so range-for is safe
@@ -288,21 +324,14 @@ QJsonValue variantToJson(const QVariant& v)
         }
         return arr;
     }
-    case QMetaType::QVariantList: {
-        QJsonArray arr;
-        // toList() returns an owned copy; range-for is safe.
-        for (const QVariant& item : v.toList()) {
-            arr.append(variantToJson(item));
-        }
-        return arr;
-    }
-    case QMetaType::QVariantMap: {
+    case QMetaType::QVariantList:
+        return listToJson(v.toList());
+    case QMetaType::QVariantMap:
+        return mapToJson(v.toMap());
+    case QMetaType::QVariantHash: {
         QJsonObject obj;
-        const QVariantMap map = v.toMap();
-        // cbegin/cend (not begin/end) so the implicitly-shared
-        // QVariantMap doesn't detach on each event broadcast in the
-        // hot path.
-        for (auto it = map.cbegin(); it != map.cend(); ++it) {
+        const QVariantHash hash = v.toHash();
+        for (auto it = hash.cbegin(); it != hash.cend(); ++it) {
             obj.insert(it.key(), variantToJson(it.value()));
         }
         return obj;
@@ -313,11 +342,34 @@ QJsonValue variantToJson(const QVariant& v)
         return v.toJsonObject();
     case QMetaType::QJsonArray:
         return v.toJsonArray();
-    default:
-        // Unknown type, emit the string-shaped fallback so the
-        // wire doesn't gain undocumented JSON shapes per metatype.
-        return v.toString();
+    case QMetaType::QJsonDocument: {
+        const QJsonDocument document = v.toJsonDocument();
+        if (document.isObject()) {
+            return document.object();
+        }
+        return document.isArray() ? QJsonValue(document.array()) : QJsonValue(QJsonValue::Null);
     }
+    case QMetaType::QByteArray:
+    case QMetaType::QChar:
+    case QMetaType::Char16:
+    case QMetaType::Char32:
+        // Text. The container test below would take a QByteArray for a
+        // list of its bytes.
+        return v.toString();
+    default:
+        break;
+    }
+    // A container that Qt can iterate, such as QList<int> or
+    // QMap<QString, int>. Without this it would go out as "".
+    if (v.canConvert<QVariantList>()) {
+        return listToJson(v.toList());
+    }
+    if (v.canConvert<QVariantMap>()) {
+        return mapToJson(v.toMap());
+    }
+    // Another type: the string form, so that the wire gains no JSON shape
+    // of its own for each metatype.
+    return v.toString();
 }
 
 } // namespace PhosphorIpc

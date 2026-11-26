@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #pragma once
 
+#include <PhosphorIpc/IpcProtocol.h>
 #include <PhosphorIpc/IpcTarget.h>
 
 #include <QByteArray>
@@ -9,6 +10,8 @@
 #include <QMetaObject>
 #include <QObject>
 #include <QString>
+#include <QStringView>
+#include <QUtf8StringView>
 
 // Private detail header shared between ipcrouter.cpp and
 // ipcrouterdispatch.cpp. Holds the meta-helpers, so both translation
@@ -30,8 +33,8 @@ inline constexpr int MaxSubscriptionsPerSocket = 256;
 // grow until the process OOMs. 1 MiB is far above any realistic
 // shell request (the upper-bound observed is ~few hundred bytes
 // of args+target+fn payload) and well under any kernel send/recv
-// buffer ceiling.
-inline constexpr qint64 MaxLineBytes = 1024 * 1024;
+// buffer ceiling. The value is public, since a client must stay under it.
+inline constexpr qint64 MaxLineBytes = MaxRequestLineBytes;
 
 // Cap on frames dispatched per batch of IpcRouter::readFrames. A peer
 // that pipelines thousands of frames in a single burst would otherwise
@@ -84,13 +87,43 @@ inline constexpr qint64 MaxBytesToWrite = 16 * 1024 * 1024;
     return QObject::staticMetaObject.methodCount();
 }
 
+// True when `name` is the name of `method`. The comparison is on the
+// text, not on bytes: QString::toUtf8() drops a lone surrogate, so the
+// bytes of "hello\ud800" would equal those of "hello".
+[[nodiscard]] inline bool methodIsNamed(const QMetaMethod& method, const QString& name)
+{
+    const QByteArray methodName = method.name();
+    return QUtf8StringView(methodName.constData(), methodName.size()) == QStringView(name);
+}
+
+// True when a class nearer to the object's own class declares a method of
+// the same name as `method`. Such a declaration hides every declaration
+// of the name in the classes below it, whatever its parameters, as a
+// declaration in a derived class does in C++ and a function of a derived
+// component does in QML. Without this rule the router would call the
+// function of a base component where QML itself calls the one that
+// replaced it. A non-public declaration hides too: a subclass that makes
+// a method protected takes it off the wire.
+[[nodiscard]] inline bool isHiddenMethod(const QMetaObject* meta, const QMetaMethod& method)
+{
+    const QMetaObject* level = method.enclosingMetaObject();
+    const QByteArray name = method.name();
+    for (int i = meta->methodCount() - 1; i > method.methodIndex(); --i) {
+        const QMetaMethod other = meta->method(i);
+        if (other.methodType() != QMetaMethod::Signal && other.enclosingMetaObject() != level && other.name() == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Find a Q_INVOKABLE method by name AND arity. Overload resolution
 // favours an exact arity match; when no overload's parameter count
 // lines up, returns the first name-matching method so the caller
 // can surface a precise ArgCountMismatch citing the metamethod's
-// expected arity. Filters to Public access — protected Q_INVOKABLE
+// expected arity. Filters to Public access. Protected Q_INVOKABLE
 // methods are a "subclass-only" marker by convention and must not
-// reach the wire.
+// reach the wire. A method that isHiddenMethod() names is not found.
 [[nodiscard]] inline QMetaMethod findInvokableMethod(const QObject* object, const QString& fnName, int expectedArity)
 {
     if (!object) {
@@ -100,17 +133,19 @@ inline constexpr qint64 MaxBytesToWrite = 16 * 1024 * 1024;
     if (!meta) {
         return {};
     }
-    const QByteArray needle = fnName.toUtf8();
     QMetaMethod nameOnlyFallback;
     for (int i = firstUserMethodIndex(object); i < meta->methodCount(); ++i) {
         const QMetaMethod m = meta->method(i);
         if (m.methodType() == QMetaMethod::Signal) {
             continue;
         }
-        if (m.access() != QMetaMethod::Public) {
+        if (!methodIsNamed(m, fnName)) {
             continue;
         }
-        if (m.name() != needle) {
+        if (isHiddenMethod(meta, m)) {
+            continue;
+        }
+        if (m.access() != QMetaMethod::Public) {
             continue;
         }
         if (m.parameterCount() == expectedArity) {
@@ -137,7 +172,6 @@ inline constexpr qint64 MaxBytesToWrite = 16 * 1024 * 1024;
     if (!meta) {
         return {};
     }
-    const QByteArray needle = signalName.toUtf8();
     for (int i = firstUserMethodIndex(object); i < meta->methodCount(); ++i) {
         const QMetaMethod m = meta->method(i);
         if (m.methodType() != QMetaMethod::Signal) {
@@ -146,7 +180,7 @@ inline constexpr qint64 MaxBytesToWrite = 16 * 1024 * 1024;
         if (m.access() != QMetaMethod::Public) {
             continue;
         }
-        if (m.name() == needle) {
+        if (methodIsNamed(m, signalName)) {
             return m;
         }
     }

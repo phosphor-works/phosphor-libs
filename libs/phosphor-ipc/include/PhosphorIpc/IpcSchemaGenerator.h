@@ -28,15 +28,20 @@ namespace PhosphorIpc {
 //   }
 //
 // Type mapping (QMetaType ID → JSON Schema):
-//   - Int / Long / LongLong / Short / UInt / etc.      → {"type":"integer"}
-//   - Double / Float                                   → {"type":"number"}
-//   - Bool                                             → {"type":"boolean"}
-//   - QString                                          → {"type":"string"}
-//   - QStringList                                      → {"type":"array","items":{"type":"string"}}
-//   - QVariantList                                     → {"type":"array"}
-//   - QVariantMap / QJsonObject                        → {"type":"object"}
-//   - Void (return only)                               → "returns" omitted
-//   - Unknown / custom                                 → {"description":"custom QMetaType: <name>"}
+//   - Int / UInt / Long / ULong / LongLong / ULongLong
+//     / Short / UShort / Char / SChar / UChar            → {"type":"integer"}
+//   - Double / Float / Float16                           → {"type":"number"}
+//   - Bool                                               → {"type":"boolean"}
+//   - QString                                            → {"type":"string"}
+//   - QStringList                                        → {"type":"array","items":{"type":"string"}}
+//   - QVariantList / QJsonArray                          → {"type":"array"}
+//   - QVariantMap / QJsonObject                          → {"type":"object"}
+//   - QVariant / QJsonValue (any value)                  → {}
+//   - Void (return only)                                 → "returns" omitted
+//   - Unknown / custom                                   → {"description":"custom QMetaType: <name>"}
+//
+// A parameter carries its fragment's members next to its "name". An
+// untyped parameter of a QML function is a QVariant.
 //
 // The CLI (phosphorctl) uses this schema for argument validation
 // before sending a call request. Server side, the schema lets

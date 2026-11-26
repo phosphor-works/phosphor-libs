@@ -4,13 +4,13 @@
 # PhosphorIpc, typed JSON-over-Unix-socket invocation channel for Phosphor
 # applications such as phosphor-shell. Lets compositor keybinds, external scripts, and other
 # shells drive Phosphor actions via `phosphorctl call <target>.<fn>`,
-# without replacing the existing D-Bus surface.
-#
-# Phase 1.4 deliverable per docs/phosphor-shell-design/04-implementation-plan.md.
+# without replacing the existing D-Bus surface. It holds the router of an
+# application (IpcRouter) and the QML type for its targets (IpcTarget). It
+# also holds a client of the wire format for C++ programs (IpcClient).
 
 cmake_minimum_required(VERSION 3.16)
 
-set(PHOSPHORIPC_VERSION "0.3.0")
+set(PHOSPHORIPC_VERSION "0.4.0")
 
 # The Qt floor this library requires AND advertises in its generated
 # PhosphorIpcConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
@@ -47,16 +47,19 @@ include(GenerateExportHeader)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Core: QObject / QVariant / QString. Network: QLocalServer /
-# QLocalSocket. Qml: IpcTarget's QML_ELEMENT registration. No Gui
-# here: none of the public headers (IpcRouter, IpcTarget, IpcProtocol,
+# QLocalSocket, which the public headers only name. The link is public all
+# the same. A program that uses a socket of its own gets QtNetwork with
+# the library, as this library's tests do.
+# Qml: IpcTarget's QML_ELEMENT registration, and the JavaScript values
+# (QJSValue) that variantToJson turns into JSON. No Gui here: none of the
+# public headers (IpcRouter, IpcTarget, IpcClient, IpcProtocol,
 # IpcSchemaGenerator, IpcEngine, IpcCallContext, IpcPendingReply, the
 # PhosphorIpc umbrella) pull in any QtGui types, so linking
 # Gui at the core target would force CLI consumers like phosphorctl
-# to drag in the full GUI stack for no reason. The Gui dependency is
-# scoped onto PhosphorIpcQml below (qmltyperegistrar's generated code
-# transitively wants it). Keeping the find_package list aligned with
-# PhosphorIpcConfig.cmake.in's downstream find_dependency block so the
-# build-side dependency set doesn't drift from the install-side one.
+# to drag in the full GUI stack for no reason. Keeping the find_package
+# list aligned with PhosphorIpcConfig.cmake.in's downstream find_dependency
+# block so the build-side dependency set doesn't drift from the
+# install-side one.
 find_package(Qt6 ${PHOSPHORIPC_QT_MIN} REQUIRED COMPONENTS Core Qml Network)
 
 # Qt 6.5+ resource-prefix policy. NEW = use `:/qt/qml/` as the QML
@@ -75,6 +78,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(phosphoripc_public_HDRS
     include/PhosphorIpc/PhosphorIpc.h
     include/PhosphorIpc/IpcCallContext.h
+    include/PhosphorIpc/IpcClient.h
     include/PhosphorIpc/IpcPendingReply.h
     include/PhosphorIpc/IpcRouter.h
     include/PhosphorIpc/IpcTarget.h
@@ -85,6 +89,7 @@ set(phosphoripc_public_HDRS
 
 set(phosphoripc_SRCS
     src/ipccallcontext.cpp
+    src/ipcclient.cpp
     src/ipcpendingreply.cpp
     src/ipcrouter.cpp
     src/ipcrouterdispatch.cpp
@@ -157,21 +162,16 @@ set_target_properties(PhosphorIpc PROPERTIES
 # PhosphorIpcQmlplugin target that qt_add_qml_module creates to get
 # the type registered in their QQmlEngine. Mirrors the PhosphorTheme
 # / PhosphorThemeQml split.
-
-# Qt6::Gui is scoped onto the QML plugin specifically; the
-# qmltyperegistrar-generated registration translation unit
-# transitively expects QGuiApplication / QQmlEngine to be in scope.
-# find_package is idempotent — when the top-level project already
-# called find_package(Qt6 ... Gui) this is a no-op; when this lib
-# is consumed standalone via add_subdirectory, the call ensures
-# Qt6::Gui is found before the qt_add_qml_module below.
-find_package(Qt6 ${PHOSPHORIPC_QT_MIN} REQUIRED COMPONENTS Gui)
+#
+# The module needs QtQml only. Its generated registration code names no
+# QtGui type, and tests/test_phosphor_ipc_qmlmodule.cpp loads it under a
+# QCoreApplication.
 
 # Directory-scope suppression of -Wmissing-include-dirs for the targets
 # qt_add_qml_module generates here: Qt adds <target>_autogen/include to each
 # sub-target's -I list, but when a module carries no Q_OBJECT sources AUTOMOC
 # never creates that directory (and --clean-first deletes it), so cc1plus
-# warns on a Qt-managed scratch path. Full rationale: plasmazones/src/shared/CMakeLists.txt.
+# warns on a Qt-managed scratch path.
 set_property(DIRECTORY APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-include-dirs")
 
 qt_add_qml_module(PhosphorIpcQml
@@ -179,14 +179,18 @@ qt_add_qml_module(PhosphorIpcQml
     VERSION 1.0
     STATIC
     OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Phosphor/Ipc
-    SOURCES
-        include/PhosphorIpc/IpcTarget.h
 )
+# The module registers IpcTarget as a foreign type, so the type and its
+# meta-object stay in libPhosphorIpc alone. With IpcTarget.h as a source
+# of the module, moc would compile the meta-object a second time into the
+# static library. A program would then hold two definitions of it.
+qt_generate_foreign_qml_types(PhosphorIpc PhosphorIpcQml)
 
 add_library(PhosphorIpc::PhosphorIpcQml ALIAS PhosphorIpcQml)
 
-# The QML type registration generator emits #include <IpcTarget.h>
-# (bare basename of the SOURCES file). Adding the PhosphorIpc/
+# The generated header of the foreign types,
+# PhosphorIpc_PhosphorIpcQml.h, has #include <IpcTarget.h>
+# (bare basename of the header). Adding the PhosphorIpc/
 # directory itself to the include path lets that bare include
 # resolve without changing the public header layout.
 target_include_directories(PhosphorIpcQml
@@ -198,7 +202,6 @@ target_link_libraries(PhosphorIpcQml
     PUBLIC
         PhosphorIpc::PhosphorIpc
         Qt6::Core
-        Qt6::Gui
         Qt6::Qml
 )
 

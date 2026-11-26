@@ -139,6 +139,12 @@ public:
     // could declare them), for a handler that is empty, and after start(),
     // since the list stays the same for the life of the server.
     bool addTool(const McpTool& tool, Handler handler, QString* error = nullptr);
+    // Why addTool() of any server refuses the tool, or nothing: its name,
+    // its required client capabilities or one of its schemas. It writes no
+    // warning. A program that builds tools from data of another program
+    // uses it to leave out a tool before it adds the others. The other
+    // refusals of addTool() depend on the server and its handler.
+    [[nodiscard]] static QString toolProblem(const McpTool& tool);
     // The tools added, in the order tools/list shows them.
     [[nodiscard]] QList<McpTool> tools() const;
 

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Phosphor Works Team
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# PhosphorMcp is in the public interface (McpIpcBridge::addTools takes an
+# McpServer). The library also uses McpTool::isValidName and
+# McpServer::toolProblem, which came with 0.2. PhosphorIpc is linked
+# privately, so CMake needs no PhosphorIpc target for a consumer.
+# Its library file must be installed, because libPhosphorMcpIpc loads it.
+find_dependency(Qt6 @PHOSPHORMCPIPC_QT_MIN@ COMPONENTS Core)
+find_dependency(PhosphorMcp 0.2)
+
+include("${CMAKE_CURRENT_LIST_DIR}/PhosphorMcpIpcTargets.cmake")
+
+check_required_components(PhosphorMcpIpc)

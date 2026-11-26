@@ -36,6 +36,10 @@ public:
 
     [[nodiscard]] QString name() const;
     McpTool& setName(const QString& name);
+    // True for a name that McpServer::addTool takes: 1 to 128 of A-Z, a-z,
+    // 0-9, '_', '-' and '.'. Code that reads tool names from a file checks
+    // them with it, to name the entry that is wrong.
+    [[nodiscard]] static bool isValidName(const QString& name);
 
     // A short name for people. Omitted from the list when empty.
     [[nodiscard]] QString title() const;

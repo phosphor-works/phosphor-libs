@@ -5,20 +5,21 @@
 
 include(CMakeFindDependencyMacro)
 
-# Network for QLocalServer / QLocalSocket; Qml for IpcTarget's
-# QML_ELEMENT registration. Gui is intentionally absent: no public
+# Network for QLocalServer / QLocalSocket. Qml for IpcTarget's
+# QML_ELEMENT registration and for the JavaScript values that
+# variantToJson turns into JSON. Gui is intentionally absent: no public
 # header in libs/phosphor-ipc/include/ references a
 # QtGui type, so out-of-tree CLI consumers (phosphorctl-style) don't need
 # qt6-gui installed just to find_package(PhosphorIpc).
 #
 # This config file exports the `PhosphorIpc::PhosphorIpc` core
-# library only. The `PhosphorIpcQml` plugin (which DOES depend on
-# Qt6::Gui via qmltyperegistrar) is intentionally NOT installed or
-# exported; it's an in-tree convenience for projects that build
-# libs/phosphor-ipc via add_subdirectory(). Downstream consumers
-# that want IpcTarget's QML_ELEMENT registration should either
-# add_subdirectory the lib or replicate the qt_add_qml_module call
-# in their own build (the SOURCES list is one file: IpcTarget.h).
+# library only. The `PhosphorIpcQml` static QML module is intentionally
+# NOT installed or exported. It is an in-tree convenience for projects
+# that build libs/phosphor-ipc via add_subdirectory(). A downstream
+# consumer that wants IpcTarget in QML has two ways. It adds the library
+# with add_subdirectory(), or it registers the type in its own QML module
+# as a foreign type. That is a struct with
+# QML_FOREIGN(PhosphorIpc::IpcTarget) and QML_NAMED_ELEMENT(IpcTarget).
 find_dependency(Qt6 @PHOSPHORIPC_QT_MIN@ COMPONENTS Core Qml Network)
 
 include("${CMAKE_CURRENT_LIST_DIR}/PhosphorIpcTargets.cmake")

@@ -4,12 +4,20 @@
 #include <PhosphorMcp/McpTool.h>
 
 #include <QLatin1StringView>
+#include <QRegularExpression>
 
 namespace PhosphorMcp {
 
 McpTool::McpTool(const QString& name)
     : m_name(name)
 {
+}
+
+bool McpTool::isValidName(const QString& name)
+{
+    // Anchored at the very end: "$" would also match before a final "\n".
+    static const QRegularExpression pattern(QRegularExpression::anchoredPattern(u"[A-Za-z0-9_.-]{1,128}"));
+    return pattern.match(name).hasMatch();
 }
 
 QString McpTool::name() const

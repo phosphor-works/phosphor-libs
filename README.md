@@ -38,6 +38,7 @@ Each library is in `libs/<name>/`, with its own `CMakeLists.txt`, headers, sourc
 | [`phosphor-fsloader`](libs/phosphor-fsloader/README.md) | Infrastructure | Is the generic base for registries that load their entries from directories of files. |
 | [`phosphor-ipc`](libs/phosphor-ipc/README.md) | Infrastructure | Is a typed JSON channel over a Unix socket for Phosphor applications. |
 | [`phosphor-mcp`](libs/phosphor-mcp/README.md) | Infrastructure | Is a Model Context Protocol server over stdio. |
+| [`phosphor-mcp-ipc`](libs/phosphor-mcp-ipc/README.md) | Infrastructure | Offers the calls of an application's phosphor-ipc socket that a manifest lists as MCP tools. |
 | [`phosphor-channel`](libs/phosphor-channel/README.md) | Infrastructure | Sends ordered frames of opaque bytes from one process to another, with backpressure. |
 | [`phosphor-dbus`](libs/phosphor-dbus/README.md) | Infrastructure | Gives generic D-Bus client utilities for Qt applications. |
 | [`phosphor-protocol`](libs/phosphor-protocol/README.md) | Infrastructure | Is the Phosphor D-Bus contract. |
@@ -55,7 +56,7 @@ The build needs these tools and libraries:
 | --- | --- |
 | CMake | 3.23. The presets below and Qt 6.12 (its CMake packages ask for it) need 3.25. |
 | Qt | 6.10, with its private headers (Gui, Quick, ShaderTools, WaylandClient) |
-| extra-cmake-modules | Required |
+| extra-cmake-modules | 6.26.0 |
 | Wayland | Required |
 | Vulkan headers | Required only when Qt was built with Vulkan support. Most distributions build Qt that way. |
 
