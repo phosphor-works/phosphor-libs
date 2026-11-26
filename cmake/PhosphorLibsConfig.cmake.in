@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Phosphor Works Team
+# SPDX-License-Identifier: LGPL-2.1-or-later
+#
+# The PhosphorLibs package: the installed phosphor-libs, for a consumer that
+# links the packaged libraries instead of building the pinned archive in its
+# own tree.
+#
+#   find_package(PhosphorLibs 0.1 REQUIRED COMPONENTS PhosphorGeometry PhosphorChannel)
+#
+# Each component is the CMake package of one library (PhosphorGeometry gives
+# PhosphorGeometry::PhosphorGeometry). The package also sets
+# PHOSPHOR_LIBS_CMAKE_DIR to the installed helper modules (PhosphorSuite,
+# PhosphorTestIsolation, PhosphorLibTesting, PhosphorTestPch and the test
+# session bus configuration), the same variable an in-tree phosphor-libs sets.
+
+@PACKAGE_INIT@
+
+set(PHOSPHOR_LIBS_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+set(PHOSPHOR_LIBS_INSTALLED TRUE)
+
+# The library packages are installed beside this one, in the same release.
+get_filename_component(_phosphor_libs_packages "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+foreach(_phosphor_libs_component IN LISTS PhosphorLibs_FIND_COMPONENTS)
+    find_package(${_phosphor_libs_component} CONFIG QUIET
+                 PATHS "${_phosphor_libs_packages}" NO_DEFAULT_PATH)
+    set(PhosphorLibs_${_phosphor_libs_component}_FOUND ${${_phosphor_libs_component}_FOUND})
+endforeach()
+unset(_phosphor_libs_component)
+unset(_phosphor_libs_packages)
+
+check_required_components(PhosphorLibs)

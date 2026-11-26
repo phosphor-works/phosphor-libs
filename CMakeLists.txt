@@ -258,6 +258,33 @@ if(PHOSPHOR_LIBS_TOP_LEVEL)
         phosphor_share_test_pch()
     endif()
 
+    # The PhosphorLibs package: the helper modules and a config that finds the
+    # library packages as components (cmake/PhosphorLibsConfig.cmake.in). Only
+    # a top-level build installs it: an app that builds this tree in its own
+    # needs no installed copy.
+    include(CMakePackageConfigHelpers)
+    set(_phosphor_libs_package_dir "${KDE_INSTALL_LIBDIR}/cmake/PhosphorLibs")
+    configure_package_config_file(
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorLibsConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLibsConfig.cmake"
+        INSTALL_DESTINATION "${_phosphor_libs_package_dir}"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLibsConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMinorVersion
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLibsConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLibsConfigVersion.cmake"
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake"
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorTestIsolation.cmake"
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorLibTesting.cmake"
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorTestPch.cmake"
+        "${PHOSPHOR_LIBS_CMAKE_DIR}/test-session-bus.conf"
+        DESTINATION "${_phosphor_libs_package_dir}"
+    )
+
     feature_summary(WHAT REQUIRED_PACKAGES_FOUND REQUIRED_PACKAGES_NOT_FOUND
                          OPTIONAL_PACKAGES_FOUND OPTIONAL_PACKAGES_NOT_FOUND
                     FATAL_ON_MISSING_REQUIRED_PACKAGES)

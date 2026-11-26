@@ -242,6 +242,23 @@ install(TARGETS ${_phosphorlayer_install_targets}
     RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
 )
 
+# PhosphorLayer::Testing: the header-only test doubles of this library's own
+# tests (tests/mocks/: a mock layer-shell transport, a mock screen provider and
+# test roles). The tests of phosphor-shell-libs and Lambent use them too, so
+# they are an interface of this library, in the tree and in the installed
+# package, not a path into its source tree. Include them as
+# "mocks/mocktransport.h".
+add_library(PhosphorLayerTesting INTERFACE)
+add_library(PhosphorLayer::Testing ALIAS PhosphorLayerTesting)
+set_target_properties(PhosphorLayerTesting PROPERTIES EXPORT_NAME Testing)
+target_include_directories(PhosphorLayerTesting INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tests>
+    $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}/PhosphorLayerTesting>
+)
+target_link_libraries(PhosphorLayerTesting INTERFACE PhosphorLayer)
+install(TARGETS PhosphorLayerTesting EXPORT PhosphorLayerTargets)
+install(DIRECTORY tests/mocks DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayerTesting)
+
 # Headers (regular .h via DIRECTORY pattern, then extensionless camelcase
 # forwarders via explicit FILES — FILES_MATCHING PATTERN doesn't pair well
 # with non-".h" filenames).
