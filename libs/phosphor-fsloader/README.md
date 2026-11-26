@@ -1,72 +1,63 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-fsloader
 
-> Generic filesystem-backed registry skeleton: directory walking, file
-> watching, debounced rescans, user-wins-over-system layering, and a
-> pluggable scan strategy. The single owner of "live-reload a directory
-> tree of user-editable JSON" across the suite.
+phosphor-fsloader is the generic base for registries that load their entries from directories of files. It walks
+directories, watches files, runs debounced rescans and lets user files replace system files, with a scan strategy that
+the consumer selects. It is the single owner of the live reload of a directory tree of user-editable JSON in the
+suite.
 
 ## Responsibility
 
-Walk a set of directories, parse each file (flat `*.json`, or a
-metadata-pack subdirectory) into a typed record, watch the directories
-for live edits, debounce rescans, apply user files that shadow bundled
-ones with the same ID, and emit one bulk-update signal per scan.
+The library walks a set of directories and parses each file (flat `*.json`, or a metadata-pack subdirectory) into a
+typed record. It watches the directories for live edits and debounces the rescans. A user file replaces a bundled file
+with the same ID. The library emits one bulk-update signal for each scan.
 
-The library factors the work into:
+The library divides the work into these parts:
 
-- **`WatchedDirectorySet`** is the base mechanism. It owns the
-  `QFileSystemWatcher`, debounces rescan triggers (50 ms), promotes
-  watches to a parent directory when the target doesn't exist yet,
-  guards against rescan-during-rescan races, re-arms individual
-  file watches after a scan, and re-arms its watches when a directory on
-  the way to a registered one is replaced or retargeted.
-- **`IScanStrategy`** is the pluggable policy for how to enumerate the
-  registered directories, parse each entry, and commit results to the
-  consumer's registry. The base owns *when* to scan, and the strategy owns
+- **`WatchedDirectorySet`** is the base mechanism. It owns the `QFileSystemWatcher` and debounces rescan triggers
+  (50 ms). If a target directory does not exist yet, it watches the parent directory instead. It prevents a rescan
+  from starting during a rescan. It arms individual file watches again after a scan. It also arms its watches again
+  when a directory on the way to a registered directory is replaced or retargeted.
+- **`IScanStrategy`** is the policy that the consumer selects. It enumerates the registered directories, parses each
+  entry, and commits the results to the consumer's registry. The base decides *when* to scan, and the strategy decides
   *what scanning means*.
-- **`DirectoryLoader`** is the flat `*.json` specialisation that pairs with
-  an `IDirectoryLoaderSink` (the schema-specific parse + commit
-  strategy). Used by curve and profile loaders.
-- **`MetadataPackScanStrategy<Payload>`** is the templated specialisation for
-  "subdirectory-with-metadata-json" packs. There is one pack per top-level
-  subfolder, validated by a `metadata.json`, with the payload type chosen by the
-  registry. Hosted by `PhosphorRegistry::MetadataPackLoader<T>`, which owns the
-  strategy and the watcher and adds the per-id fingerprint diff. Used by
+- **`DirectoryLoader`** is the specialization for flat `*.json` files. It works with an `IDirectoryLoaderSink`, which
+  is the parse and commit strategy for one schema. The curve and profile loaders use it.
+- **`MetadataPackScanStrategy<Payload>`** is the template specialization for packs that are subdirectories with a
+  metadata JSON file. There is one pack in each top-level subfolder, validated by a `metadata.json`. The registry
+  selects the payload type. `PhosphorRegistry::MetadataPackLoader<T>` hosts it: it owns the strategy and the watcher,
+  and adds the fingerprint diff for each id. These registries use it:
   [`phosphor-shaders`](../phosphor-shaders/README.md)' `ShaderRegistry`,
-  [`phosphor-animation`](../phosphor-animation/README.md)'s
-  `AnimationShaderRegistry`, and `PhosphorSurfaceShaders::SurfaceShaderRegistry`.
-- **`validateJsonEnvelope`** is the shared envelope validation. It parses the
-  file, checks the `"name"` field is non-empty and matches the
-  filename, and returns a `JsonEnvelope` carrying the rest of the JSON
-  object for the sink's schema-specific `fromJson`.
+  [`phosphor-animation`](../phosphor-animation/README.md)'s `AnimationShaderRegistry`, and
+  `PhosphorSurfaceShaders::SurfaceShaderRegistry`.
+- **`validateJsonEnvelope`** is the shared envelope validation. It parses the file and checks that the `"name"` field
+  is not empty and matches the filename. It returns a `JsonEnvelope` with the rest of the JSON object for the sink's
+  schema-specific `fromJson`.
 
-A metadata-pack registry does not inherit anything from this library: it
-COMPOSES a `PhosphorRegistry::MetadataPackLoader<T>`, which owns the
-`WatchedDirectorySet` plus the strategy and provides the search-path management
-surface (`addSearchPath`, `setUserPath`, `refresh`) every consumer was otherwise
-hand-rolling.
+A metadata-pack registry inherits nothing from this library. It COMPOSES a `PhosphorRegistry::MetadataPackLoader<T>`.
+That loader owns the `WatchedDirectorySet` and the strategy, and gives the functions that manage search paths
+(`addSearchPath`, `setUserPath`, `refresh`). Without it, each consumer must write these functions itself.
 
 ## Key types
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorFsLoader::WatchedDirectorySet`           | Base mechanism: watcher, debounce, parent-watch, race guard |
-| `PhosphorFsLoader::WatchedFileSet`                | Watches an explicit list of files, some possibly missing, and reports only the ones whose fingerprint (inode, size, mtime ns) changed |
-| `PhosphorFsLoader::IScanStrategy`                 | Pluggable enumerate / parse / commit policy |
-| `PhosphorFsLoader::DirectoryLoader`               | Flat `*.json` specialisation (sink-driven) |
-| `PhosphorFsLoader::IDirectoryLoaderSink`          | Per-schema strategy: `parseFile()` + `commitBatch()` |
-| `PhosphorFsLoader::ParsedEntry`                   | Parse-result value type with source-path metadata and `std::any` payload |
-| `PhosphorFsLoader::MetadataPackScanStrategy<P>`   | Subdirectory-with-`metadata.json` strategy |
-| `PhosphorFsLoader::validateJsonEnvelope`          | Shared `"name"`-field envelope validator returning a `JsonEnvelope` |
-| `PhosphorFsLoader::resolveWithinDirectory`        | Containment guard: resolves a declared path against a directory and refuses anything landing outside it |
-| `PhosphorFsLoader::readFileWithinDirectory`       | Bounded read of a declared path that validates the OPENED descriptor: regular file, size cap, real path inside the directory, so a symlink or FIFO swapped in after the check is refused |
-| `PhosphorFsLoader::AbsolutePathPolicy`            | Whether an already-absolute declared path is refused (pack-declared) or trusted (user-chosen at runtime) |
-| `PhosphorFsLoader::SchemaValidator`               | JSON-Schema gate applied to a pack's `metadata.json` before it is parsed |
+| `PhosphorFsLoader::WatchedDirectorySet`           | Base mechanism: watcher, debounce, parent watch, guard against a rescan during a rescan |
+| `PhosphorFsLoader::WatchedFileSet`                | Watches an explicit list of files, some possibly missing, and reports only the files whose fingerprint (inode, size, mtime ns) changed |
+| `PhosphorFsLoader::IScanStrategy`                 | The policy to enumerate, parse and commit |
+| `PhosphorFsLoader::DirectoryLoader`               | Specialization for flat `*.json` files, driven by a sink |
+| `PhosphorFsLoader::IDirectoryLoaderSink`          | Strategy for one schema: `parseFile()` and `commitBatch()` |
+| `PhosphorFsLoader::ParsedEntry`                   | Value type for a parse result, with source-path metadata and a `std::any` payload |
+| `PhosphorFsLoader::MetadataPackScanStrategy<P>`   | Strategy for subdirectories with a `metadata.json` |
+| `PhosphorFsLoader::validateJsonEnvelope`          | Shared validator of the `"name"`-field envelope. Returns a `JsonEnvelope` |
+| `PhosphorFsLoader::resolveWithinDirectory`        | Containment guard: resolves a declared path against a directory, and refuses each result outside it |
+| `PhosphorFsLoader::readFileWithinDirectory`       | Bounded read of a declared path that validates the OPENED descriptor: regular file, size limit, real path inside the directory. Thus it refuses a symlink or FIFO put in its place after the check |
+| `PhosphorFsLoader::AbsolutePathPolicy`            | Tells whether a declared path that is already absolute is refused (declared by a pack) or trusted (selected by the user at runtime) |
+| `PhosphorFsLoader::SchemaValidator`               | JSON Schema check of a pack's `metadata.json` before the parse |
 
-## Typical use
+## Use
 
 A profile loader sink (flat `*.json` mode):
 
@@ -93,7 +84,7 @@ loader.loadFromDirectories({systemDir, userDir}, LiveReload::On);
 // synchronous scan and dispatched commitBatch + entriesChanged.
 ```
 
-A metadata-pack registry (used by shader / animation-shader registries):
+A metadata-pack registry (as the shader and animation-shader registries use):
 
 ```cpp
 // `MyPack` must derive PhosphorRegistry::IFactoryBase — the loader
@@ -132,8 +123,7 @@ registry.setUserPath(userDir);
 registry.refresh();
 ```
 
-Watching a config file and the theme file it names, either of which may not
-exist yet:
+Watch a config file and the theme file that it names. Each file can be missing:
 
 ```cpp
 #include <PhosphorFsLoader/WatchedFileSet.h>
@@ -144,7 +134,7 @@ connect(files, &PhosphorFsLoader::WatchedFileSet::filesChanged, this,
 files->setPaths({configPath, themePath});   // reconciles; call again when the theme changes
 ```
 
-Reading an asset a pack declares, without letting it escape the pack:
+Read an asset that a pack declares, and do not let the path go outside the pack:
 
 ```cpp
 #include <PhosphorFsLoader/ContainedFileReader.h>
@@ -159,170 +149,149 @@ watch(mesh->path);
 parse(mesh->bytes);
 ```
 
+## Schema validation
+
+`SchemaValidator` checks a document against a JSON Schema 2020-12 schema. `SchemaValidator.h` is the full contract.
+The sections below give a summary.
+
+### Schemas
+
+- The validator reads a schema as Qt reads JSON: no comments, and of two members with one name, it keeps the last.
+- The schema must be 2020-12. `$schema` is absent or `https://json-schema.org/draft/2020-12/schema` (a trailing `#`
+  is allowed). It has no keyword of a different draft (`definitions`, `dependencies`, `additionalItems`,
+  `$recursiveRef`, `$recursiveAnchor`, an array under `items`).
+- The constructor checks the schema against the 2020-12 meta-schema. Thus it refuses `{"enum": "x"}` or a negative
+  `maxItems`, with the most specific reason of the meta-schema. This works inside a maximum of four maps
+  (`$defs`, `properties`, `patternProperties`, `dependentSchemas`), one inside the other. For a member of a fifth map,
+  the reason is only that the member was invalid.
+- A refused schema refuses every document, with the reason.
+
+### References
+
+- References stay within the schema. A `$ref` is `#`, `#/<JSON pointer>` or `#<anchor>`, not percent-encoded, and
+  names one of the schema's subschemas.
+- An `$anchor` is defined one time, `$id` is only at the root, and `$dynamicRef` and `$dynamicAnchor` are refused.
+- A `$ref` that jsoncons cannot resolve is refused too. These are such references:
+  - A reference into `contentSchema`, which jsoncons does not compile.
+  - A reference by pointer below `items` next to `prefixItems`, which jsoncons files as `additionalItems`.
+  - A reference by pointer below a member of `patternProperties` or `dependentSchemas`, which jsoncons files without
+    the member's name. An `$anchor` below these resolves.
+- Some member names of `properties` or `$defs` are refused. jsoncons writes such a name into its location as a `%7E`
+  or `%7e` that is followed by neither `0` nor `1` after decoding (`a%7E2`, or a U+0007 then an `E` or `e` at the end,
+  which it encodes so). jsoncons then reads the location as the name of an anchor, and compiles it apart from the
+  schema. A literal `~` is kept, because jsoncons writes it as `~0`.
+- A `$ref` that leads back to its own schema without a descent into the document is refused. This is also true in a
+  `$defs` entry that nothing uses, because jsoncons would recurse on it until the stack overflowed. Such a `$ref`
+  goes back through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `dependentSchemas`, other `$ref`s, or `then` and `else`
+  next to an `if` (2020-12 ignores them without one). `{"$ref": "#"}` is an example. A `$ref` back through
+  `properties`, `items` or another keyword that applies to a member or an item is allowed.
+
+### Values
+
+- `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex, json-pointer, uri and uri-reference, as
+  jsoncons reads each one. It accepts the year 0000 and the ipv4 address 256.1.1.1. It refuses an empty
+  uri-reference and the uri `a:`. A schema that names a different format is refused, because jsoncons would ignore
+  it. `hostname` is also refused, because its jsoncons check refuses the digit 9 and reads past the end of an empty
+  string.
+- These values are refused at their path before jsoncons sees them: a string or member name that holds U+0000 or an
+  unpaired UTF-16 surrogate, and a number outside int64 (below -2^63, or 2^63 and above). This applies wherever they
+  are in the document, also where the schema accepts all values. The reason is that the integer check of jsoncons is
+  undefined behavior on such a number, and can run at any node. The Python 2020-12 validator that CI runs accepts such
+  numbers. Thus a data file that holds one passes CI and is refused at load.
+- Integers within int64 are exact. `minimum`, `maximum` and their exclusive forms are also exact between them.
+- `multipleOf` works in doubles with a tolerance of one ulp. Thus 0.07 is a multiple of 0.01 here, but not in Python.
+  Its message prints the divisor with six decimals (`0.075 is not a multiple of
+  0.010000`).
+- `pattern` is an ECMAScript `std::regex` matched against UTF-8 bytes. Thus a dot, a class or a quantifier applies to
+  one byte of a character past U+007F (`^.$` does not match "é").
+
+### Errors
+
+| Limit | Value | At the limit |
+| --- | --- | --- |
+| Errors returned by `validate()` | 100 | One more entry, with an empty path, counts the rest. |
+| Length of a path or a message, escapes included | 500 UTF-16 code units | The text keeps the first 500 (a few fewer, so that it does not split a surrogate pair or an escape) and gets an ellipsis. |
+| Subschemas compiled as a copy in one `validate()` | 100 | Each recheck follows a kept error. After 100 errors are kept, no new recheck starts. |
+| Compiled copies kept for later calls | 16 | The validator keeps the first 16 that it compiles, for calls from any thread. Each `validate()` that needs a different copy compiles it again. |
+
+- The reasons that an `anyOf`, `oneOf` or `allOf` failed follow its error, with the branch as a prefix
+  (`anyOf/1: ...`).
+- The reasons that a member failed an `additionalProperties` subschema also follow, although jsoncons does not give
+  them. The validator checks the member against that subschema again, down to four such subschemas one inside the
+  other. Each reason gets the prefix `additionalProperties: `. For this, the validator compiles each subschema as a
+  copy of the whole schema. The documentation of `validate()` gives the cost.
+- A failed `dependentSchemas` subschema is reported below the member that triggered it (`/a/c` for member `c`, when
+  `a` triggered it), as jsoncons reports it. There, a member that fails an `additionalProperties` subschema keeps only
+  the line of jsoncons, because that location does not name the validated object. The same applies to a member that
+  fails a subschema that jsoncons files under the same location as a different subschema, because jsoncons keeps only
+  the first of them. Two members of `patternProperties` that hold `additionalProperties` share one subschema. Two
+  names that jsoncons percent-encodes in the same way (`a{b` and `a%7Bb`) also share one.
+- In a path or a message, the validator writes these characters as `\uXXXX`: each C0 and C1 control character, DEL,
+  U+2028, U+2029 and each bidirectional control (U+202A to U+202E, U+2066 to U+2069). Thus a member name or a quoted
+  string from a data file cannot start a log line, send a terminal escape sequence or change the order of the text
+  around it.
+- `logSchemaErrors()` logs each error as `  <path>: <message>`, without quotes.
+
 ## Design notes
 
-- **Watcher is opt-in.** `LiveReload::On` installs a
-  `QFileSystemWatcher` on every scanned directory (or its parent, if
-  the target doesn't exist yet, so fresh installs that create the
-  user-data dir later still pick up edits without a restart). The enable is
-  a set-wide ONE-WAY latch: a later `LiveReload::Off` call never disarms an
-  already-armed set. A test that must not watch should never pass `On`, or
-  should destroy and rebuild the set.
-- **Path containment is one shared function.** Every pack parser that resolves a
-  declared path routes through `resolveWithinDirectory`. There is exactly one
-  correct way to write that check: `QDir::filePath` returns an absolute argument
-  unchanged and never normalises `..`, a lexical compare cannot see a symlinked
-  component, and canonicalisation returns empty for a leaf that does not exist
-  yet, which is the ordinary live-reload case. The guard canonicalises the
-  deepest EXISTING ancestor and re-appends the missing tail, so the two domains
-  are never mixed, and it fails closed when nothing on the chain exists.
-- **Single files report by fingerprint.** `WatchedFileSet` watches each file
-  and every directory on the way to it, from `/` down, so creation, deletion
-  and rename-replacement are seen wherever they happen. A directory event
-  alone proves nothing, so after the debounce each path is `stat()`ed and
-  only those whose identity or content stamp moved are reported. An
-  unrelated write beside a watched file or in one of its ancestors emits
+- **The watcher is opt-in.** `LiveReload::On` puts a `QFileSystemWatcher` on every scanned directory. If the target
+  does not exist yet, it watches the parent. Thus a fresh install that creates the user-data directory later still
+  sees edits without a restart. The enable is a ONE-WAY latch for the whole set: a later `LiveReload::Off` call never
+  disarms a set that is already armed. A test that must not watch must never pass `On`, or must destroy and build the
+  set again.
+- **Path containment is one shared function.** Every pack parser that resolves a declared path calls
+  `resolveWithinDirectory`. There is exactly one correct way to write that check, for these reasons:
+  - `QDir::filePath` returns an absolute argument unchanged and never normalizes `..`.
+  - A lexical compare cannot see a symlinked component.
+  - Canonicalization returns empty for a leaf that does not exist yet, which is the usual live-reload case.
+
+  The guard canonicalizes the deepest EXISTING ancestor and appends the missing tail again. Thus the two domains are
+  never mixed. If nothing on the chain exists, the guard fails closed.
+- **Single files report by fingerprint.** `WatchedFileSet` watches each file and every directory on the way to it,
+  from `/` down. Thus it sees creation, deletion and replacement by rename wherever they occur. A directory event
+  alone proves nothing. Thus after the debounce, it runs `stat()` on each path, and reports only the paths whose
+  identity or content stamp changed. An unrelated write next to a watched file, or in one of its ancestors, emits
   nothing.
-- **Watches follow identity, not path strings.** An inotify watch stays on
-  the inode its path named when it was added, and Qt's directory watch does
-  not report its own rename. So a symlinked directory that is retargeted
-  (Home Manager, stow, chezmoi) or a parent replaced by rename would leave
-  every watch below it on the old tree. Both sets record an identity chain
-  for each watched path: the device and inode of every directory walked from
-  `/` and the text of every symlink followed, resolved component by
-  component. An event in an ancestor costs a walk of the chains, a few
-  `lstat()` calls. Only a chain that moved re-arms its watches, and in
-  `WatchedDirectorySet` only a chain that moved runs a rescan.
-  `WatchedDirectorySet` chains its registered directories, and also each
-  path its strategy reports that goes through a symlink below its
-  registered directory: a linked file, a linked folder, a file inside one.
-  A watch under the link's own spelling would stay on the old target when
-  the link is pointed elsewhere, and see nothing while it dangles, so such a
-  path is watched through its chain, its target under its physical path.
-  Reported paths that go through no link keep their plain watch, because
-  the chain of their registered directory already covers everything above
-  them.
-- **Containment of what was opened, not what was named.**
-  `readFileWithinDirectory` runs `resolveWithinDirectory` first, then opens
-  with `O_NONBLOCK`, `fstat()`s the descriptor and checks its
-  `/proc/self/fd` real path against the directory. A path checked before
-  opening can be swapped between check and open; the descriptor cannot.
-- **`commitBatch` is the one mutation point.** The sink only touches
-  its target registry inside `commitBatch`, so bulk signals (e.g. a
-  QML `reloadAll`) coalesce to one emit per scan.
-- **User wins on collision.** When a system file and a user file share
-  an ID, the user file commits. Search-path order is consumer-chosen, and
-  the loader honours it.
-- **Type-erased payloads.** `ParsedEntry::payload` is `std::any` so the
-  loader stays schema-agnostic. The sink produces it, the sink
-  consumes it, nobody in between peeks. The metadata-pack variant adds
-  a typed `Payload` template parameter for registries that don't need
-  the erasure.
+- **Watches follow identity, not path strings.** An inotify watch stays on the inode that its path named when the
+  watch was added. Qt's directory watch does not report its own rename. Thus a symlinked directory that is retargeted
+  (Home Manager, stow, chezmoi), or a parent replaced by rename, would leave every watch below it on the old tree.
+  Both sets record an identity chain for each watched path. The chain is the device and inode of every directory
+  walked from `/`, and the text of every symlink followed, resolved one component at a time. An event in an ancestor
+  costs a walk of the chains, which is a few `lstat()` calls. Only a chain that changed arms its watches again. In
+  `WatchedDirectorySet`, only a chain that changed runs a rescan.
+
+  `WatchedDirectorySet` makes chains for its registered directories. It also makes a chain for each path that its
+  strategy reports through a symlink below its registered directory: a linked file, a linked folder, or a file inside
+  one. A watch under the link's own spelling would stay on the old target when the link points to a different place,
+  and would see nothing while the link dangles. Thus such a path is watched through its chain, with its target under
+  its physical path. A reported path that goes through no link keeps its plain watch, because the chain of its
+  registered directory already covers everything above it.
+- **Containment of what was opened, not what was named.** `readFileWithinDirectory` runs `resolveWithinDirectory`
+  first. Then it opens with `O_NONBLOCK`, runs `fstat()` on the descriptor, and checks the `/proc/self/fd` real path of
+  the descriptor against the directory. A different file can replace a checked path between the check and the open.
+  It cannot replace an open descriptor.
+- **`commitBatch` is the one mutation point.** The sink changes its target registry only inside `commitBatch`. Thus
+  bulk signals (for example a QML `reloadAll`) become one emit for each scan.
+- **The user file wins on a collision.** When a system file and a user file have the same ID, the user file commits.
+  The consumer selects the search-path order, and the loader obeys it.
+- **Type-erased payloads.** `ParsedEntry::payload` is `std::any`, so the loader does not depend on a schema. The sink
+  makes the payload and the sink reads it. Nothing between them looks at it. The metadata-pack variant adds a typed
+  `Payload` template parameter for registries that do not need the erasure.
 
 ## Dependencies
 
 - `QtCore`
-- jsoncons 1.10.0 (BSL-1.0), header-only. By default it comes from the
-  archive that `cmake/PhosphorDependencies.cmake` pins, is compiled into the
-  library (whose symbols are hidden but for its own exports, so none of
-  jsoncons' leaves it), and its licence installs as
-  `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with any
-  distribution. That file also holds the MIT notices of the two jsoncons
-  headers compiled in that carry their own, grisu3 and a5hash. With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON` the system's
-  headers are used instead, found through `JSONCONS_INCLUDE_DIR`, and the
-  configure checks that they compile against the JSON Schema API the library
-  uses, which needs jsoncons 1.7.0 or later. The check runs again when
-  `JSONCONS_INCLUDE_DIR` changes and after it fails.
-
-## Schema validation
-
-`SchemaValidator` checks a document against a JSON Schema 2020-12 schema.
-`SchemaValidator.h` is the full contract. In short:
-
-- A schema is read as Qt reads JSON (no comments, the last of two members
-  with one name kept) and must be 2020-12, with `$schema` absent or
-  `https://json-schema.org/draft/2020-12/schema` (a trailing `#` allowed)
-  and no keyword of another draft (`definitions`, `dependencies`,
-  `additionalItems`, `$recursiveRef`, `$recursiveAnchor`, an array under
-  `items`). It is checked against the 2020-12 meta-schema when it is
-  constructed, so `{"enum": "x"}` or a negative `maxItems` is refused there,
-  with the meta-schema's most specific reason, inside up to four maps
-  (`$defs`, `properties`, `patternProperties`, `dependentSchemas`) one inside
-  another. For a member of a fifth, the reason is only that it was invalid.
-  A refused schema refuses every document, with the reason.
-- References stay within the schema. A `$ref` is `#`, `#/<JSON pointer>` or
-  `#<anchor>`, not percent-encoded, and names one of its subschemas. An
-  `$anchor` is defined once, `$id` appears at the root only, and
-  `$dynamicRef` and `$dynamicAnchor` are refused. A `$ref` that jsoncons
-  cannot resolve is refused too. Such is one into `contentSchema`, which
-  jsoncons does not compile. Such is also one by pointer below `items`
-  beside `prefixItems`, which jsoncons files as `additionalItems`, or below
-  a member of `patternProperties` or `dependentSchemas`, which it files
-  without the member's name. An `$anchor` below those resolves. A member of
-  `properties` or `$defs` whose name jsoncons writes into its location as a
-  `%7E` or `%7e` followed by neither `0` nor `1` once decoded (`a%7E2`, or a
-  U+0007 then an `E` or `e` at the end, which it encodes so) is refused,
-  since jsoncons then reads its location as an anchor's name and compiles it
-  apart from the schema. A literal `~` is kept, since jsoncons writes it as
-  `~0`.
-- A `$ref` that leads back to its own schema without descending into the
-  document is refused, even in a `$defs` entry nothing uses, since jsoncons
-  would recurse on it until the stack overflowed. That is a `$ref` back
-  through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `dependentSchemas`, other
-  `$ref`s, and `then` and `else` beside an `if` (2020-12 ignores them
-  without one), as `{"$ref": "#"}` is. A `$ref` back through `properties`,
-  `items` or another keyword that applies to a member or an item is
-  allowed.
-- `format` is asserted for date-time, date, time, email, ipv4, ipv6, regex,
-  json-pointer, uri and uri-reference, as jsoncons reads each. It takes the
-  year 0000 and the ipv4 address 256.1.1.1, and refuses an empty
-  uri-reference and the uri `a:`. A schema naming another format is refused,
-  since jsoncons would ignore it, and so is `hostname`, whose jsoncons check
-  refuses the digit 9 and reads past the end of an empty string.
-- A string or member name holding U+0000 or an unpaired UTF-16 surrogate,
-  and a number outside int64 (below -2^63, or 2^63 and above), are refused
-  at their path before jsoncons sees them, wherever they sit in the
-  document, also where the schema accepts any value, since jsoncons' integer
-  check is undefined behaviour on such a number and may run at any node.
-  Python's 2020-12, which CI runs, accepts such numbers, so a data file
-  holding one passes CI and is refused at load.
-- Integers within int64 are exact, and so are `minimum`, `maximum` and
-  their exclusive forms between them. `multipleOf` works in doubles with a
-  tolerance of one ulp, so 0.07 is a multiple of 0.01 here, not in Python. Its
-  message prints the divisor with six decimals (`0.075 is not a multiple of
-  0.010000`).
-- `pattern` is an ECMAScript `std::regex` matched against UTF-8 bytes, so a
-  dot, a class or a quantifier applies to one byte of a character past
-  U+007F (`^.$` does not match "é").
-- `validate()` returns at most 100 errors, then one entry with an empty path
-  that counts the rest. A path or message longer than 500 UTF-16 code units,
-  escapes included, keeps the first 500 (a few fewer rather than split a
-  surrogate pair or an escape) and gains an ellipsis.
-- The reasons an `anyOf`, `oneOf` or `allOf` failed follow its error,
-  prefixed with the branch (`anyOf/1: ...`). So do the reasons a member
-  failed an `additionalProperties` subschema, which jsoncons does not give.
-  The member is checked against that subschema again, down to four such
-  subschemas one inside another, and each reason is prefixed
-  `additionalProperties: `. Each subschema is compiled for that as a copy of
-  the whole schema, at most 100 times in one `validate()`. The validator
-  keeps the first 16 it compiles for later calls, from any thread.
-  `validate()`'s documentation gives the cost.
-- A failed `dependentSchemas` subschema is reported below the member that
-  triggered it (`/a/c` for member `c`, when `a` triggered it), as jsoncons
-  reports it. A member that fails an `additionalProperties` subschema there
-  keeps jsoncons' line only, since that location does not name the object
-  validated. So does one that fails a subschema that jsoncons files under
-  the same location as another, since it keeps only the first of them.
-  Two members of `patternProperties` holding `additionalProperties` share
-  one, and so do two names it percent-encodes alike (`a{b` and `a%7Bb`).
-- In a path or a message, each C0 and C1 control character, DEL, U+2028,
-  U+2029 and each bidirectional control (U+202A to U+202E, U+2066 to U+2069)
-  is written as `\uXXXX`, so a member name or a quoted string from a data
-  file cannot start a log line, send a terminal escape sequence or reorder
-  the text around it. `logSchemaErrors()` logs each error as
-  `  <path>: <message>`, unquoted.
+- jsoncons 1.10.0 (BSL-1.0), header-only. By default it comes from the archive that
+  `cmake/PhosphorDependencies.cmake` pins, and it is compiled into the library. The symbols of the library are hidden,
+  except its own exports, so no jsoncons symbol is exported. Its license installs as
+  `licenses/phosphor-libs/LICENSE.jsoncons`, so the notice ships with each distribution. That file also holds the MIT
+  notices of the two compiled jsoncons headers that have their own notice, grisu3 and a5hash.
+- With `-DPHOSPHORFSLOADER_USE_SYSTEM_JSONCONS=ON`, the build uses the system's headers instead, found through
+  `JSONCONS_INCLUDE_DIR`. The configure step checks that they compile against the JSON Schema API that the library
+  uses, which needs jsoncons 1.7.0 or later. The check runs again when `JSONCONS_INCLUDE_DIR` changes, and after it
+  fails.
 
 ## See also
 
-- [`phosphor-animation`](../phosphor-animation/README.md) — `ProfileLoader`, `CurveLoader`, and `AnimationShaderRegistry` are clients.
-- [`phosphor-shaders`](../phosphor-shaders/README.md) — `ShaderRegistry` composes a `MetadataPackLoader` over this library's strategy.
+- [`phosphor-animation`](../phosphor-animation/README.md): `ProfileLoader`, `CurveLoader` and `AnimationShaderRegistry` are clients.
+- [`phosphor-shaders`](../phosphor-shaders/README.md): `ShaderRegistry` composes a `MetadataPackLoader` over the strategy of this library.

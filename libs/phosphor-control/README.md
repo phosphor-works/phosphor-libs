@@ -1,74 +1,56 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-control
 
-> Reusable Qt6/QML/Kirigami settings-app framework: the window chrome
-> (sidebar, breadcrumbs, footer, page host) plus the orchestration
-> (`PageController`, `PageRegistry`, `StagingDomain`, `ApplicationController`)
-> that any Kirigami settings app builds on, so each consumer writes only its
-> own page controllers and QML pages.
+phosphor-control is a Qt 6, QML and Kirigami framework for settings apps. It gives the window chrome (sidebar,
+breadcrumbs, footer and page host) and the orchestration (`PageController`, `PageRegistry`, `StagingDomain`,
+`ApplicationController`) that a Kirigami settings app builds on. Each consumer writes only its own page controllers
+and QML pages.
 
 ## Responsibility
 
-A settings app on this framework declares a set of pages, each backed by a
-staging domain that holds the user's pending edits, and the shell handles the
-rest: sidebar navigation, breadcrumbs, a global dirty flag, batched
-Apply/Discard across every domain, deep-link reveal, and global search. The
-library provides:
+A settings app on this framework declares a set of pages. A staging domain holds the pending edits of each page. The
+shell does the rest: sidebar navigation, breadcrumbs, a global dirty flag, one Apply or Discard across all domains,
+deep-link reveal and global search. The library supplies these parts:
 
-- **Staging domains.** `StagingDomain` is the unit of staged work:
-  `isDirty()`, `apply()`, `discard()`, `resetToDefaults()`, plus async
-  completion signals. `PageController` is a domain that also has a QML page and
-  a sidebar row. Headless domains hold cross-cutting state (e.g. per-screen
-  assignment maps) with no sidebar entry.
-- **A page catalogue.** `PageRegistry` holds the page tree (top-level entries
-  plus drill-down or collapsible children), keyed by stable page id, and drives
-  the sidebar via serialized `Entry` views.
-- **Top-level orchestration.** `ApplicationController` owns the registry and the
-  registered domains, recomputes the global dirty flag, drives `applyAll()` /
-  `discardAll()` as one transaction (sync or async), dispatches per-page
-  `resetToDefaults()`, and latches deep-link anchors for `PageHost` to reveal.
-- **Global search.** `SearchController` builds a ranked result index from the
-  page registry (Page entries), authored anchors (`addEntry()`), and dynamic
-  content (`ISearchProvider`). `SearchRanker` is the pure, headless,
-  typo-tolerant scorer behind it.
-- **The QML chrome.** `org.phosphor.control` ships `SettingsAppWindow`,
-  `Sidebar`, `Breadcrumbs`, `UnsavedChangesFooter`, `PageHost`,
-  `DiscardChangesDialog`, `AboutPageShell`, `ModulePage`, `ExtensionSlot` and
-  `ExtensionFrame`, wired to the controllers above.
-- **Glue.** `DBusBridge` for talking to a daemon, and `LocalizedContext` for
-  bare-word `i18n()` in QML on Qt-only (non-KF6) builds.
+| Part | What it does |
+| --- | --- |
+| Staging domains | `StagingDomain` is the unit of staged work: `isDirty()`, `apply()`, `discard()`, `resetToDefaults()`, and signals for asynchronous completion. `PageController` is a domain that also has a QML page and a sidebar row. A headless domain holds state that more than one page uses (for example, maps of assignments for each screen) and has no sidebar entry. |
+| Page catalog | `PageRegistry` holds the page tree (top-level entries, and children that drill down or collapse). A stable page id is the key of each page. The registry drives the sidebar through serialized `Entry` views. |
+| Top-level orchestration | `ApplicationController` owns the registry and the registered domains. It calculates the global dirty flag again when a domain changes. It runs `applyAll()` and `discardAll()` as one transaction (synchronous or asynchronous), sends `resetToDefaults()` to one page, and keeps deep-link anchors for `PageHost` to reveal. |
+| Global search | `SearchController` builds a ranked result index from three sources: the page registry (Page entries), authored anchors (`addEntry()`) and dynamic content (`ISearchProvider`). `SearchRanker` is the scorer behind it. It is pure and headless, and it accepts typing errors. |
+| QML chrome | `org.phosphor.control` supplies `SettingsAppWindow`, `Sidebar`, `Breadcrumbs`, `UnsavedChangesFooter`, `PageHost`, `DiscardChangesDialog`, `AboutPageShell`, `ModulePage`, `ExtensionSlot` and `ExtensionFrame`, connected to the controllers above. |
+| Glue | `DBusBridge` calls a daemon. `LocalizedContext` gives bare-word `i18n()` in QML for builds with Qt only (no KF6). |
 
 ## Key types
 
 | Type | Purpose |
-|------|---------|
-| `PhosphorControl::ApplicationController`  | Top-level orchestrator: owns the registry + domains, global dirty flag, batched `applyAllAsync` / `discardAllAsync`, current-page selection, deep-link anchor latch, `bindPage` for pages whose controller arrives late, a single owned navigation hook (`setNavigationHook`) a plugin host loads pages through, and the sections other modules add to a page: a single owned extension provider (`setExtensionProvider`) behind `extensionsFor` / `extensionsChanged`, and `attachDomainToPage` to count a section's domain toward its page's dirty mark and reset |
-| `PhosphorControl::StagingDomain`          | Abstract unit of staged changes: `isDirty()`, `apply()`, `discard()`, `resetToDefaults()`, with `applyResult` / `discardResult` async signals |
-| `PhosphorControl::PageController`         | A `StagingDomain` that also has a QML page and a sidebar row, with a stable, globally-unique page id |
-| `PhosphorControl::PageRegistry`           | Catalogue of registered pages as a tree (`Entry` per page). It grows at runtime and never shrinks: `registerPage` adds (optionally at a sibling slot), `bindPage` swaps a page's controller and QML in place, `setPageVisibility` restamps a tier |
-| `PhosphorControl::SearchController`       | Global settings search: ranked results from page registry, authored anchors, and registered providers |
-| `PhosphorControl::SearchRanker`           | Pure, stateless, typo-tolerant scoring + ranking; headless and Qt-free beyond `QString` |
-| `PhosphorControl::ISearchProvider`        | App-implemented source of dynamic search entries (rules, shaders, layouts, …) |
-| `PhosphorControl::SearchEntry`            | One searchable item (Page / Section / Setting / Entity), addressed as `"pageId"` or `"pageId#anchor"` |
-| `PhosphorControl::DBusBridge`             | Configured endpoint(s) for daemon calls: sync `call()` / async `asyncCall()`, with explicit-interface variants |
-| `PhosphorControl::LocalizedContext`       | QML i18n context routing `i18n()`/`i18nc()`/`i18np()` through Qt translation, for Qt-only consumers without KF6 |
-| `PhosphorControl::IControlModule`         | The interface a control module's root object implements (`registerInto(ModuleContext&)`), IID `org.phosphor_works.PhosphorControl.Module/1` |
-| `PhosphorControl::ModuleMetadata`         | A module's embedded metadata (id, name, icon, category, parent module, the categories it defines, pages and their anchors, extension points, extensions, search entries, and whether it registers search providers), parsed and validated per locale |
-| `PhosphorControl::ModuleContext`          | What a module registers into: its page controllers, by local page id, its headless staging domains, the domain and QML of each section it adds to another module's page, and its search providers (`registerSearchProvider`). It also hands out one config backend per file, shared by every module that writes it |
-| `PhosphorControl::ModuleHost`             | Finds control modules through a `PhosphorRegistry::PluginCatalog`, fills the page registry with placeholders, resolves extensions against their target pages, and loads a module the first time one of its pages, or a page it extends, is opened, and loads every module with search providers that is available (not loaded yet, and neither failed nor turned off after a crash) while a search query is not blank. With a `SearchController` it lists every module's pages and search entries before they load |
-| `PhosphorControl::ModulePlaceholderPage`  | The controller of a page that stands in for a control module's page while the module is not loaded: the module's name, whether it failed or was turned off after a crash, the host's reason, and `retry()`. `ModuleHost` registers one per placeholder, and `ModulePage` shows it |
-| `PhosphorControl::ExtensionSlotModel`     | The sections in one slot of one page, for `ExtensionSlot`: reads `extensionsFor` again on `extensionsChanged` and keeps the row of a section that stays |
-| `PhosphorControl::ModuleTestHost`         | Loads one module headless and checks it against the module contract, for the module's own CI: metadata, registration, staging, search providers, extension targets and anchor stability. Lives in the separate `PhosphorControl::PhosphorControlTest` library |
-| `phosphor-control-metadata`               | Build tool behind `phosphor_add_control_module_metadata()`: validates a module's metadata, adds `Key[<lang>]` translations from its `.ts` files, and writes its anchor list and lupdate strings |
+| --- | --- |
+| `PhosphorControl::ApplicationController` | The top-level orchestrator. It owns the registry and the domains, the global dirty flag, the batched `applyAllAsync` and `discardAllAsync`, the current page and the deep-link anchor. `bindPage` binds a page whose controller arrives late. One owned navigation hook (`setNavigationHook`) lets a plugin host load pages. Other modules add sections to a page through one owned extension provider (`setExtensionProvider`), behind `extensionsFor` and `extensionsChanged`. `attachDomainToPage` makes the domain of a section count toward the dirty mark and the reset of its page. |
+| `PhosphorControl::StagingDomain` | The abstract unit of staged changes: `isDirty()`, `apply()`, `discard()`, `resetToDefaults()`, with the asynchronous signals `applyResult` and `discardResult`. |
+| `PhosphorControl::PageController` | A `StagingDomain` that also has a QML page and a sidebar row, with a stable page id that is unique in the app. |
+| `PhosphorControl::PageRegistry` | The catalog of registered pages as a tree (one `Entry` for each page). It grows at run time and never shrinks. `registerPage` adds a page (optionally at a sibling slot). `bindPage` replaces the controller and QML of a page in place. `setPageVisibility` sets a new tier. |
+| `PhosphorControl::SearchController` | Global settings search. It ranks results from the page registry, the authored anchors and the registered providers. |
+| `PhosphorControl::SearchRanker` | Scoring and ranking that is pure, stateless and accepts typing errors. It is headless and uses no Qt but `QString`. |
+| `PhosphorControl::ISearchProvider` | A source of dynamic search entries that the app implements (rules, shaders, layouts and similar). |
+| `PhosphorControl::SearchEntry` | One searchable item (Page, Section, Setting or Entity), with the address `"pageId"` or `"pageId#anchor"`. |
+| `PhosphorControl::DBusBridge` | The configured endpoints for daemon calls: synchronous `call()` and asynchronous `asyncCall()`, each also with an explicit interface. |
+| `PhosphorControl::LocalizedContext` | A QML i18n context that sends `i18n()`/`i18nc()`/`i18np()` through Qt translation, for consumers with Qt only and no KF6. |
+| `PhosphorControl::IControlModule` | The interface that the root object of a control module implements (`registerInto(ModuleContext&)`), IID `org.phosphor_works.PhosphorControl.Module/1`. |
+| `PhosphorControl::ModuleMetadata` | The embedded metadata of a module, parsed and validated for each locale: id, name, icon, category, parent module, the categories it defines, pages and their anchors, extension points, extensions, search entries, and if it registers search providers. |
+| `PhosphorControl::ModuleContext` | What a module registers into: its page controllers by local page id, its headless staging domains, the domain and QML of each section it adds to the page of another module, and its search providers (`registerSearchProvider`). It also gives one config backend for each file, shared by all modules that write that file. |
+| `PhosphorControl::ModuleHost` | Finds control modules through a `PhosphorRegistry::PluginCatalog` and fills the page registry with placeholders. It resolves extensions against their target pages. It loads a module the first time a user opens one of its pages, or a page it extends. While a search query is not blank, it loads each available module that has search providers (not loaded yet, not failed, and not turned off after a crash). With a `SearchController`, it lists the pages and search entries of all modules before they load. |
+| `PhosphorControl::ModulePlaceholderPage` | The controller of a page that stands in for a module page while the module is not loaded. It holds the module name, if the module failed or was turned off after a crash, the reason from the host, and `retry()`. `ModuleHost` registers one for each placeholder, and `ModulePage` shows it. |
+| `PhosphorControl::ExtensionSlotModel` | The sections in one slot of one page, for `ExtensionSlot`. It reads `extensionsFor` again on `extensionsChanged`, and keeps the row of a section that stays. |
+| `PhosphorControl::ModuleTestHost` | Loads one module headless and checks it against the module contract, for the CI of the module: metadata, registration, staging, search providers, extension targets and anchor stability. It is in the separate `PhosphorControl::PhosphorControlTest` library. |
+| `phosphor-control-metadata` | The build tool behind `phosphor_add_control_module_metadata()`. It validates the metadata of a module, adds `Key[<lang>]` translations from its `.ts` files, and writes its anchor list and lupdate strings. |
 
-## Typical use
+## Use
 
-A consumer subclasses `ApplicationController` to declare its pages, subclasses
-`PageController` for each page, and points the QML `SettingsAppWindow` at the
-controller. Titles are translated by the caller, because the library
-deliberately provides no translation context for app strings.
+A consumer subclasses `ApplicationController` to declare its pages and subclasses `PageController` for each page.
+Then it points the QML `SettingsAppWindow` at the controller. The caller translates the titles, because the library
+does not supply a translation context for app strings.
 
 ```cpp
 #include <PhosphorControl/ApplicationController.h>
@@ -118,101 +100,96 @@ SettingsAppWindow {
 }
 ```
 
-The shell drives the dirty/Apply lifecycle from the domains' signals:
-`UnsavedChangesFooter` binds to `ApplicationController::dirty` /
-`applying` / `discarding`, so a synchronous page just emits
-`applyResult(true, {})` at the end of `apply()` and the footer swaps
-"Save" → "Saving…" automatically.
+The shell controls the dirty and Apply cycle from the signals of the domains. `UnsavedChangesFooter` binds to
+`ApplicationController::dirty`, `applying` and `discarding`. Thus a synchronous page only emits
+`applyResult(true, {})` at the end of `apply()`, and the footer changes "Save" to "Saving…" automatically.
 
-See `examples/phosphor-control/minimal/` at the repository root for a complete two-page app (General + About), built with `-DPHOSPHOR_LIBS_BUILD_EXAMPLES=ON`.
+`examples/phosphor-control/minimal/` at the repository root is a complete app with two pages (General and About).
+Build it with `-DPHOSPHOR_LIBS_BUILD_EXAMPLES=ON`.
 
 ## Control modules
 
-An app built on PhosphorControl can take its pages from control modules. A
-module is a Qt plugin in the `control` seam whose root object implements
-`IControlModule` and whose metadata (`ModuleMetadata`) lists its pages.
-`ModuleHost` reads every module's metadata without loading it and fills the
-page registry before anything loads:
+An app on PhosphorControl can get its pages from control modules. A module is a Qt plugin in the `control` seam. Its
+root object implements `IControlModule`, and its metadata (`ModuleMetadata`) lists its pages. `ModuleHost` reads the
+metadata of each module without loading it, and fills the page registry before anything loads:
 
-- a node per category in use (`@category/<id>`), a node per module
-  (`<module>`), and a page per module page (`<module>:<page>`), ordered by
-  `Order` and then name, with a module's own pages parents first and
-  siblings in declaration order;
-- each module page shows `ModulePage.qml` until its module loads, so it
-  is an ordinary page in the sidebar, search and keyboard navigation;
-- a page can sit under one of its module's pages, under another module's page
-  (`<module>:<page>`), or directly in a category, and carries its tier,
-  divider and counterpart from the metadata.
+- It adds a node for each category in use (`@category/<id>`), a node for each module (`<module>`), and a page for
+  each module page (`<module>:<page>`). The order is by `Order`, then by name. The pages of one module come parents
+  first, and siblings in the order of declaration.
+- Each module page shows `ModulePage.qml` until its module loads. Thus it is an ordinary page in the sidebar, in
+  search and in keyboard navigation.
+- A page can be under one of the pages of its module, under the page of another module (`<module>:<page>`), or
+  directly in a category. It gets its tier, divider and counterpart from the metadata.
 
-Opening one of a module's pages loads the module through
-`ApplicationController`'s navigation hook, before the page change is
-announced. Its `registerInto` registers into a `ModuleContext`, which only
-records. The host then checks the whole registration and binds every page
-(`ApplicationController::bindPage`) and domain at once, or, when anything is
-wrong (a page or extension the metadata does not declare, a skipped page or
-extension, one registered twice, a controller with the wrong id, a page or
-section without QML, a search provider that is null, registered twice,
-registered without `"SearchProviders": true` in the metadata, living in
-another thread or deleted while the module registered), keeps none of
-it and fails the module with the reason. The one call that does more than record is
-`ModuleContext::configBackend` (below): it shares the file's backend at once,
-and the backend stays shared when the registration is not kept. A module that
-did not load keeps its placeholder page, which says why, and offers a retry
-when loading again can help.
+### Loading
 
-**A module page's QML.** `PageHost` creates every page bound with `bindPage`,
-and the `ModulePage` placeholder before it, with two properties already
-set before any of the page's bindings run: `controller`, the page's
-`PageController`, and `settingsApp`, the `ApplicationController`. The page's
-root must declare both, and it may make them `required`. A root that leaves
-one out still loads, but Qt logs "Cannot assign to non-existent property"
-for it, and the message may carry no usable file location to trace it to.
-`PageHost` does not create such a page while the registry has no controller
-for it: the page area says the page could not be shown, and a later
-`bindPage` creates it.
+When a user opens a page of a module, the navigation hook of `ApplicationController` loads the module before the page
+change is announced. The `registerInto` of the module registers into a `ModuleContext`, which only records. Then the
+host checks the full registration. If all is correct, it binds all pages (`ApplicationController::bindPage`) and
+domains at once. If something is wrong, it keeps nothing and fails the module with the reason. These are wrong:
 
-A module that was loading when the process died is disabled, at the next start
-and every start after, until `retryModule` (or the placeholder page's retry
-button) loads it. The load record that remembers this
-(`ModuleHost::setSentinelPath`) belongs to one host, so a second `ModuleHost`
-needs a path of its own. A module that failed after its library was loaded
-stays failed when its file is offered again: the process keeps running the
-code it loaded, so the new file takes effect at the next start. `ModuleTestHost` runs a
-module through the same host headless, for the module's own CI. It makes the
-config files the module opens under its temporary directory
-(`ModuleHost::setConfigRedirect`), so the module starts from its defaults and
-the run does not write the real settings, as long as the module's factory
-opens the path it is handed.
+- a page or extension that the metadata does not declare
+- a skipped page or extension, or one registered two times
+- a controller with the wrong id
+- a page or section without QML
+- a search provider that is null, registered two times, registered without `"SearchProviders": true` in the
+  metadata, in another thread, or deleted while the module registered
 
-A module can also add sections to another module's page. Its metadata lists
-each one under `Extensions` with a `Target` (`<module>:<page>`), a `Slot`,
-the `TargetVersion` of the slot it was built for (1 by default) and a `Name`.
-Every page offers `top`, `bottom`, and `before:<anchor>` / `after:<anchor>`
-for each entry of its `Anchors` list, all at the version of the page's
-reserved `anchors` extension point (1 when it declares none). A module adds
-named slots with its top-level `ExtensionPoints` list, each entry a `Page`, an
-`Id` and a `Version` (1 by default). `ModuleHost` shows an extension only when
-its target page offers that slot at that version. One aimed at a module that
-is not installed stays inactive, and one whose target module could not be
-placed, or whose page, slot or version does not match, is listed in
-`refusedExtensions()` with the reason (`refusedExtensionsChanged` says when
-that list changes). Opening a page loads every module that extends it once the
-page's own module has loaded, and so does a section that becomes active while
-its page is open, or the page's module loading while it is open (a retry). A
-section is shown once its extension is active and its page's module has
-loaded. From then on its staging domain joins Apply and counts toward that
-page's dirty mark and reset, and neither condition is ever undone. Before
-that, nothing shows it, so it joins nothing.
+Only one call does more than record: `ModuleContext::configBackend` (see "Shared config files"). It shares the
+backend of the file at once, and the backend stays shared when the host does not keep the registration. A module
+that did not load keeps its placeholder page. The page says why, and offers a retry when a new load can help.
 
-`PageHost` places the `top` and `bottom` slots around every page, outside the
-page's own scrolling content. The page places the others itself with
-`ExtensionSlot`, which lists them through `ExtensionSlotModel` and wraps each in a
-`ExtensionFrame`. The frame names the module the section comes from,
-creates the section's QML with its `domain` already set, which the section
-must declare (it may make it `required`), and shows a card in the section's
-place when the module did not load, the section's domain was deleted or its
-QML failed, with a button to the module's own page when the module is what
-failed:
+**The QML of a module page.** `PageHost` creates each page bound with `bindPage`, and the `ModulePage` placeholder
+before it. It sets two properties before any bindings of the page run: `controller`, the `PageController` of the
+page, and `settingsApp`, the `ApplicationController`. The root of the page must declare both, and can make them
+`required`. A root that does not declare one still loads, but Qt logs "Cannot assign to non-existent property" for
+it. That message can have no usable file location. `PageHost` does not create such a page while the registry has no
+controller for it. The page area then says that the page could not be shown, and a later `bindPage` creates it.
+
+If the process stops during the load of a module, the module is disabled at the next start and at each start after
+it. It stays disabled until `retryModule` (or the retry button of the placeholder page) loads it. One host owns the
+load record that remembers this (`ModuleHost::setSentinelPath`), so a second `ModuleHost` needs its own path. A module
+that failed after its library loaded stays failed when its file is offered again. The process continues to run the
+code it loaded, so the new file has an effect at the next start.
+
+`ModuleTestHost` runs a module headless through the same host, for the CI of the module. It puts the config files
+that the module opens under its temporary directory (`ModuleHost::setConfigRedirect`). Thus the module starts from
+its defaults and the run does not write the real settings, if the factory of the module opens the path it gets.
+
+### Extensions
+
+A module can also add sections to the page of another module. Its metadata lists each section under `Extensions`,
+with these keys:
+
+| Key | Value |
+| --- | --- |
+| `Target` | The target page, `<module>:<page>`. |
+| `Slot` | The slot on that page. |
+| `TargetVersion` | The version of the slot that the extension was built for (1 by default). |
+| `Name` | The name of the extension. |
+
+Each page offers `top`, `bottom`, and `before:<anchor>` / `after:<anchor>` for each entry of its `Anchors` list. All
+of them are at the version of the reserved `anchors` extension point of the page (1 when the page declares none). A
+module adds named slots with its top-level `ExtensionPoints` list. Each entry has a `Page`, an `Id` and a `Version`
+(1 by default).
+
+`ModuleHost` shows an extension only when its target page offers that slot at that version. An extension for a module
+that is not installed stays inactive. An extension is refused when the host could not place its target module, or
+when its page, slot or version does not agree. `refusedExtensions()` lists it with the reason, and
+`refusedExtensionsChanged` tells when that list changes.
+
+When a user opens a page, the host loads all modules that extend it, after the own module of the page has loaded. It
+also loads them when a section becomes active while its page is open, and when the module of the page loads while the
+page is open (a retry). A section shows when its extension is active and the module of its page has loaded. From then
+on, its staging domain is part of Apply and counts toward the dirty mark and the reset of that page. These two
+conditions are never undone. Before that, nothing shows the section, so it is part of nothing.
+
+`PageHost` puts the `top` and `bottom` slots around each page, outside the scrolling content of the page. The page
+puts the other slots itself with `ExtensionSlot`. `ExtensionSlot` lists them through `ExtensionSlotModel` and puts
+each one in an `ExtensionFrame`. The frame names the module that the section comes from. It creates the QML of the
+section with its `domain` already set, which the section must declare (it can make it `required`). The frame shows a
+card in place of the section when the module did not load, the domain of the section was deleted, or its QML failed.
+When the module is the cause, the card has a button to the own page of the module.
 
 ```qml
 ExtensionSlot {
@@ -223,12 +200,12 @@ ExtensionSlot {
 }
 ```
 
-**Building a module.** A module embeds generated metadata rather than its
-source file, so the build can validate it and add translations. It links
-`PhosphorControl` and installs into the `control` seam of a Qt plugin
-directory, `<Qt plugin dir>/phosphor-works/control/`, where `ModuleHost` looks
-by default (`PhosphorRegistry::PluginCatalog` lists the whole search path).
-`KDE_INSTALL_QTPLUGINDIR` below comes from ECM's `KDEInstallDirs6`:
+### Build a module
+
+A module embeds generated metadata, not its source file, so that the build can validate it and add translations. It
+links `PhosphorControl` and installs into the `control` seam of a Qt plugin directory,
+`<Qt plugin dir>/phosphor-works/control/`. `ModuleHost` looks there by default (`PhosphorRegistry::PluginCatalog`
+lists the full search path). `KDE_INSTALL_QTPLUGINDIR` below comes from `KDEInstallDirs6` of ECM.
 
 ```cmake
 find_package(Qt6 REQUIRED COMPONENTS Core)
@@ -249,55 +226,53 @@ install(TARGETS control_module_mine DESTINATION ${KDE_INSTALL_QTPLUGINDIR}/phosp
 Q_PLUGIN_METADATA(IID PhosphorControlModule_iid FILE "module_metadata.json")
 ```
 
-Invalid metadata fails the build. A warning, such as a key this PhosphorControl does
-not know, is printed once and never fails it, so metadata written for a newer
-PhosphorControl still builds. A cross build points `PHOSPHOR_CONTROL_METADATA_EXECUTABLE`
-at a `phosphor-control-metadata` that runs on the build machine.
+Metadata that is not valid fails the build. A warning, such as a key that this PhosphorControl does not know, shows
+one time and never fails the build. Thus metadata written for a newer PhosphorControl still builds. For a cross
+build, set `PHOSPHOR_CONTROL_METADATA_EXECUTABLE` to a `phosphor-control-metadata` that runs on the build machine.
 
-The source that names `module_metadata.json` is rebuilt in the same build
-when the metadata changes. For moc to embed the generated file and nothing
-else, `METADATA` must have another name, and no other `module_metadata.json`
-may sit beside that source or in the target's source or binary directory.
-The dependency is kept per directory, so two modules built in one directory
-cannot compile the same plugin source file: give each its own path to it,
-such as a symbolic link. `phosphor_add_control_module_metadata()` stops the
-configure in each of these cases.
+The source that names `module_metadata.json` is compiled again in the same build when the metadata changes. Moc must
+embed the generated file and nothing else, so these rules apply:
 
-The translations come from the module's catalogs: every finished translation in
-context `PhosphorControlModule` is added as `Key[<lang>]`. A catalog is keyed by its
-language and that language's script, so `de_DE` becomes `Key[de_Latn]` and
-`zh_TW` becomes `Key[zh_Hant]`. Every locale lists that form among its UI
-languages, so a user in `de_AT` gets the `de_DE` catalog while one in `zh_TW`
-never gets the Simplified Chinese of `zh_CN`. When two catalogs claim one
-language and script (`de` and `de_AT`), each is keyed by its own language, with
-`-` turned into `_`. The exception is a language Qt has locales for in more
-than one script (`zh`, `sr`, `uz`, `pa`, `az`, and `en` for Deseret and
-Shavian), which is never keyed by its code alone, because every locale of the
-language lists that code whatever its script. A catalog for the bare code goes
-under the script Qt reads it in, so `zh` becomes `Key[zh_Hans]` and `sr`
-becomes `Key[sr_Cyrl]`, even beside a regional catalog such as `zh_CN`, which
-keeps `Key[zh_CN]`. A `zh` catalog beside a `zh_Hans` one fails the build as
-two catalogs for `zh_Hans`. A language of one script keeps its bare key
-(`Key[de]` beside `Key[de_AT]`). The language is the code Qt gives it, so a
-`no_NO` catalog serves `nb` users. An old code for a language written in more
-than one script, such as `sh`, does not say which script it means, so name the
-script (`sr_Latn`). A catalog under such a code alone is kept under that code,
-which no locale lists, and the build warns about it. A `Key[<lang>]` written in
-the metadata by hand wins over the catalog unless it is empty. It wins at the
-catalog's key, at the language and script when the catalog keeps its own longer
-key (`Key[de_Latn]` beside `de` and `de_AT` catalogs), and at the bare language
-when the catalog's script is the language's usual one (`Key[de]`, but not
-`Key[zh]` beside a `zh_TW` catalog). So a hand-written `Key[zh]` counts as
-Simplified Chinese: it holds off a `zh`, `zh_CN` or `zh_Hans` catalog, while a
-`zh_TW` catalog still serves its users. A key written by hand uses the code Qt
-gives the language (`Key[nb]`), since `Key[no]` is never picked. An unfinished
-translation is left out, while `lrelease` ships it unless given
-`-nounfinished`, so pass that for a module's pages to read in the same language
-as its sidebar entry.
+- `METADATA` must have another name.
+- No other `module_metadata.json` can be next to that source, or in the source or binary directory of the target.
+- The dependency is kept for each directory. Thus two modules built in one directory cannot compile the same plugin
+  source file. Give each module its own path to it, for example a symbolic link.
 
-`MODULE_STRINGS_FILE` holds the metadata's strings for `lupdate`, in context
-`PhosphorControlModule`. The build writes it (the target `<target>_module_metadata`), so
-the `lupdate` target depends on that:
+`phosphor_add_control_module_metadata()` stops the configure in each of these cases.
+
+### Translations
+
+The translations come from the catalogs of the module. The build adds each finished translation in the context
+`PhosphorControlModule` as `Key[<lang>]`. The key of a catalog is its language and the script of that language. Thus
+`de_DE` becomes `Key[de_Latn]` and `zh_TW` becomes `Key[zh_Hant]`. Each locale lists that form in its UI languages.
+Thus a user in `de_AT` gets the `de_DE` catalog, but a user in `zh_TW` never gets the Simplified Chinese of `zh_CN`.
+
+| Case | Key |
+| --- | --- |
+| Two catalogs for one language and script (`de` and `de_AT`) | Each catalog gets its own language, with `-` changed to `_`. |
+| A language that Qt has locales for in more than one script (`zh`, `sr`, `uz`, `pa`, `az`, and `en` for Deseret and Shavian) | Never its code alone, because each locale of the language lists that code for all scripts. A catalog for the bare code goes under the script that Qt reads it in: `zh` becomes `Key[zh_Hans]` and `sr` becomes `Key[sr_Cyrl]`. This is also true next to a regional catalog such as `zh_CN`, which keeps `Key[zh_CN]`. A `zh` catalog next to a `zh_Hans` one fails the build as two catalogs for `zh_Hans`. |
+| A language with one script | It keeps its bare key (`Key[de]` next to `Key[de_AT]`). |
+| A language code | The code that Qt gives the language. Thus a `no_NO` catalog serves `nb` users. |
+| An old code for a language with more than one script, such as `sh` | The code does not tell the script, so name the script (`sr_Latn`). A catalog with only such a code stays under that code, which no locale lists, and the build gives a warning. |
+
+A `Key[<lang>]` that you write by hand in the metadata wins over the catalog, unless it is empty. It wins at these
+keys:
+
+- at the key of the catalog
+- at the language and script, when the catalog keeps its own longer key (`Key[de_Latn]` next to `de` and `de_AT`
+  catalogs)
+- at the bare language, when the script of the catalog is the usual script of the language (`Key[de]`, but not
+  `Key[zh]` next to a `zh_TW` catalog)
+
+Thus a `Key[zh]` written by hand counts as Simplified Chinese. It stops a `zh`, `zh_CN` or `zh_Hans` catalog, but a
+`zh_TW` catalog still serves its users. A key written by hand uses the code that Qt gives the language (`Key[nb]`),
+because `Key[no]` is never selected.
+
+The build leaves out an unfinished translation, but `lrelease` ships it unless you give `-nounfinished`. Give that
+option, so that the pages of a module use the same language as its sidebar entry.
+
+`MODULE_STRINGS_FILE` holds the strings of the metadata for `lupdate`, in the context `PhosphorControlModule`. The
+build writes it (the target `<target>_module_metadata`), so the `lupdate` target depends on that target:
 
 ```cmake
 get_target_property(moduleStrings control_module_mine MODULE_STRINGS_FILE)
@@ -307,141 +282,123 @@ qt_add_lupdate(SOURCE_TARGETS control_module_mine SOURCES ${moduleStrings}
 add_dependencies(control_module_mine_lupdate control_module_mine_module_metadata)
 ```
 
-The generated `anchors.json` (the target's `MODULE_ANCHORS_FILE`) records each
-page's anchors, its `anchors` version and the version of each of its named
-extension points. It goes with each release, and the next release's CI passes
-it to `ModuleTestHost::setPreviousAnchors()`. That fails when a page is gone,
-since other modules may extend it, when an anchor is gone without a bump of
-the page's `anchors` version, when that version went down, and when a named
-extension point is gone or its version went down.
+### Anchor stability
 
-**Testing a module.** `ModuleTestHost(path).run()` loads the module headless
-from a private copy and returns every problem it finds, one line each
-(`ModuleTestHost.h` lists the checks). Besides what `ModuleHost` refuses, it
-reports each metadata warning as `metadata: <warning>`, since the module is
-built against the PhosphorControl that checks it, a module whose metadata says
-`"SearchProviders": true` that registers no provider, a page controller or
-domain that code the module ran while it loaded deleted, and a domain that
-does not answer apply or discard exactly once. `addTargetModule()` adds a module
-this one extends, so its extensions are checked against that module's slots.
-The copies are staged as `module.so` and `target-000.so` onwards, and every
-problem names a module by the path it was given.
+The generated `anchors.json` (the `MODULE_ANCHORS_FILE` of the target) records the anchors of each page, its
+`anchors` version, and the version of each of its named extension points. Ship it with each release. The CI of the
+next release gives it to `ModuleTestHost::setPreviousAnchors()`. The check fails in these cases, because other modules
+can extend the page:
 
-**Search before loading.** the host indexes every module from its metadata at
-start (`ModuleHost::setSearchController`): each page with its `Keywords`, the
-module's `Keywords` and the module's name, each `Search` entry (a setting or
-section at one of the page's `Anchors`), and each active extension as a
-section of the page it is on, at the anchor `<module>:<extension>`, which the
-section's `ExtensionFrame` registers with the page's reveal registry.
-Entries list in the order of their page in the sidebar, which decides ties and
-what a result limit cuts. A page whose module failed or was turned off after a
-crash keeps only its own page result, which opens the placeholder that says
-why.
+- a page is removed
+- an anchor is removed and the `anchors` version of the page did not increase
+- that version decreased
+- a named extension point is removed, or its version decreased
 
-Content that only code can list, such as rules, layouts or shaders, comes from
-an `ISearchProvider` the module registers through
-`ModuleContext::registerSearchProvider`, with `"SearchProviders": true` in its
-metadata. The host loads every such module whenever the query is not blank and it
-has not loaded yet, which covers a query typed before start and a module
-installed while one stands. It asks each provider for its entries once while
-the module's load is recorded, so a provider that crashes then disables its
-module, and again on each index rebuild for as long as the `ModuleHost` lives.
-A provider's entries go on the module's own pages or the pages its extensions
-target, and the host leaves out the rest with a warning.
+### Test a module
 
-Modules that keep settings in one file share its backend:
-`ModuleContext::configBackend(path, create)` creates the backend for the first
-module that opens the file and hands the same one to every later module, so
-one Apply writes every module's keys into one document and no module
-overwrites another's. Each module wraps the backend in its own
-`PhosphorConfig::Store` or settings object. A module whose settings belong to
-a host that may not be running finds the file with
-`PhosphorConfig::HostDirectory`.
+`ModuleTestHost(path).run()` loads the module headless from a private copy. It returns each problem that it finds, on
+one line each (`ModuleTestHost.h` lists the checks). It reports all that `ModuleHost` refuses, and also these
+problems:
 
-The path must be absolute. Paths that lead to one file through symbolic
-links, `.` or `..` get one backend, whether or not the file or its directory
-exists yet, and `create` is handed the resolved path. Sharing a backend asks
-three things of the modules:
+- each metadata warning, as `metadata: <warning>`, because the module is built against the PhosphorControl that
+  checks it
+- a module whose metadata says `"SearchProviders": true` but that registers no provider
+- a page controller or domain that code of the module deleted while the module loaded
+- a domain that does not answer apply or discard exactly one time
 
-- Every `Store` on the backend must be given the same path resolver object
-  (`Schema::pathResolver` is compared by pointer, so an equal copy counts as
-  another) and the same version stamp. The first `Store`'s settings stand,
-  and what a later one brings instead is ignored, with a warning. A `Store`'s
-  migrations run on the whole document.
-- A `JsonBackend` allows one live group at a time, whichever module holds it.
-  A second one asserts in a debug build and is read-only in a release build,
-  so its writes are lost. Open a group, use it and let it go without running
-  other modules' code in between.
-- `sync()`, `commit()` and `reparseConfiguration()` act on the whole document.
-  A write also saves what the other modules have not saved yet, and a reparse
-  drops it.
+`addTargetModule()` adds a module that this module extends, so that the test checks its extensions against the slots
+of that module. The copies have the names `module.so` and `target-000.so` and up. Each problem names a module by the
+path that it got.
 
-The backends belong to the `ApplicationController`: `ModuleHost` keeps them in
-an object it parents to the controller, so they outlive the host and a domain
-can still be applied after it is gone. The controller destroys them before
-the page controllers and domains it adopted from modules, and a `JsonBackend`
-writes what was not saved then. A module must therefore not use its backend
-from a destructor, nor keep one of its groups in a member. A second
-`ModuleHost` on the same controller keeps its own backends, and the first's
-stay alive with the controller, so two hosts whose modules open one file hold
-two documents for it and each write drops the keys only the other holds.
+### Search before loading
 
-`ModuleHost::configBackend(path)` returns the backend a file is shared under,
-for a host application or a test that wants to look. Modules get theirs from
-the context. `ModuleHost::setConfigRedirect(directory)` makes every such file
-under `directory` instead, at its own absolute path below it, for a test that
-must not touch the real settings.
+At start, the host indexes each module from its metadata (`ModuleHost::setSearchController`). The index holds:
+
+- each page with its `Keywords`, the `Keywords` of the module and the name of the module
+- each `Search` entry (a setting or section at one of the `Anchors` of the page)
+- each active extension, as a section of its page, at the anchor `<module>:<extension>`. The `ExtensionFrame` of the
+  section registers that anchor with the reveal registry of the page.
+
+The entries are in the sidebar order of their pages. This order decides ties and what a result limit removes. A page
+whose module failed, or was turned off after a crash, keeps only its own page result. That result opens the
+placeholder, which says why.
+
+Content that only code can list, such as rules, layouts or shaders, comes from an `ISearchProvider`. The module
+registers it through `ModuleContext::registerSearchProvider`, with `"SearchProviders": true` in its metadata. When the
+query is not blank, the host loads each such module that has not loaded yet. This includes a query typed before start
+and a module installed while a query stays. The host asks each provider for its entries one time while it records
+the load of the module, so a provider that crashes then disables its module. It asks again at each index rebuild,
+while the `ModuleHost` exists. The entries of a provider must be on the own pages of the module or on the pages that
+its extensions target. The host leaves out the others, with a warning.
+
+### Shared config files
+
+Modules that keep settings in one file share its backend. `ModuleContext::configBackend(path, create)` creates the
+backend for the first module that opens the file, and gives the same backend to each later module. Thus one Apply
+writes the keys of all modules into one document, and no module overwrites the keys of another. Each module puts the
+backend in its own `PhosphorConfig::Store` or settings object. A module whose settings belong to a host that may not
+be running finds the file with `PhosphorConfig::HostDirectory`.
+
+The path must be absolute. Paths that go to one file through symbolic links, `.` or `..` get one backend, also when
+the file or its directory does not exist yet. `create` gets the resolved path. A shared backend sets three rules for
+the modules:
+
+| Rule | Detail |
+| --- | --- |
+| Same resolver and stamp | Give each `Store` on the backend the same path resolver object and the same version stamp. `Schema::pathResolver` is compared by pointer, so an equal copy counts as another object. The settings of the first `Store` stay. The host ignores a different setting from a later `Store`, with a warning. The migrations of a `Store` run on the full document. |
+| One live group | A `JsonBackend` allows one live group at a time, for all modules. A second group asserts in a debug build and is read-only in a release build, so its writes are lost. Open a group, use it and release it without running code of other modules between these steps. |
+| Whole document | `sync()`, `commit()` and `reparseConfiguration()` act on the full document. A write also saves what the other modules have not saved yet, and a reparse drops it. |
+
+The backends belong to the `ApplicationController`. `ModuleHost` keeps them in an object whose parent is the
+controller. Thus they stay after the host is gone, and a domain can still apply. The controller destroys them before
+the page controllers and domains that it adopted from modules, and a `JsonBackend` then writes what was not saved.
+Thus a module must not use its backend from a destructor, and must not keep one of its groups in a member. A second
+`ModuleHost` on the same controller keeps its own backends, and the backends of the first host stay with the
+controller. Thus, when the modules of two hosts open one file, the hosts hold two documents for it, and each write
+drops the keys that only the other document holds.
+
+`ModuleHost::configBackend(path)` returns the backend that shares a file, for a host application or a test that must
+examine it. Modules get their backend from the context. `ModuleHost::setConfigRedirect(directory)` puts each such
+file under `directory`, at its own absolute path below it. Use it for a test that must not change the real settings.
 
 ## Design notes
 
-- **Staging is the contract, not persistence.** `ApplicationController` only
-  invokes `apply()` / `discard()` on domains whose `isDirty()` is true, so
-  implementations must not rely on side effects that need to run while clean
-  (timestamp stamping, notifications). Every domain must emit `applyResult` /
-  `discardResult` exactly once per batch. The async driver's pending counter
-  parks the chrome's "Saving…" state until it lands or the 60 s timeout fires.
-- **Boundary with phosphor-config and phosphor-shortcuts.** This library
-  defines no configuration store and no shortcut backend. Consumers wire their
-  own `ISettings` against [`phosphor-config`](../phosphor-config/README.md) and
-  pull global shortcuts from [`phosphor-shortcuts`](../phosphor-shortcuts/README.md).
-  It links `phosphor-config` for one thing: `ModuleHost` keeps the `IBackend` of
-  each config file control modules share, which the first module to open the
-  file creates (`ModuleContext::configBackend`).
-- **Headless-friendly C++ core.** The `PhosphorControl` library avoids
-  `Qt6::Quick`, so headless tests can construct `ApplicationController` /
-  `PageController` / `StagingDomain` without a QML engine. The QML module is a
-  separate target. `Qt6::Gui` is another matter: the library links it
-  privately, but `phosphor-config` links it publicly, so it reaches every
-  consumer through that dependency.
-- **Search is layered.** `SearchRanker` is pure and unit-testable on its own
-  (best-tier-per-field scoring, weighted title > keywords > subtitle, edit
-  distance only as a "did you mean" fallback). `SearchController` composes it
-  with the page registry and providers. The app supplies translated strings, and
-  the index stores them verbatim.
-- **STATIC QML module in-tree, SHARED on opt-in.** `org.phosphor.control` builds
-  STATIC for in-tree consumers (linked directly). Out-of-tree
-  `find_package(PhosphorControl)` consumers need the SHARED runtime plugin,
-  gated behind `-DPHOSPHOR_CONTROL_QML_INSTALL=ON` (mirrors phosphor-animation).
+- **Staging is the contract, not persistence.** `ApplicationController` calls `apply()` / `discard()` only on domains
+  whose `isDirty()` is true. Thus an implementation must not rely on side effects that must run while it is clean
+  (time stamps, notifications). Each domain must emit `applyResult` / `discardResult` exactly one time in each batch.
+  The pending counter of the asynchronous driver keeps the "Saving…" state of the chrome until the result comes or
+  the 60 s timeout occurs.
+- **The boundary with phosphor-config and phosphor-shortcuts.** This library defines no configuration store and no
+  shortcut backend. Consumers connect their own `ISettings` to [`phosphor-config`](../phosphor-config/README.md),
+  and get global shortcuts from [`phosphor-shortcuts`](../phosphor-shortcuts/README.md). The library links
+  `phosphor-config` for one purpose: `ModuleHost` keeps the `IBackend` of each config file that control modules
+  share. The first module that opens the file creates it (`ModuleContext::configBackend`).
+- **A C++ core that works headless.** The `PhosphorControl` library does not use `Qt6::Quick`. Thus headless tests
+  can construct `ApplicationController`, `PageController` and `StagingDomain` without a QML engine. The QML module is
+  a separate target. `Qt6::Gui` is different: the library links it privately, but `phosphor-config` links it
+  publicly, so it gets to each consumer through that dependency.
+- **Search has layers.** `SearchRanker` is pure and has its own unit tests. It scores the best tier of each field,
+  with the weights title > keywords > subtitle, and uses edit distance only as a "did you mean" fallback.
+  `SearchController` combines it with the page registry and the providers. The app supplies translated strings, and
+  the index stores them as they are.
+- **STATIC QML module in the tree, SHARED when you ask for it.** `org.phosphor.control` builds STATIC for consumers
+  in the tree, which link it directly. Consumers outside the tree that use `find_package(PhosphorControl)` need the
+  SHARED runtime plugin. Set `-DPHOSPHOR_CONTROL_QML_INSTALL=ON` to build it (the same as phosphor-animation).
 
 ## Dependencies
 
-- `QtCore`, `QtDBus`, `QtQml`, and `QtGui`, which the library links privately
-  and consumers get through `phosphor-config`. The QML module adds `QtQuick`,
-  and its QML imports `QtQuick.Controls`, `QtQuick.Layouts` and KF6 Kirigami
-  (`org.kde.kirigami`) at run time
-- [`phosphor-animation`](../phosphor-animation/README.md) — the QML chrome
-  imports `org.phosphor.animation` for the spring-physics motion profiles
-  (panel fade and slide, accordion expand/collapse, widget fade, hover and
-  tint)
-- [`phosphor-registry`](../phosphor-registry/README.md) — `PluginCatalog`, the
-  plugin loader `ModuleHost` finds and loads control modules through
-- [`phosphor-config`](../phosphor-config/README.md) — `IBackend`, the config
-  backend `ModuleContext::configBackend` hands control modules, one for each file
+| Dependency | Why |
+| --- | --- |
+| `QtCore`, `QtDBus`, `QtQml` | Linked publicly. |
+| `QtGui` | The library links it privately. Consumers get it through `phosphor-config`. |
+| `QtQuick` | The QML module adds it. At run time, the QML imports `QtQuick.Controls`, `QtQuick.Layouts` and KF6 Kirigami (`org.kde.kirigami`). |
+| [`phosphor-animation`](../phosphor-animation/README.md) | The QML chrome imports `org.phosphor.animation` for the spring-physics motion profiles (panel fade and slide, accordion expand and collapse, widget fade, hover and tint). |
+| [`phosphor-registry`](../phosphor-registry/README.md) | `PluginCatalog`, the plugin loader that `ModuleHost` uses to find and load control modules. |
+| [`phosphor-config`](../phosphor-config/README.md) | `IBackend`, the config backend that `ModuleContext::configBackend` gives to control modules, one for each file. |
 
 ## See also
 
-- [`phosphor-config`](../phosphor-config/README.md) — the configuration store an
-  app's `ISettings` implementation is wired against, and the backends control
-  modules share. This library does not duplicate that contract.
-- [`phosphor-shortcuts`](../phosphor-shortcuts/README.md) — global-shortcut
-  backends, kept out of this library on purpose.
+- [`phosphor-config`](../phosphor-config/README.md): the configuration store that the `ISettings` implementation of
+  an app connects to, and the backends that control modules share. This library does not copy that contract.
+- [`phosphor-shortcuts`](../phosphor-shortcuts/README.md): global-shortcut backends, which this library does not
+  hold, by design.

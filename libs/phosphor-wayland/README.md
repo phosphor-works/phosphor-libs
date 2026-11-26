@@ -1,64 +1,53 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-wayland
 
-> Wayland layer-shell integration. The custom QPA plugin that mounts
-> `QWindow`s as `zwlr_layer_shell_v1` surfaces, plus the
-> `LayerSurface` Qt wrapper that exposes anchors, exclusive zone,
-> margins, and keyboard interactivity as `Q_PROPERTY`s.
+phosphor-wayland connects Qt windows to the Wayland layer-shell. It has a custom QPA plugin that shows `QWindow`s
+as `zwlr_layer_shell_v1` surfaces. It also has the `LayerSurface` Qt wrapper, which gives anchors, exclusive zone,
+margins and keyboard interactivity as `Q_PROPERTY`s.
 
 ## Responsibility
 
-Qt's standard QPA plugins (`wayland`, `xcb`) create desktop-level
-windows. Overlays such as zone outlines, snap-assist previews, and shader
-wallpapers need to live on a **layer-shell surface** with per-surface
-anchor, margin, exclusive-zone, and keyboard-interactivity
-configuration that the regular Qt surface API doesn't expose.
+The standard QPA plugins of Qt (`wayland`, `xcb`) make desktop-level windows. Overlays such as zone outlines,
+snap-assist previews and shader wallpapers must be on a **layer-shell surface**. Such a surface needs anchor,
+margin, exclusive-zone and keyboard-interactivity settings for each surface, and the usual Qt surface API does not
+give them.
 
 `phosphor-wayland` is the lowest level of the stack:
 
-- **A custom QPA plugin** (`phosphorwayland`). Loaded by setting
-  `QT_WAYLAND_SHELL_INTEGRATION=phosphorwayland` before
-  `QGuiApplication`. Hosts a `QQuickWindow` on top of a
-  `wlr-layer-shell-v1` surface.
-- **`LayerSurface`** — the Qt wrapper around a layer-shell role.
-  The API is pure Qt, so callers get `QObject` + `Q_PROPERTY`s and never see
-  Wayland types directly. The wrapper communicates with the QPA
-  plugin via a small set of dynamic property keys
-  (`LayerSurfaceProps::*`), so a build that doesn't link this lib
-  can still construct a `QWindow` with the same properties and have
-  the plugin pick them up.
-- **`registerLayerShellPlugin()`** — a header-only helper that sets
-  the QPA env var when a Wayland compositor is actually running.
-  Respects an existing `QT_WAYLAND_SHELL_INTEGRATION` (so debug
-  workflows can override) and falls back to checking
-  `XDG_RUNTIME_DIR/wayland-{0,1}` for compositors like COSMIC that
-  don't set `WAYLAND_DISPLAY`.
+- **A custom QPA plugin** (`phosphorwayland`). To load it, set `QT_WAYLAND_SHELL_INTEGRATION=phosphorwayland`
+  before `QGuiApplication`. It hosts a `QQuickWindow` on a `wlr-layer-shell-v1` surface.
+- **`LayerSurface`**, the Qt wrapper around a layer-shell role. The API is only Qt. Callers get `QObject` and
+  `Q_PROPERTY`s and never see Wayland types. The wrapper talks to the QPA plugin through a small set of dynamic
+  property keys (`LayerSurfaceProps::*`). Thus a build that does not link this library can still construct a
+  `QWindow` with the same properties, and the plugin reads them.
+- **`registerLayerShellPlugin()`**, a header-only helper. It sets the QPA environment variable when a Wayland
+  compositor runs. It keeps an existing `QT_WAYLAND_SHELL_INTEGRATION`, so that a developer can override it for
+  debugging. For compositors such as COSMIC that do not set `WAYLAND_DISPLAY`, it falls back to a check of
+  `XDG_RUNTIME_DIR/wayland-{0,1}`.
 
-[`phosphor-layer`](../phosphor-layer/README.md) sits one level up and
-provides the policy layer (roles, per-screen surface registry,
-topology coordinator). Application code typically uses `phosphor-layer`
-or [`phosphor-surfaces`](../phosphor-surfaces/README.md) and only
-touches this lib through `registerLayerShellPlugin()` at startup.
+[`phosphor-layer`](../phosphor-layer/README.md) is one level higher. It supplies the policy layer (roles, the
+surface registry for each screen, the topology coordinator). Application code usually uses `phosphor-layer` or
+[`phosphor-surfaces`](../phosphor-surfaces/README.md). It touches this library only through
+`registerLayerShellPlugin()` at startup.
 
 ## Key types
 
 | Type | Purpose |
 |------|---------|
-| `PhosphorWayland::LayerSurface`            | `QObject` wrapper around a `zwlr_layer_shell_v1` surface; `Q_PROPERTY` for layer / anchors / exclusive zone / keyboard / scope / screen / margins |
+| `PhosphorWayland::LayerSurface`            | `QObject` wrapper around a `zwlr_layer_shell_v1` surface, with a `Q_PROPERTY` for layer, anchors, exclusive zone, keyboard, scope, screen and margins |
 | `PhosphorWayland::LayerSurface::Layer`     | Background / Bottom / Top / Overlay |
-| `PhosphorWayland::LayerSurface::Anchors`   | `Q_FLAGS` of `AnchorTop / Bottom / Left / Right`; `AnchorAll` constant for full-screen anchors |
+| `PhosphorWayland::LayerSurface::Anchors`   | `Q_FLAGS` of `AnchorTop / Bottom / Left / Right`, and the `AnchorAll` constant for full-screen anchors |
 | `PhosphorWayland::LayerSurface::KeyboardInteractivity` | None / Exclusive / OnDemand |
-| `PhosphorWayland::LayerSurfaceProps`       | Property-key constants used by `LayerSurface` ↔ QPA plugin |
-| `PhosphorWayland::registerLayerShellPlugin`| Header-only env-var setup before `QGuiApplication` |
-| `PhosphorWayland::addCompositorLostCallback` / `removeCompositorLostCallback` | Process-wide subscription to `zwlr_layer_shell_v1` global-removal (one-shot, thread-safe) |
-| `PhosphorWayland::BackgroundEffect`        | Compositor blur behind a region of a window (`ext-background-effect-v1`); `blurSupported` says whether the compositor applies it, and the region is a no-op until it does |
+| `PhosphorWayland::LayerSurfaceProps`       | Property-key constants for `LayerSurface` ↔ QPA plugin |
+| `PhosphorWayland::registerLayerShellPlugin`| Header-only setup of the environment variable before `QGuiApplication` |
+| `PhosphorWayland::addCompositorLostCallback` / `removeCompositorLostCallback` | Process-wide subscription to the global removal of `zwlr_layer_shell_v1` (one-shot, thread-safe) |
+| `PhosphorWayland::BackgroundEffect`        | Compositor blur behind a region of a window (`ext-background-effect-v1`). `blurSupported` says if the compositor applies it. The region has no effect until the compositor applies it |
 
-## Typical use
+## Use
 
-Register the plugin before `QGuiApplication`, then build a layer
-surface in the usual Qt style:
+Register the plugin before `QGuiApplication`. Then build a layer surface in the usual Qt style:
 
 ```cpp
 #include <PhosphorWayland/LayerShellPluginLoader.h>
@@ -86,38 +75,30 @@ int main(int argc, char** argv) {
 
 ## Design notes
 
-- **Pure Qt API surface.** No Wayland types leak through `LayerSurface`.
-  Callers see `QMargins`, `QScreen*`, and Qt enums. The QPA plugin
-  consumes the dynamic properties on the underlying `QWindow` and
-  drives `wl_layer_shell` itself.
-- **Header-only env-var setup.** `registerLayerShellPlugin()` is
-  inline so callers don't link the QPA plugin's library just to set
-  one environment variable. The plugin itself loads through Qt's
-  standard QPA discovery once the env var is set.
-- **Compositor-running detection is conservative.**
-  `WAYLAND_DISPLAY` proves a compositor is up. We don't use
-  `XDG_SESSION_TYPE` because it can be `wayland` in SSH sessions or
-  before the compositor starts. The fallback checks
-  `$XDG_RUNTIME_DIR/wayland-{0,1}` for COSMIC and socket-activation
-  setups that don't set `WAYLAND_DISPLAY`.
-- **Compositor-lost is exposed publicly.** The QPA plugin observes
-  `wl_registry::global_remove` for `zwlr_layer_shell_v1` and forwards
-  the edge through `PhosphorWayland::addCompositorLostCallback`
-  (see `<PhosphorWayland/CompositorLost.h>`). The broadcaster is
-  one-shot per process and tolerates registration before
-  `QGuiApplication`. The default `PhosphorWaylandTransport` in
-  [`phosphor-layer`](../phosphor-layer/README.md) subscribes through
-  this seam, so mid-session compositor crashes fire transport
-  callbacks alongside the existing clean-exit `aboutToQuit` path.
+- **The API is only Qt.** No Wayland types come through `LayerSurface`. Callers see `QMargins`, `QScreen*` and Qt
+  enums. The QPA plugin reads the dynamic properties on the `QWindow` below and drives `wl_layer_shell` itself.
+- **Header-only setup of the environment variable.** `registerLayerShellPlugin()` is inline. Thus callers do not
+  link the library of the QPA plugin only to set one environment variable. When the variable is set, the plugin
+  loads through the standard QPA discovery of Qt.
+- **The check for a running compositor is conservative.** `WAYLAND_DISPLAY` proves that a compositor runs. The
+  library does not use `XDG_SESSION_TYPE`, because it can be `wayland` in SSH sessions or before the compositor
+  starts. The fallback checks `$XDG_RUNTIME_DIR/wayland-{0,1}` for COSMIC and for socket-activation setups that do
+  not set `WAYLAND_DISPLAY`.
+- **Compositor loss is public.** The QPA plugin watches `wl_registry::global_remove` for `zwlr_layer_shell_v1`. It
+  sends the event through `PhosphorWayland::addCompositorLostCallback` (see `<PhosphorWayland/CompositorLost.h>`).
+  The broadcaster fires one time for each process, and it accepts a registration before `QGuiApplication`. The
+  default `PhosphorWaylandTransport` in [`phosphor-layer`](../phosphor-layer/README.md) subscribes through this
+  interface. Thus a compositor crash during a session fires the transport callbacks, in addition to the existing
+  clean-exit `aboutToQuit` path.
 
 ## Dependencies
 
 - `QtCore`, `QtGui`
-- `wayland-client`, `Qt6::WaylandClientPrivate`, and the protocols vendored in
-  `protocols/` (wlr-layer-shell, ext-session-lock, ext-background-effect and the rest)
+- `wayland-client`, `Qt6::WaylandClientPrivate`, and the protocols vendored in `protocols/` (wlr-layer-shell,
+  ext-session-lock, ext-background-effect and the others)
 
 ## See also
 
-- [`phosphor-layer`](../phosphor-layer/README.md) — policy layer (roles, per-screen registry, topology coordinator) on top of `LayerSurface`.
-- [`phosphor-surfaces`](../phosphor-surfaces/README.md) — higher-level surface manager with QML + Vulkan wiring.
-- [`phosphor-shaders`](../phosphor-shaders/README.md) — shader-domain headers (`BaseUniforms`, `IUniformExtension`, `ShaderRegistry`).
+- [`phosphor-layer`](../phosphor-layer/README.md): the policy layer (roles, registry for each screen, topology coordinator) on `LayerSurface`.
+- [`phosphor-surfaces`](../phosphor-surfaces/README.md): a higher-level surface manager with QML and Vulkan wiring.
+- [`phosphor-shaders`](../phosphor-shaders/README.md): shader-domain headers (`BaseUniforms`, `IUniformExtension`, `ShaderRegistry`).

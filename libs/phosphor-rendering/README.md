@@ -1,40 +1,34 @@
-<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team
-     SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Phosphor Works Team -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 # phosphor-rendering
 
-> `ShaderEffect` / `ShaderNodeRhi` / `ShaderCompiler` infrastructure for
-> mounting per-frame shader passes inside a Qt Quick scene graph, plus the
-> zone-aware UBO extension used by the overlay.
+phosphor-rendering runs per-frame shader passes inside a Qt Quick scene graph. It supplies the `ShaderEffect` /
+`ShaderNodeRhi` / `ShaderCompiler` infrastructure, plus the zone-aware UBO extension that the overlay uses.
 
 ## Responsibility
 
-Qt Quick's built-in `ShaderEffect` doesn't support multipass, per-pass render
-targets, custom UBO layouts, or shader-file `#include`. This library
-replaces it with three cooperating pieces:
+The built-in `ShaderEffect` of Qt Quick does not support multipass, render targets for each pass, custom UBO
+layouts or shader-file `#include`. This library replaces it with three parts that work together:
 
-- **`ShaderEffect`** — a `QQuickItem` subclass that owns one render node,
-  exposes shader source and parameters as `Q_PROPERTY`s, and delegates
-  uniform packing to a pluggable `IUniformExtension` (declared in
+- **`ShaderEffect`** is a `QQuickItem` subclass that owns one render node. It exposes the shader source and the
+  parameters as `Q_PROPERTY`s. It gives uniform packing to a pluggable `IUniformExtension` (declared in
   [`phosphor-shaders`](../phosphor-shaders/README.md)).
-- **`ShaderNodeRhi`** — the scene-graph render node. Owns the QRhi
-  pipeline, vertex and index buffers, the uniform buffer object (UBO),
-  texture bindings, and per-pass targets. Supports multipass via
-  ping-pong buffers, input-channel textures (`iChannel0..7`,
-  Shadertoy-style, with `iChannelResolution` declared for the first four),
-  and writeable depth attachments.
-- **`ShaderCompiler`** — a runtime GLSL to SPIR-V compiler using
-  `Qt6::ShaderToolsPrivate`. Feeds into Qt's shader pipeline. Caches
-  compiled modules keyed on source-hash and target-API, so re-entering
-  the editor doesn't recompile unchanged shaders.
+- **`ShaderNodeRhi`** is the scene-graph render node. It owns the QRhi pipeline, the vertex and index buffers, the
+  uniform buffer object (UBO), the texture bindings and the targets of each pass. It supports multipass with
+  ping-pong buffers. It supports input-channel textures (`iChannel0..7`, as in Shadertoy, with
+  `iChannelResolution` declared for the first four) and writeable depth attachments.
+- **`ShaderCompiler`** compiles GLSL to SPIR-V at runtime with `Qt6::ShaderToolsPrivate`. Its output goes into the
+  shader pipeline of Qt. It caches compiled modules by source hash in memory, and in a content-addressed cache on
+  disk. Thus the editor does not compile an unchanged shader again.
 
-A second pair of types specialises the base node for the **zone-overlay**
-case: `ZoneShaderNodeRhi` adds a labels texture binding and zone counts
-in the base UBO, and `ZoneUniformExtension` writes zone rects, fill and
-border colours, per-zone parameters, and the logical-to-device scale for the
-lengths among them (corner radius and border width) into the UBO tail. They are
-optional. Non-zone shader effects use `ShaderEffect` + `ShaderNodeRhi`
-directly.
+A second pair of types specializes the base node for the **zone-overlay** case:
+
+- `ZoneShaderNodeRhi` adds a labels texture binding and the zone counts in the base UBO.
+- `ZoneUniformExtension` writes into the UBO tail the zone rectangles, the fill and border colors, the parameters
+  of each zone, and the logical-to-device scale for the lengths among them (corner radius and border width).
+
+The zone types are optional. Shader effects without zones use `ShaderEffect` + `ShaderNodeRhi` directly.
 
 ## Key types
 
@@ -45,13 +39,12 @@ directly.
 | `PhosphorRendering::ShaderCompiler`       | GLSL to SPIR-V pipeline with on-disk cache |
 | `PhosphorRendering::ZoneShaderNodeRhi`    | Zone-aware subclass: labels texture + zone counts in `BaseUniforms::appField0/1` |
 | `PhosphorRendering::ZoneShaderUniforms`   | The GLSL-matching UBO struct, with `MaxZones` and the offset asserts, in `ZoneShaderCommon.h` |
-| `PhosphorRendering::ZoneUniformExtension` | `IUniformExtension` writing zone rects / colours / params / scale |
+| `PhosphorRendering::ZoneUniformExtension` | `IUniformExtension` writing zone rects / colors / params / scale |
 
-## Typical use
+## Use
 
-This library does not ship a QML module. A consumer registers
-`ShaderEffect` (and any subclass) with `qmlRegisterType()` under its own
-module URI, then instantiates it in QML:
+This library does not ship a QML module. A consumer registers `ShaderEffect` (and any subclass) with
+`qmlRegisterType()` under its own module URI. Then it instantiates the type in QML:
 
 ```cpp
 qmlRegisterType<PhosphorRendering::ShaderEffect>("MyApp.Shaders", 1, 0, "ShaderEffect");
@@ -75,38 +68,34 @@ ShaderEffect {
 }
 ```
 
-A `setUniformExtension()` method (C++ side) attaches an
-`IUniformExtension` such as `ZoneUniformExtension` to feed per-zone data
-into the UBO tail.
+On the C++ side, the `setUniformExtension()` method attaches an `IUniformExtension` such as
+`ZoneUniformExtension`. The extension writes the data of each zone into the UBO tail.
 
 ## Design notes
 
-- **No GPU-texture ownership by the item.** `ShaderNodeRhi` owns every
-  `QRhiTexture` and does all uploads on the render thread, which avoids the
-  GPU-resource-lifetime bugs that plague naive `ShaderEffect`
-  reimplementations. The item does own decoded CPU-side images:
-  `setShaderParams` calls `loadUserTextureFile` synchronously on the CALLING
-  thread and keeps the results, and the wallpaper `QImage` lives on the item
-  behind its own mutex.
-- **Multipass is opt-in.** Single-pass shaders don't pay for the
-  additional framebuffers. Setting `bufferShaderPaths` to a non-empty
-  list enables the multipass path.
-- **No direct GL calls.** Everything goes through QRhi, so the same code
-  runs on OpenGL, Vulkan, and Metal backends. Shaders are authored in
-  Vulkan-flavor GLSL 450.
-- **UBO is `BaseUniforms` + extension.** The base layout from
-  [`phosphor-shaders`](../phosphor-shaders/README.md) is Shadertoy-compatible,
-  and consumers attach an `IUniformExtension` to append application-specific
-  data. Zone rendering uses `ZoneUniformExtension`, and animations use a
-  different one declared in [`phosphor-animation`](../phosphor-animation/README.md).
+- **The item owns no GPU texture.** `ShaderNodeRhi` owns every `QRhiTexture` and does all uploads on the render
+  thread. This prevents the GPU-resource lifetime bugs that are frequent in simple `ShaderEffect`
+  reimplementations. The item does own decoded CPU-side images. `setShaderParams` calls `loadUserTextureFile`
+  synchronously on the CALLING thread and keeps the results. The wallpaper `QImage` is on the item, behind its own
+  mutex.
+- **Multipass is opt-in.** Single-pass shaders do not pay for the additional framebuffers. A non-empty
+  `bufferShaderPaths` list enables the multipass path.
+- **No direct GL calls.** All calls go through QRhi, so the same code runs on the OpenGL, Vulkan and Metal
+  backends. Shaders use Vulkan-flavor GLSL 450.
+- **The UBO is `BaseUniforms` + extension.** The base layout from
+  [`phosphor-shaders`](../phosphor-shaders/README.md) is compatible with Shadertoy. Consumers attach an
+  `IUniformExtension` to append application-specific data. Zone rendering uses `ZoneUniformExtension`. Animations
+  use a different extension, declared in [`phosphor-animation`](../phosphor-animation/README.md).
 
 ## Dependencies
 
 - `QtCore`, `QtGui`, `QtQuick`, `QtSvg`
-- [`phosphor-shaders`](../phosphor-shaders/README.md) — `BaseUniforms`, `IUniformExtension`
+- [`phosphor-shaders`](../phosphor-shaders/README.md): `BaseUniforms`, `IUniformExtension`
 - `Qt6::ShaderToolsPrivate` for runtime compilation
 
 ## See also
 
-- [`phosphor-shaders`](../phosphor-shaders/README.md) — `ShaderRegistry`, parameter metadata, wallpaper provider, include resolver.
-- [`phosphor-animation`](../phosphor-animation/README.md) — animation-shader registry layered on top of this lib's render node.
+- [`phosphor-shaders`](../phosphor-shaders/README.md): `ShaderRegistry`, parameter metadata, wallpaper provider,
+  include resolver.
+- [`phosphor-animation`](../phosphor-animation/README.md): the animation-shader registry on top of the render node
+  of this library.
