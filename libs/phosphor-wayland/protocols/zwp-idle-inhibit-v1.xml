@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="idle_inhibit_unstable_v1">
+
   <copyright>
     Copyright © 2015 Samsung Electronics Co., Ltd
 
@@ -24,7 +25,7 @@
   </copyright>
 
   <interface name="zwp_idle_inhibit_manager_v1" version="1">
-    <description summary="idle inhibitor manager">
+    <description summary="control behavior when display idles">
       This interface permits inhibiting the idle behavior such as screen
       blanking, locking, and screensaving.  The client binds the idle manager
       globally, then creates idle-inhibitor objects for each surface.
@@ -41,36 +42,42 @@
 
     <request name="destroy" type="destructor">
       <description summary="destroy the idle inhibitor object">
-        Destroy the inhibit manager.
+	Destroy the inhibit manager.
       </description>
     </request>
 
     <request name="create_inhibitor">
       <description summary="create a new inhibitor object">
-        Create a new inhibitor object associated with the given surface.
+	Create a new inhibitor object associated with the given surface.
       </description>
       <arg name="id" type="new_id" interface="zwp_idle_inhibitor_v1"/>
-      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="surface" type="object" interface="wl_surface"
+	   summary="the surface that inhibits the idle behavior"/>
     </request>
+
   </interface>
 
   <interface name="zwp_idle_inhibitor_v1" version="1">
     <description summary="context object for inhibiting idle behavior">
       An idle inhibitor prevents the output that the associated surface is
-      visible on from being set to a state where it is not combating the
-      idle behaviour.  Any visible mapped surface that has an active idle
-      inhibitor will prevent idle behaviour for the associated output.
+      visible on from being set to a state where it is not visually usable due
+      to lack of user interaction (e.g. blanked, dimmed, locked, set to power
+      save, etc.)  Any screensaver processes are also blocked from displaying.
+
       If the surface is destroyed, unmapped, becomes occluded, loses
-      visibility, or otherwise becomes not combating the idle behavior,
-      the idle inhibitor will not be honored by the compositor; if the
-      surface subsequently regains visibility the inhibitor takes effect
-      once again.
+      visibility, or otherwise becomes not visually relevant for the user, the
+      idle inhibitor will not be honored by the compositor; if the surface
+      subsequently regains visibility the inhibitor takes effect once again.
+      Likewise, the inhibitor isn't honored if the system was already idled at
+      the time the inhibitor was established, although if the system later
+      de-idles and re-idles the inhibitor will take effect.
     </description>
 
     <request name="destroy" type="destructor">
       <description summary="destroy the idle inhibitor object">
-        Remove the inhibitor effect from the associated wl_surface.
+	Remove the inhibitor effect from the associated wl_surface.
       </description>
     </request>
+
   </interface>
 </protocol>
