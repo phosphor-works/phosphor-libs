@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # The phosphor-libs package: every library, its headers and its CMake package
-# files. `withTests` builds and runs the test suite in the sandbox, which is
-# what the flake's `checks.<system>.tests` does.
+# files, and the program phosphor-mcp-ipc in bin/. `withTests` builds and runs
+# the test suite in the sandbox, which is what the flake's
+# `checks.<system>.tests` does.
 {
   lib,
   stdenv,
@@ -78,7 +79,9 @@ stdenv.mkDerivation {
     qt6.wrapQtAppsHook
   ];
 
-  # Libraries and their QML modules, no applications to wrap.
+  # Libraries and their QML modules. The one program in bin/, phosphor-mcp-ipc,
+  # is a QCoreApplication on a local socket. It needs no Qt plugin, so nothing
+  # is wrapped.
   dontWrapQtApps = true;
 
   buildInputs = [

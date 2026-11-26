@@ -37,3 +37,5 @@ jobs:
         libs=$(find result/lib -maxdepth 1 -name 'libPhosphor*.so*' | wc -l)
         echo "Shared libraries: $libs"
         test "$libs" -gt 0 || { echo "::error::the package installed no libPhosphor*.so"; exit 1; }
+        # The one program in bin/. It runs only when it finds its libraries.
+        result/bin/phosphor-mcp-ipc --version
