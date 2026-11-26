@@ -68,32 +68,128 @@ void finalizeIo(int& fd, QSocketNotifier*& notifier)
 }
 } // namespace
 
+// The device speaks one of two protocols with the same requests and events:
+// ext-data-control-v1, the standard one, and wlr-data-control-unstable-v1, the
+// older one that upstream deprecates in favor of it. The device logic is written
+// once, on untyped proxies, and calls the requests through a DataControlOps
+// table that Private::Protocol<P> fills for each protocol.
+struct DataControlOps
+{
+    const char* name;
+    // The bound manager, or nullptr when the compositor does not advertise it.
+    struct wl_proxy* (*manager)(LayerShellIntegration* integration);
+    // Each of these that makes an object also attaches its listener with data.
+    struct wl_proxy* (*getDevice)(struct wl_proxy* manager, struct wl_seat* seat, void* data);
+    void (*setSelection)(struct wl_proxy* device, struct wl_proxy* source);
+    void (*destroyDevice)(struct wl_proxy* device);
+    void (*listenOffer)(struct wl_proxy* offer, void* data);
+    void (*receive)(struct wl_proxy* offer, const char* mimeType, int32_t fd);
+    void (*destroyOffer)(struct wl_proxy* offer);
+    struct wl_proxy* (*createSource)(struct wl_proxy* manager, void* data);
+    void (*offerMime)(struct wl_proxy* source, const char* mimeType);
+    void (*destroySource)(struct wl_proxy* source);
+};
+
+// The C types and functions of one protocol, named from its prefix, and the
+// LayerShellIntegration accessor of its manager.
+#define PHOSPHOR_DATA_CONTROL_TRAITS(Name, prefix, accessor)                                                           \
+    struct Name                                                                                                        \
+    {                                                                                                                  \
+        using Manager = struct prefix##_manager_v1;                                                                    \
+        using Device = struct prefix##_device_v1;                                                                      \
+        using Offer = struct prefix##_offer_v1;                                                                        \
+        using Source = struct prefix##_source_v1;                                                                      \
+        using DeviceListener = struct prefix##_device_v1_listener;                                                     \
+        using OfferListener = struct prefix##_offer_v1_listener;                                                       \
+        using SourceListener = struct prefix##_source_v1_listener;                                                     \
+        static Manager* manager(LayerShellIntegration* integration)                                                    \
+        {                                                                                                              \
+            return integration->accessor();                                                                            \
+        }                                                                                                              \
+        static Device* getDevice(Manager* m, struct wl_seat* seat)                                                     \
+        {                                                                                                              \
+            return prefix##_manager_v1_get_data_device(m, seat);                                                       \
+        }                                                                                                              \
+        static Source* createSource(Manager* m)                                                                        \
+        {                                                                                                              \
+            return prefix##_manager_v1_create_data_source(m);                                                          \
+        }                                                                                                              \
+        static void addListener(Device* d, const DeviceListener* l, void* data)                                        \
+        {                                                                                                              \
+            prefix##_device_v1_add_listener(d, l, data);                                                               \
+        }                                                                                                              \
+        static void addListener(Offer* o, const OfferListener* l, void* data)                                          \
+        {                                                                                                              \
+            prefix##_offer_v1_add_listener(o, l, data);                                                                \
+        }                                                                                                              \
+        static void addListener(Source* s, const SourceListener* l, void* data)                                        \
+        {                                                                                                              \
+            prefix##_source_v1_add_listener(s, l, data);                                                               \
+        }                                                                                                              \
+        static void setSelection(Device* d, Source* s)                                                                 \
+        {                                                                                                              \
+            prefix##_device_v1_set_selection(d, s);                                                                    \
+        }                                                                                                              \
+        static void receive(Offer* o, const char* mimeType, int32_t fd)                                                \
+        {                                                                                                              \
+            prefix##_offer_v1_receive(o, mimeType, fd);                                                                \
+        }                                                                                                              \
+        static void offerMime(Source* s, const char* mimeType)                                                         \
+        {                                                                                                              \
+            prefix##_source_v1_offer(s, mimeType);                                                                     \
+        }                                                                                                              \
+        static void destroy(Device* d)                                                                                 \
+        {                                                                                                              \
+            prefix##_device_v1_destroy(d);                                                                             \
+        }                                                                                                              \
+        static void destroy(Offer* o)                                                                                  \
+        {                                                                                                              \
+            prefix##_offer_v1_destroy(o);                                                                              \
+        }                                                                                                              \
+        static void destroy(Source* s)                                                                                 \
+        {                                                                                                              \
+            prefix##_source_v1_destroy(s);                                                                             \
+        }                                                                                                              \
+    };
+
+PHOSPHOR_DATA_CONTROL_TRAITS(ExtDataControl, ext_data_control, extDataControlManager)
+PHOSPHOR_DATA_CONTROL_TRAITS(WlrDataControl, zwlr_data_control, wlrDataControlManager)
+#undef PHOSPHOR_DATA_CONTROL_TRAITS
+
 class ClipboardDevice::Private
 {
 public:
     ClipboardDevice* owner = nullptr;
 
-    struct zwlr_data_control_device_v1* device = nullptr;
+    // The requests of the protocol the device was made with, chosen once in
+    // ensureDevice(): ext-data-control when the compositor has it, else wlr.
+    const DataControlOps* ops = nullptr;
+
+    struct wl_proxy* device = nullptr;
 
     // The offer that is the current clipboard selection, plus its MIME types.
-    struct zwlr_data_control_offer_v1* currentOffer = nullptr;
+    struct wl_proxy* currentOffer = nullptr;
     QStringList currentMimes;
 
     // Offers introduced by `data_offer` but not yet promoted by `selection`;
     // their `offer` events accumulate the MIME types here.
-    QHash<struct zwlr_data_control_offer_v1*, QStringList> pendingOffers;
+    QHash<struct wl_proxy*, QStringList> pendingOffers;
 
     // Selection we own (set via setSelection), and the bytes we serve per type.
-    struct zwlr_data_control_source_v1* source = nullptr;
+    struct wl_proxy* source = nullptr;
     QMap<QString, QByteArray> sourceData;
 
     std::vector<std::unique_ptr<ReadContext>> reads;
     std::vector<std::unique_ptr<WriteContext>> writes;
 
+    // The protocol whose manager the compositor advertises, ext first, or
+    // nullptr when it advertises neither.
+    static const DataControlOps* availableOps();
+
     void ensureDevice();
     void teardownDevice();
-    void destroyOffer(struct zwlr_data_control_offer_v1* offer);
-    void clearPendingOffers(struct zwlr_data_control_offer_v1* except);
+    void destroyOffer(struct wl_proxy* offer);
+    void clearPendingOffers(struct wl_proxy* except);
     void destroySource();
     void flush();
 
@@ -102,22 +198,139 @@ public:
     void startWrite(const QByteArray& data, int writeFd);
     void finishWrite(WriteContext* ctx);
 
-    // ─── device listener ───────────────────────────────────────────────
-    static void handleDataOffer(void* data, struct zwlr_data_control_device_v1*,
-                                struct zwlr_data_control_offer_v1* offer);
-    static void handleSelection(void* data, struct zwlr_data_control_device_v1*,
-                                struct zwlr_data_control_offer_v1* offer);
-    static void handleFinished(void* data, struct zwlr_data_control_device_v1*);
-    static void handlePrimarySelection(void* data, struct zwlr_data_control_device_v1*,
-                                       struct zwlr_data_control_offer_v1* offer);
+    // ─── events, the same for both protocols ───────────────────────────
+    static void handleDataOffer(void* data, struct wl_proxy* offer);
+    static void handleSelection(void* data, struct wl_proxy* offer);
+    static void handleFinished(void* data);
+    static void handleOfferMime(void* data, struct wl_proxy* offer, const char* mimeType);
+    static void handleSend(void* data, const char* mimeType, int32_t fd);
+    static void handleCancelled(void* data);
 
-    // ─── offer listener ────────────────────────────────────────────────
-    static void handleOfferMime(void* data, struct zwlr_data_control_offer_v1* offer, const char* mimeType);
-
-    // ─── source listener ───────────────────────────────────────────────
-    static void handleSend(void* data, struct zwlr_data_control_source_v1*, const char* mimeType, int32_t fd);
-    static void handleCancelled(void* data, struct zwlr_data_control_source_v1*);
+    // The listeners and the DataControlOps of one protocol (ExtDataControl or
+    // WlrDataControl). Nested, so that it can reach the handlers above.
+    template<typename P>
+    struct Protocol;
 };
+
+template<typename P>
+struct ClipboardDevice::Private::Protocol
+{
+    static struct wl_proxy* proxy(void* object)
+    {
+        return static_cast<struct wl_proxy*>(object);
+    }
+
+    // The listeners, which turn each typed event into the shared handler.
+    static void dataOffer(void* data, typename P::Device*, typename P::Offer* offer)
+    {
+        handleDataOffer(data, proxy(offer));
+    }
+    static void selection(void* data, typename P::Device*, typename P::Offer* offer)
+    {
+        handleSelection(data, proxy(offer));
+    }
+    static void finished(void* data, typename P::Device*)
+    {
+        handleFinished(data);
+    }
+    static void primarySelection(void*, typename P::Device*, typename P::Offer*)
+    {
+        // Only the clipboard selection is consumed. The primary selection is
+        // ignored, and its offer stays with the compositor.
+    }
+    static void offerMime(void* data, typename P::Offer* offer, const char* mimeType)
+    {
+        handleOfferMime(data, proxy(offer), mimeType);
+    }
+    static void send(void* data, typename P::Source*, const char* mimeType, int32_t fd)
+    {
+        handleSend(data, mimeType, fd);
+    }
+    static void cancelled(void* data, typename P::Source*)
+    {
+        handleCancelled(data);
+    }
+
+    static constexpr typename P::DeviceListener deviceListener = {
+        .data_offer = dataOffer,
+        .selection = selection,
+        .finished = finished,
+        .primary_selection = primarySelection,
+    };
+    static constexpr typename P::OfferListener offerListener = {
+        .offer = offerMime,
+    };
+    static constexpr typename P::SourceListener sourceListener = {
+        .send = send,
+        .cancelled = cancelled,
+    };
+
+    static const DataControlOps& ops(const char* name)
+    {
+        static const DataControlOps table = {
+            .name = name,
+            .manager =
+                [](LayerShellIntegration* integration) {
+                    return proxy(P::manager(integration));
+                },
+            .getDevice =
+                [](struct wl_proxy* m, struct wl_seat* seat, void* data) {
+                    auto* d = P::getDevice(reinterpret_cast<typename P::Manager*>(m), seat);
+                    if (d)
+                        P::addListener(d, &deviceListener, data);
+                    return proxy(d);
+                },
+            .setSelection =
+                [](struct wl_proxy* d, struct wl_proxy* s) {
+                    P::setSelection(reinterpret_cast<typename P::Device*>(d), reinterpret_cast<typename P::Source*>(s));
+                },
+            .destroyDevice =
+                [](struct wl_proxy* d) {
+                    P::destroy(reinterpret_cast<typename P::Device*>(d));
+                },
+            .listenOffer =
+                [](struct wl_proxy* o, void* data) {
+                    P::addListener(reinterpret_cast<typename P::Offer*>(o), &offerListener, data);
+                },
+            .receive =
+                [](struct wl_proxy* o, const char* mimeType, int32_t fd) {
+                    P::receive(reinterpret_cast<typename P::Offer*>(o), mimeType, fd);
+                },
+            .destroyOffer =
+                [](struct wl_proxy* o) {
+                    P::destroy(reinterpret_cast<typename P::Offer*>(o));
+                },
+            .createSource =
+                [](struct wl_proxy* m, void* data) {
+                    auto* s = P::createSource(reinterpret_cast<typename P::Manager*>(m));
+                    if (s)
+                        P::addListener(s, &sourceListener, data);
+                    return proxy(s);
+                },
+            .offerMime =
+                [](struct wl_proxy* s, const char* mimeType) {
+                    P::offerMime(reinterpret_cast<typename P::Source*>(s), mimeType);
+                },
+            .destroySource =
+                [](struct wl_proxy* s) {
+                    P::destroy(reinterpret_cast<typename P::Source*>(s));
+                },
+        };
+        return table;
+    }
+};
+
+const DataControlOps* ClipboardDevice::Private::availableOps()
+{
+    auto* integration = LayerShellIntegration::instance();
+    if (!integration)
+        return nullptr;
+    if (integration->extDataControlManager())
+        return &Protocol<ExtDataControl>::ops("ext-data-control-v1");
+    if (integration->wlrDataControlManager())
+        return &Protocol<WlrDataControl>::ops("wlr-data-control-unstable-v1");
+    return nullptr;
+}
 
 void ClipboardDevice::Private::flush()
 {
@@ -133,9 +346,10 @@ void ClipboardDevice::Private::ensureDevice()
     auto* integration = LayerShellIntegration::instance();
     if (!integration)
         return;
-    auto* manager = integration->dataControlManager();
-    if (!manager)
+    const DataControlOps* chosen = availableOps();
+    if (!chosen)
         return;
+    struct wl_proxy* manager = chosen->manager(integration);
     auto* display = integration->display();
     if (!display)
         return;
@@ -147,32 +361,27 @@ void ClipboardDevice::Private::ensureDevice()
     struct wl_seat* seat = seats.first()->wl_seat();
     if (!seat)
         return;
-    device = zwlr_data_control_manager_v1_get_data_device(manager, seat);
+    device = chosen->getDevice(manager, seat, this);
     if (device) {
-        static const struct zwlr_data_control_device_v1_listener listener = {
-            .data_offer = handleDataOffer,
-            .selection = handleSelection,
-            .finished = handleFinished,
-            .primary_selection = handlePrimarySelection,
-        };
-        zwlr_data_control_device_v1_add_listener(device, &listener, this);
+        ops = chosen;
+        qCDebug(lcClipboardDevice) << "clipboard device on" << ops->name;
     }
 }
 
-void ClipboardDevice::Private::destroyOffer(struct zwlr_data_control_offer_v1* offer)
+void ClipboardDevice::Private::destroyOffer(struct wl_proxy* offer)
 {
     if (offer) {
         // Sever the listener's back-pointer before destroying, so any event still
         // queued for this offer dispatches with data == nullptr and is dropped.
-        wl_proxy_set_user_data(reinterpret_cast<struct wl_proxy*>(offer), nullptr);
-        zwlr_data_control_offer_v1_destroy(offer);
+        wl_proxy_set_user_data(offer, nullptr);
+        ops->destroyOffer(offer);
     }
 }
 
-void ClipboardDevice::Private::clearPendingOffers(struct zwlr_data_control_offer_v1* except)
+void ClipboardDevice::Private::clearPendingOffers(struct wl_proxy* except)
 {
     for (auto it = pendingOffers.begin(); it != pendingOffers.end();) {
-        struct zwlr_data_control_offer_v1* offer = it.key();
+        struct wl_proxy* offer = it.key();
         if (offer == except) {
             ++it;
             continue;
@@ -185,8 +394,8 @@ void ClipboardDevice::Private::clearPendingOffers(struct zwlr_data_control_offer
 void ClipboardDevice::Private::destroySource()
 {
     if (source) {
-        wl_proxy_set_user_data(reinterpret_cast<struct wl_proxy*>(source), nullptr);
-        zwlr_data_control_source_v1_destroy(source);
+        wl_proxy_set_user_data(source, nullptr);
+        ops->destroySource(source);
         source = nullptr;
     }
     sourceData.clear();
@@ -211,10 +420,11 @@ void ClipboardDevice::Private::teardownDevice()
     currentMimes.clear();
 
     if (device) {
-        wl_proxy_set_user_data(reinterpret_cast<struct wl_proxy*>(device), nullptr);
-        zwlr_data_control_device_v1_destroy(device);
+        wl_proxy_set_user_data(device, nullptr);
+        ops->destroyDevice(device);
         device = nullptr;
     }
+    ops = nullptr;
 }
 
 // ─── reads ──────────────────────────────────────────────────────────────
@@ -316,22 +526,17 @@ void ClipboardDevice::Private::finishWrite(WriteContext* ctx)
 
 // ─── device events ────────────────────────────────────────────────────────
 
-void ClipboardDevice::Private::handleDataOffer(void* data, struct zwlr_data_control_device_v1*,
-                                               struct zwlr_data_control_offer_v1* offer)
+void ClipboardDevice::Private::handleDataOffer(void* data, struct wl_proxy* offer)
 {
     auto* self = static_cast<Private*>(data);
     if (!self || !offer)
         return;
     // The offer's MIME types arrive next, as `offer` events, before `selection`.
     self->pendingOffers.insert(offer, QStringList());
-    static const struct zwlr_data_control_offer_v1_listener listener = {
-        .offer = handleOfferMime,
-    };
-    zwlr_data_control_offer_v1_add_listener(offer, &listener, self);
+    self->ops->listenOffer(offer, self);
 }
 
-void ClipboardDevice::Private::handleSelection(void* data, struct zwlr_data_control_device_v1*,
-                                               struct zwlr_data_control_offer_v1* offer)
+void ClipboardDevice::Private::handleSelection(void* data, struct wl_proxy* offer)
 {
     auto* self = static_cast<Private*>(data);
     if (!self)
@@ -365,7 +570,7 @@ void ClipboardDevice::Private::handleSelection(void* data, struct zwlr_data_cont
     Q_EMIT self->owner->selectionChanged(self->currentMimes);
 }
 
-void ClipboardDevice::Private::handleFinished(void* data, struct zwlr_data_control_device_v1*)
+void ClipboardDevice::Private::handleFinished(void* data)
 {
     // The compositor invalidated this device (e.g. the seat went away). Tear it
     // down; a fresh selection event stream would require a new device.
@@ -392,14 +597,7 @@ void ClipboardDevice::Private::handleFinished(void* data, struct zwlr_data_contr
         Q_EMIT self->owner->dataReceived(mimeType, QByteArray());
 }
 
-void ClipboardDevice::Private::handlePrimarySelection(void*, struct zwlr_data_control_device_v1*,
-                                                      struct zwlr_data_control_offer_v1*)
-{
-    // Bound at v1: primary-selection is never delivered. No-op for completeness.
-}
-
-void ClipboardDevice::Private::handleOfferMime(void* data, struct zwlr_data_control_offer_v1* offer,
-                                               const char* mimeType)
+void ClipboardDevice::Private::handleOfferMime(void* data, struct wl_proxy* offer, const char* mimeType)
 {
     auto* self = static_cast<Private*>(data);
     if (!self || !mimeType)
@@ -411,8 +609,7 @@ void ClipboardDevice::Private::handleOfferMime(void* data, struct zwlr_data_cont
 
 // ─── source events (we own the selection) ─────────────────────────────────
 
-void ClipboardDevice::Private::handleSend(void* data, struct zwlr_data_control_source_v1*, const char* mimeType,
-                                          int32_t fd)
+void ClipboardDevice::Private::handleSend(void* data, const char* mimeType, int32_t fd)
 {
     auto* self = static_cast<Private*>(data);
     if (!self) {
@@ -433,7 +630,7 @@ void ClipboardDevice::Private::handleSend(void* data, struct zwlr_data_control_s
     self->startWrite(bytes, fd);
 }
 
-void ClipboardDevice::Private::handleCancelled(void* data, struct zwlr_data_control_source_v1*)
+void ClipboardDevice::Private::handleCancelled(void* data)
 {
     // Another client took the selection; our source is dead.
     auto* self = static_cast<Private*>(data);
@@ -459,8 +656,7 @@ ClipboardDevice::~ClipboardDevice()
 
 bool ClipboardDevice::isSupported()
 {
-    auto* integration = LayerShellIntegration::instance();
-    return integration && integration->dataControlManager();
+    return Private::availableOps() != nullptr;
 }
 
 QStringList ClipboardDevice::mimeTypes() const
@@ -480,7 +676,7 @@ void ClipboardDevice::receive(const QString& mimeType)
         Q_EMIT dataReceived(mimeType, QByteArray());
         return;
     }
-    zwlr_data_control_offer_v1_receive(d->currentOffer, mimeType.toUtf8().constData(), fds[1]);
+    d->ops->receive(d->currentOffer, mimeType.toUtf8().constData(), fds[1]);
     ::close(fds[1]); // the compositor keeps its dup of the write end
     d->flush();
     d->startRead(mimeType, fds[0]);
@@ -491,24 +687,20 @@ void ClipboardDevice::setSelection(const QMap<QString, QByteArray>& data)
     d->ensureDevice();
     if (!d->device)
         return;
+    // The source must come from the manager of the device's own protocol.
     auto* integration = LayerShellIntegration::instance();
-    auto* manager = integration ? integration->dataControlManager() : nullptr;
+    struct wl_proxy* manager = integration ? d->ops->manager(integration) : nullptr;
     if (!manager || data.isEmpty())
         return;
 
     d->destroySource();
-    d->source = zwlr_data_control_manager_v1_create_data_source(manager);
+    d->source = d->ops->createSource(manager, d.get());
     if (!d->source)
         return;
     d->sourceData = data;
-    static const struct zwlr_data_control_source_v1_listener listener = {
-        .send = Private::handleSend,
-        .cancelled = Private::handleCancelled,
-    };
-    zwlr_data_control_source_v1_add_listener(d->source, &listener, d.get());
     for (auto it = data.constBegin(); it != data.constEnd(); ++it)
-        zwlr_data_control_source_v1_offer(d->source, it.key().toUtf8().constData());
-    zwlr_data_control_device_v1_set_selection(d->device, d->source);
+        d->ops->offerMime(d->source, it.key().toUtf8().constData());
+    d->ops->setSelection(d->device, d->source);
     d->flush();
 }
 

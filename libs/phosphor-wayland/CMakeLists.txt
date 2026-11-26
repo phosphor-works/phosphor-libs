@@ -144,6 +144,19 @@ add_custom_command(
 )
 
 add_custom_command(
+    OUTPUT ${_ps_gen_dir}/ext-data-control-v1-client-protocol.h
+           ${_ps_gen_dir}/ext-data-control-v1-protocol.c
+    COMMAND ${WAYLAND_SCANNER} client-header
+            ${_ps_proto_dir}/ext-data-control-v1.xml
+            ${_ps_gen_dir}/ext-data-control-v1-client-protocol.h
+    COMMAND ${WAYLAND_SCANNER} private-code
+            ${_ps_proto_dir}/ext-data-control-v1.xml
+            ${_ps_gen_dir}/ext-data-control-v1-protocol.c
+    DEPENDS ${_ps_proto_dir}/ext-data-control-v1.xml
+    COMMENT "PhosphorWayland: generating ext-data-control protocol code"
+)
+
+add_custom_command(
     OUTPUT ${_ps_gen_dir}/wlr-data-control-unstable-v1-client-protocol.h
            ${_ps_gen_dir}/wlr-data-control-unstable-v1-protocol.c
     COMMAND ${WAYLAND_SCANNER} client-header
@@ -191,6 +204,7 @@ set_source_files_properties(
     ${_ps_gen_dir}/wlr-foreign-toplevel-management-unstable-v1-protocol.c
     ${_ps_gen_dir}/zwp-idle-inhibit-v1-protocol.c
     ${_ps_gen_dir}/wlr-data-control-unstable-v1-protocol.c
+    ${_ps_gen_dir}/ext-data-control-v1-protocol.c
     ${_ps_gen_dir}/ext-session-lock-v1-protocol.c
     ${_ps_gen_dir}/ext-background-effect-v1-protocol.c
     src/qpa/xdg_popup_stub.c
@@ -250,6 +264,7 @@ set(phosphorwayland_layershell_SRCS
     ${_ps_gen_dir}/wlr-foreign-toplevel-management-unstable-v1-protocol.c
     ${_ps_gen_dir}/zwp-idle-inhibit-v1-protocol.c
     ${_ps_gen_dir}/wlr-data-control-unstable-v1-protocol.c
+    ${_ps_gen_dir}/ext-data-control-v1-protocol.c
     ${_ps_gen_dir}/ext-session-lock-v1-protocol.c
     ${_ps_gen_dir}/ext-background-effect-v1-protocol.c
 )
