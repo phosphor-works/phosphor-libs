@@ -315,14 +315,12 @@ _phosphorscreens_target_defaults(PhosphorScreens)
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorScreensCore PhosphorScreensRuntime PhosphorScreens
-    EXPORT PhosphorScreensTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorScreensCore PhosphorScreensRuntime PhosphorScreens EXPORT PhosphorScreensTargets)
 
-install(EXPORT PhosphorScreensTargets
+phosphor_install_devel(EXPORT PhosphorScreensTargets
     FILE PhosphorScreensTargets.cmake
     NAMESPACE PhosphorScreens::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScreens
@@ -339,18 +337,18 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSCREENS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScreensConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScreensConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScreens
 )
 
-install(DIRECTORY include/PhosphorScreens/
+phosphor_install_devel(DIRECTORY include/PhosphorScreens/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorScreens
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES
+phosphor_install_devel(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreenscore_export.h
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreensruntime_export.h
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreens_export.h

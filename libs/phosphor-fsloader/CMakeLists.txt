@@ -207,6 +207,9 @@ set(phosphorfsloader_public_HDRS
     include/PhosphorFsLoader/WatchedFileSet.h
 )
 
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
 add_library(PhosphorFsLoader SHARED
     ${phosphorfsloader_public_HDRS}
     ${phosphorfsloader_SRCS}
@@ -341,26 +344,20 @@ if(NOT PHOSPHORFSLOADER_USE_SYSTEM_JSONCONS)
         string(REPLACE "${jsoncons_SOURCE_DIR}/include/" "" _phosphorfsloader_jsoncons_text
             "${_phosphorfsloader_jsoncons_text}")
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.jsoncons" "${_phosphorfsloader_jsoncons_text}")
-        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.jsoncons"
-            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs)
+        phosphor_install_notice("${CMAKE_CURRENT_BINARY_DIR}/LICENSE.jsoncons")
     endif()
 endif()
 
-install(TARGETS PhosphorFsLoader
-    EXPORT PhosphorFsLoaderTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+phosphor_install_targets(TARGETS PhosphorFsLoader EXPORT PhosphorFsLoaderTargets)
 
-install(FILES ${phosphorfsloader_public_HDRS}
+phosphor_install_devel(FILES ${phosphorfsloader_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorFsLoader
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorFsLoader/phosphorfsloader_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorFsLoader/phosphorfsloader_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorFsLoader
 )
 
-install(EXPORT PhosphorFsLoaderTargets
+phosphor_install_devel(EXPORT PhosphorFsLoaderTargets
     FILE PhosphorFsLoaderTargets.cmake
     NAMESPACE PhosphorFsLoader::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorFsLoader
@@ -377,7 +374,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORFSLOADER_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorFsLoaderConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorFsLoaderConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorFsLoader

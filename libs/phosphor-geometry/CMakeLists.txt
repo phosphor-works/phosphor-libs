@@ -91,22 +91,20 @@ set_target_properties(PhosphorGeometry PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
-install(TARGETS PhosphorGeometry
-    EXPORT PhosphorGeometryTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorGeometry EXPORT PhosphorGeometryTargets)
 
-install(DIRECTORY include/PhosphorGeometry
+phosphor_install_devel(DIRECTORY include/PhosphorGeometry
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorgeometry_export.h"
+phosphor_install_devel(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorgeometry_export.h"
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorGeometry
 )
 
-install(EXPORT PhosphorGeometryTargets
+phosphor_install_devel(EXPORT PhosphorGeometryTargets
     FILE PhosphorGeometryTargets.cmake
     NAMESPACE PhosphorGeometry::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorGeometry
@@ -123,7 +121,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORGEOMETRY_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorGeometryConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorGeometryConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorGeometry

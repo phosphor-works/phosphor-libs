@@ -129,22 +129,19 @@ set_target_properties(PhosphorServiceIdle PROPERTIES
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorServiceIdle
-    EXPORT PhosphorServiceIdleTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    INCLUDES DESTINATION ${KDE_INSTALL_INCLUDEDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorServiceIdle EXPORT PhosphorServiceIdleTargets)
 
-install(FILES ${phosphorserviceidle_public_HDRS}
+phosphor_install_devel(FILES ${phosphorserviceidle_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorServiceIdle
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorServiceIdle/phosphorserviceidle_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorServiceIdle/phosphorserviceidle_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorServiceIdle
 )
 
-install(EXPORT PhosphorServiceIdleTargets
+phosphor_install_devel(EXPORT PhosphorServiceIdleTargets
     FILE PhosphorServiceIdleTargets.cmake
     NAMESPACE PhosphorServiceIdle::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorServiceIdle
@@ -161,7 +158,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSERVICEIDLE_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorServiceIdleConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorServiceIdleConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorServiceIdle

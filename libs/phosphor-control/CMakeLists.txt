@@ -569,12 +569,15 @@ target_link_libraries(phosphor-control-metadata PRIVATE Qt6::Core)
 # Like the library, whose sources it shares: each file keeps its own
 # anonymous namespace.
 set_target_properties(phosphor-control-metadata PROPERTIES UNITY_BUILD OFF)
-install(TARGETS phosphor-control-metadata
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_devel(TARGETS phosphor-control-metadata
     EXPORT PhosphorControlTargets
     RUNTIME DESTINATION ${KDE_INSTALL_LIBEXECDIR}/phosphor
 )
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PhosphorControlModule.cmake)
-install(FILES cmake/PhosphorControlModule.cmake DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorControl)
+phosphor_install_devel(FILES cmake/PhosphorControlModule.cmake DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorControl)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Install
@@ -584,14 +587,14 @@ install(FILES cmake/PhosphorControlModule.cmake DESTINATION ${KDE_INSTALL_LIBDIR
 # hoisted include(GNUInstallDirs) block — no per-section fallback
 # include needed here.
 
-install(TARGETS PhosphorControl PhosphorControlTest
-    EXPORT PhosphorControlTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
+phosphor_install_targets(TARGETS PhosphorControl EXPORT PhosphorControlTargets)
+# ModuleTestHost serves a control module's own tests, never an app at run time.
+phosphor_install_devel(TARGETS PhosphorControlTest EXPORT PhosphorControlTargets
     RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR})
 
-install(EXPORT PhosphorControlTargets
+phosphor_install_devel(EXPORT PhosphorControlTargets
     FILE PhosphorControlTargets.cmake
     NAMESPACE PhosphorControl::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorControl
@@ -614,18 +617,18 @@ write_basic_package_version_file(
     # stabilised and we promise within-major back-compat).
     COMPATIBILITY SameMinorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorControlConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorControlConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorControl
 )
 
-install(DIRECTORY include/PhosphorControl/
+phosphor_install_devel(DIRECTORY include/PhosphorControl/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorControl
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES
+phosphor_install_devel(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/phosphorcontrol_export.h
         ${CMAKE_CURRENT_BINARY_DIR}/phosphorcontroltest_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorControl
@@ -647,18 +650,18 @@ if(PHOSPHOR_CONTROL_QML_INSTALL)
     # an export set that was never installed via `install(EXPORT ...)`,
     # which left a dangling reference for any consumer that tried to
     # use the QML targets through CMake.
-    install(TARGETS PhosphorControlQmlShared
+    phosphor_install_devel(TARGETS PhosphorControlQmlShared
         RUNTIME DESTINATION ${_phosphor_control_qml_install_dir}
         LIBRARY DESTINATION ${_phosphor_control_qml_install_dir}
         ARCHIVE DESTINATION ${_phosphor_control_qml_install_dir}
     )
-    install(TARGETS ${_phosphor_control_qml_shared_plugin_target}
+    phosphor_install_devel(TARGETS ${_phosphor_control_qml_shared_plugin_target}
         RUNTIME DESTINATION ${_phosphor_control_qml_install_dir}
         LIBRARY DESTINATION ${_phosphor_control_qml_install_dir}
         ARCHIVE DESTINATION ${_phosphor_control_qml_install_dir}
     )
 
-    install(FILES
+    phosphor_install_devel(FILES
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/control/qmldir
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/control/PhosphorControlQmlShared.qmltypes
         DESTINATION ${_phosphor_control_qml_install_dir}

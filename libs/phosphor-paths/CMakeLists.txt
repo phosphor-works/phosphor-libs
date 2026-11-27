@@ -112,21 +112,16 @@ if(CMAKE_PROJECT_NAME STREQUAL "PhosphorPaths" OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-install(TARGETS PhosphorPaths
-    EXPORT PhosphorPathsTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+phosphor_install_targets(TARGETS PhosphorPaths EXPORT PhosphorPathsTargets)
 
-install(FILES ${phosphorpaths_public_HDRS}
+phosphor_install_devel(FILES ${phosphorpaths_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorPaths
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorPaths/phosphorpaths_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorPaths/phosphorpaths_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorPaths
 )
 
-install(EXPORT PhosphorPathsTargets
+phosphor_install_devel(EXPORT PhosphorPathsTargets
     FILE PhosphorPathsTargets.cmake
     NAMESPACE PhosphorPaths::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorPaths
@@ -143,8 +138,9 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORPATHS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorPathsConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorPathsConfigVersion.cmake"
+    "${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorPaths
 )

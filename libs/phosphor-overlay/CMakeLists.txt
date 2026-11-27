@@ -149,22 +149,20 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorOverlay
-    EXPORT PhosphorOverlayTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorOverlay EXPORT PhosphorOverlayTargets)
 
-install(DIRECTORY include/PhosphorOverlay/
+phosphor_install_devel(DIRECTORY include/PhosphorOverlay/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorOverlay
     FILES_MATCHING PATTERN "*.h"
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorOverlay/phosphoroverlay_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorOverlay/phosphoroverlay_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorOverlay
 )
 
-install(EXPORT PhosphorOverlayTargets
+phosphor_install_devel(EXPORT PhosphorOverlayTargets
     FILE PhosphorOverlayTargets.cmake
     NAMESPACE PhosphorOverlay::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorOverlay
@@ -181,7 +179,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHOROVERLAY_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorOverlayConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorOverlayConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorOverlay

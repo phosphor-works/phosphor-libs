@@ -128,21 +128,19 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorShellPatterns
-    EXPORT PhosphorShellPatternsTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorShellPatterns EXPORT PhosphorShellPatternsTargets)
 
-install(FILES ${phosphorshellpatterns_public_HDRS}
+phosphor_install_devel(FILES ${phosphorshellpatterns_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShellPatterns
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorShellPatterns/phosphorshellpatterns_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorShellPatterns/phosphorshellpatterns_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShellPatterns
 )
 
-install(EXPORT PhosphorShellPatternsTargets
+phosphor_install_devel(EXPORT PhosphorShellPatternsTargets
     FILE PhosphorShellPatternsTargets.cmake
     NAMESPACE PhosphorShellPatterns::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShellPatterns
@@ -159,7 +157,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSHELLPATTERNS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShellPatternsConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShellPatternsConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShellPatterns

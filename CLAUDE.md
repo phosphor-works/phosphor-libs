@@ -93,6 +93,13 @@ build on it. The placement engines are not here. They are in phosphor-engine-lib
   (private D-Bus and XDG per test), `PhosphorLibTesting` (`phosphor_lib_enable_tests()`) and `PhosphorTestPch` (one
   PCH for all test targets, `phosphor_share_test_pch()`). Tests here include the isolation module by the relative
   path `../../../cmake/`, with a no-op stand-in when it is missing.
+- An app sets `PHOSPHOR_EMBED_APP` to its name before it adds the tree, and names its programs and plugins with
+  `phosphor_install_embedded(FOR ...)`. The install then holds only the libraries those link, with the plugins,
+  notices and data of their directories, in the app's own directories (README, "Use from an app"). Every install rule
+  goes through the functions of `cmake/PhosphorSuite.cmake` (`phosphor_install_targets`, `_devel`, `_qt_plugin`,
+  `_notice`, `_app_data`), never a bare `install()`, or the embedded install misses or leaks a file. A plugin, notice
+  or data file goes with the libraries of the directory that registers it.
+- `PHOSPHOR_LIBS_QT=OFF` builds only the libraries without Qt (`phosphor-channel`), for a program with no Qt.
 - `PHOSPHOR_ANIMATION_QUICK` is forced `ON`, because the `org.phosphor.animation` plugin needs `QtQuickClock`.
 - With tests on, the tree fetches the pinned phosphor-surface-packs unless the app set `PHOSPHOR_SURFACE_PACKS_DIR`.
   `PHOSPHOR_LIBS_BUNDLED_PACKS_DIR` is empty here, so the animation and pointer tests that check an app's bundled packs

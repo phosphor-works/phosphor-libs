@@ -235,22 +235,20 @@ if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
     list(APPEND _phosphorlayer_install_targets PhosphorLayerWayland)
 endif()
 
-install(TARGETS ${_phosphorlayer_install_targets}
-    EXPORT PhosphorLayerTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS ${_phosphorlayer_install_targets} EXPORT PhosphorLayerTargets)
 
 # Headers (regular .h via DIRECTORY pattern, then extensionless camelcase
 # forwarders via explicit FILES — FILES_MATCHING PATTERN doesn't pair well
 # with non-".h" filenames).
-install(DIRECTORY include/PhosphorLayer/
+phosphor_install_devel(DIRECTORY include/PhosphorLayer/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES
+phosphor_install_devel(FILES
     include/PhosphorLayer/Role
     include/PhosphorLayer/SurfaceConfig
     include/PhosphorLayer/Surface
@@ -260,33 +258,24 @@ install(FILES
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
 )
 
-install(DIRECTORY include/PhosphorLayer/defaults/
+# PhosphorWaylandTransport.h pulls PhosphorWayland symbols unconditionally, so a
+# build without its implementation leaves it out of the install: a consumer that
+# included it would expect a target that is not there.
+set(_phosphorlayer_defaults_exclude)
+if(NOT PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
+    set(_phosphorlayer_defaults_exclude PATTERN "PhosphorWaylandTransport.h" EXCLUDE)
+endif()
+phosphor_install_devel(DIRECTORY include/PhosphorLayer/defaults/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer/defaults
     FILES_MATCHING PATTERN "*.h"
+    ${_phosphorlayer_defaults_exclude}
 )
 
-if(NOT PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
-    # The DIRECTORY install above would have shipped PhosphorWaylandTransport.h
-    # even though its implementation was excluded from the library. Remove it
-    # from the install manifest after the fact — the header unconditionally
-    # pulls PhosphorWayland symbols, so shipping it in a minimal build would
-    # break any consumer that #includes it expecting the target to resolve.
-    install(CODE "
-        # \$ENV{DESTDIR}, like the two install(CODE) blocks in
-        # plasmazones/CMakeLists.txt. Without it a staged package build --
-        # which is every packaging path here: PKGBUILD, debian/rules via dh,
-        # and rpm's %cmake_install -- would delete this header from the BUILD
-        # HOST's real prefix instead of from the staging root.
-        file(REMOVE
-            \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer/defaults/PhosphorWaylandTransport.h\")
-    ")
-endif()
-
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayer_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayer_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
 )
 if(PHOSPHORLAYER_WITH_PHOSPHORWAYLAND)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayerwayland_export.h
+    phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayer/phosphorlayerwayland_export.h
         DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayer
     )
 endif()
@@ -297,7 +286,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-install(EXPORT PhosphorLayerTargets
+phosphor_install_devel(EXPORT PhosphorLayerTargets
     FILE PhosphorLayerTargets.cmake
     NAMESPACE PhosphorLayer::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorLayer
@@ -315,7 +304,7 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayerConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayerConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorLayer

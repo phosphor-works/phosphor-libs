@@ -220,22 +220,19 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorIpc
-    EXPORT PhosphorIpcTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    INCLUDES DESTINATION ${KDE_INSTALL_INCLUDEDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorIpc EXPORT PhosphorIpcTargets)
 
-install(FILES ${phosphoripc_public_HDRS}
+phosphor_install_devel(FILES ${phosphoripc_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIpc
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpc/phosphoripc_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpc/phosphoripc_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIpc
 )
 
-install(EXPORT PhosphorIpcTargets
+phosphor_install_devel(EXPORT PhosphorIpcTargets
     FILE PhosphorIpcTargets.cmake
     NAMESPACE PhosphorIpc::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorIpc
@@ -252,7 +249,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORIPC_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpcConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpcConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorIpc

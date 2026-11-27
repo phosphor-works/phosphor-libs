@@ -84,13 +84,42 @@ CPMAddPackage(NAME phosphor-libs
 The app's `find_package` and `target_link_libraries` calls then resolve to the targets here. To build the app against
 a local checkout, configure the app with `-DCPM_phosphor-libs_SOURCE=/path/to/phosphor-libs`.
 
-The libraries name no app's data directories. The app gives each one to the library:
+An app ships its own private copy of the libraries. Before it adds the tree, it sets its own name:
 
-| Data directory | Where the app gives it |
+```cmake
+set(PHOSPHOR_EMBED_APP "<app>")
+```
+
+Where it installs each program or plugin, the app names it:
+
+```cmake
+phosphor_install_embedded(FOR <target>...)
+```
+
+The install then holds only the libraries that these targets link, directly or through other libraries. With each
+library come the plugins, notices and data of its directory. All of it goes in the app's own directories:
+
+| What | Where |
 | --- | --- |
-| Shader-preset subdirectory | The classes and functions that read it |
-| Pointer-pack subdirectory | `PointerShaderRegistry::includePathsFor` |
-| Surface-pack subdirectory | `PhosphorSurfaceShaders::setSurfacePackDataSubdir` (`PhosphorSurface/SurfacePackLocation.h`), one time at startup, before any QML loads |
+| The shared libraries, with an `$ORIGIN` run path to each other | `<libdir>/phosphor-works/<app>` |
+| The Qt plugins, such as the Wayland shell integration | `<libdir>/phosphor-works/<app>/plugins/<type>` |
+| The licence notices of the code compiled in (Luau, Lua, jsoncons, the Wayland protocols) | `share/licenses/<app>` |
+| Data for the app's users, such as the type definitions for tiling scripts | `share/phosphor-works/<app>` |
+
+The install rules are made at the end of the app's top-level directory, when every target exists. An app that sets
+`PHOSPHOR_EMBED_APP` and names no target fails to configure.
+
+Headers, CMake packages, the development symlinks, the shared QML modules and the developer programs are not
+installed. Two apps therefore never install the same file, and each runs the commit it pins. After it adds the tree,
+the app reads the two directories with `phosphor_embedded_dirs(LIBDIR <var> LICENSEDIR <var>)` and gives its own
+executables and plugins a run path to the library directory. `PhosphorWayland::registerLayerShellPlugin()` finds the
+plugin directory beside the libraries by itself. Without `PHOSPHOR_EMBED_APP`, the install is the developer install
+of a library repository: the libdir, the headers, the CMake packages and Qt's plugin and QML directories. The functions
+in `cmake/PhosphorSuite.cmake` (`phosphor_install_targets`, `_devel`, `_qt_plugin`, `_notice`, `_app_data`) decide this
+for every library, and a new install rule goes through them.
+
+A program built with no Qt sets `PHOSPHOR_LIBS_QT` to `OFF`: the tree then builds only the libraries that do not use
+Qt (`phosphor-channel`).
 
 ## Contributing
 

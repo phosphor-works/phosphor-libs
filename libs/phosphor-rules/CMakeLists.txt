@@ -206,14 +206,12 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorRules
-    EXPORT PhosphorRulesTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorRules EXPORT PhosphorRulesTargets)
 
-install(EXPORT PhosphorRulesTargets
+phosphor_install_devel(EXPORT PhosphorRulesTargets
     FILE PhosphorRulesTargets.cmake
     NAMESPACE PhosphorRules::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRules
@@ -230,17 +228,17 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORRULES_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRulesConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRulesConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRules
 )
 
-install(DIRECTORY include/PhosphorRules/
+phosphor_install_devel(DIRECTORY include/PhosphorRules/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRules
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorrules_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorrules_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRules
 )

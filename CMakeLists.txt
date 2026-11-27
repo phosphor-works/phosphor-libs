@@ -99,6 +99,15 @@ if(PHOSPHOR_LIBS_TOP_LEVEL)
     kde_clang_format(${PHOSPHOR_LIBS_CLANG_FORMAT_FILES})
 endif()
 
+# A program built with no Qt (Afterglow's aglow and aglow-mux on their own)
+# adds the tree like any app, and gets only the libraries that do not use Qt.
+option(PHOSPHOR_LIBS_QT "Build the libraries that use Qt. Off: only the ones without Qt (phosphor-channel)" ON)
+if(NOT PHOSPHOR_LIBS_QT)
+    include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
+    add_subdirectory(libs/phosphor-channel)
+    return()
+endif()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Shared lookups. find_package is idempotent, so these also run as a subproject.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -172,6 +181,10 @@ set(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR "" CACHE PATH
 # Declaration order matters where a library find_package()s a sibling: the
 # in-tree target must exist before the consumer configures, or the lookup
 # resolves a stale installed copy.
+
+# The suite folder name and the install functions every library calls
+# (phosphor_install_targets and the others). Embedding, see the functions.
+include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
 
 add_subdirectory(libs/phosphor-channel)     # ordered byte frames between two processes with backpressure (shared-memory ring, multiplexed stream) - no Qt
 add_subdirectory(libs/phosphor-identity)    # stable cross-process window identity (composite ids, app-id matching)
