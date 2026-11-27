@@ -371,22 +371,6 @@ inline constexpr QLatin1String Cells("cells");
 inline constexpr QLatin1String Id("id");
 }
 
-/// Single-instance app identities. Each Phosphor sub-process (settings,
-/// editor) advertises its own service name and a small controller object so
-/// the launcher can detect "already running" without scanning the bus.
-namespace Apps {
-namespace Settings {
-inline constexpr QLatin1String ServiceName("org.phosphor_works.Facet");
-inline constexpr QLatin1String ObjectPath("/org/phosphor_works/Facet");
-inline constexpr QLatin1String Interface("org.phosphor_works.Facet");
-}
-namespace Editor {
-inline constexpr QLatin1String ServiceName("org.phosphor_works.PlasmaZones.Editor");
-inline constexpr QLatin1String ObjectPath("/org/phosphor_works/PlasmaZones/Editor");
-inline constexpr QLatin1String Interface("org.phosphor_works.PlasmaZones.Editor");
-}
-}
-
 // Protocol version. Bumped when the D-Bus method/signal schema changes in a
 // backwards-incompatible way (e.g. dragStopped out-params changed, new
 // required signal). Both sides check the peer's version at bridge registration

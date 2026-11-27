@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ## [Unreleased]
 
+### Removed
+
+- `PhosphorProtocol::Service::Apps`, the single-instance identities of PlasmaZones' settings app (Facet) and layout
+  editor. They belong to those programs: PlasmaZones keeps them as `PlasmaZones::AppIdentity`.
+
 ### Changed
 
 - `PhosphorWayland::ClipboardDevice` uses `ext-data-control-v1` when the compositor has it, and the older
