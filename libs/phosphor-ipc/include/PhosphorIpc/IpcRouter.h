@@ -45,9 +45,13 @@ namespace PhosphorIpc {
 //     The id belongs to the router that runs the call: a target
 //     registered on several routers sends its events through the one
 //     that accepted the connection, or sendEvent() finds no connection.
-//   - The router also reads, at accept, the process ID of the client
-//     that connected (SO_PEERCRED). A target reads it with
-//     IpcCallContext::connectionPid().
+//   - The router also reads, at accept, the credentials of the process
+//     that connected (SO_PEERCRED). A peer that runs as another user is
+//     closed at once, with a warning: it gets no id, and
+//     connectionRefused() follows. The socket mode 0600 already keeps
+//     other users out; this check is a second defense, for a socket in a
+//     directory that others can reach. A target reads the process ID
+//     with IpcCallContext::connectionPid().
 //   - A call answers when its method returns, unless the method defers
 //     its reply (IpcCallContext::deferReply, see IpcPendingReply.h).
 //     Replies carry the request id, so a deferred reply may arrive after
@@ -104,20 +108,36 @@ public:
     // the close of the connection, makes room.
     static constexpr int MaxPendingCallsPerConnection = 256;
 
-    // The socket path that start() uses when it gets none:
-    // $XDG_RUNTIME_DIR/phosphor.sock, and nothing when XDG_RUNTIME_DIR is
-    // not set. A client of that socket connects to this path.
-    [[nodiscard]] static QString defaultSocketPath();
+    // Each app has its own socket, named after the app. An app name is
+    // lower-case ASCII letters, digits and '-', and starts with a letter
+    // ("lambent", "phosphor-ipc-demo"). The functions below give nothing
+    // for another name. The server and its clients use the same function,
+    // so that they agree on the path.
 
-    // Bind the listening socket at `socketPath`, or at defaultSocketPath()
-    // when it is empty. Give an absolute path: a name that does not start
-    // with '/' is a file in the temporary directory, as QLocalServer takes
-    // it, and other users can write there. The socket file has mode 0600,
-    // and the process umask stays as it is (it is one for every thread). A
-    // stale socket at the path (one that refuses a connection) is
-    // replaced. Anything else there makes start() fail.
+    // $XDG_RUNTIME_DIR/<appName>.sock. Empty when XDG_RUNTIME_DIR is not
+    // set.
+    [[nodiscard]] static QString defaultSocketPath(const QString& appName);
+
+    // The environment variable that overrides the socket of `appName`: the
+    // name in upper case, '-' as '_', and "_SOCKET" after it
+    // (LAMBENT_SOCKET for "lambent").
+    [[nodiscard]] static QString socketEnvironmentVariable(const QString& appName);
+
+    // The value of socketEnvironmentVariable(appName) when it is set and
+    // not empty, else defaultSocketPath(appName).
+    [[nodiscard]] static QString socketPathForApp(const QString& appName);
+
+    // Bind the listening socket at `socketPath`. There is no default
+    // path: an app gives its own, usually socketPathForApp(). An empty
+    // path makes start() fail. Give an absolute path: a name that does
+    // not start with '/' is a file in the temporary directory, as
+    // QLocalServer takes it, and other users can write there. The socket
+    // file has mode 0600, and the process umask stays as it is (it is
+    // one for every thread). A stale socket at the path (one that
+    // refuses a connection) is replaced. Anything else there makes
+    // start() fail.
     // Returns false on bind failure; safe to retry after stop().
-    bool start(const QString& socketPath = QString());
+    bool start(const QString& socketPath);
 
     // Close the listening socket and every client connection, each of
     // which then gets its connectionClosed. Idempotent. A target method
@@ -149,8 +169,8 @@ public:
     // router right after this call.
     void stop(StopMode mode, int flushTimeoutMs = DefaultFlushTimeoutMs);
 
-    // The resolved socket path (after XDG fallback). Empty if
-    // start() has not been called or failed.
+    // The socket path that start() bound. Empty if start() has not
+    // been called or failed.
     [[nodiscard]] QString socketPath() const;
 
     // The most client connections open at once. Each holds a descriptor
@@ -296,8 +316,9 @@ Q_SIGNALS:
     // reads anything the client sent. sendEvent() to the id works from
     // the slot on.
     void connectionOpened(quint64 connectionId);
-    // The router closed a connection at accept because maxConnections()
-    // were open. Sent once per refused connection, from the event loop.
+    // The router closed a connection at accept, because maxConnections()
+    // were open or because the peer runs as another user. Sent once per
+    // refused connection, from the event loop.
     void connectionRefused();
     // The client connection `connectionId` has closed: the client went
     // away, the router closed it (malformed input, output limit) or

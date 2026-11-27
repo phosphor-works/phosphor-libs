@@ -15,8 +15,8 @@
 #include <optional>
 
 // Wire-format definitions for the JSON-over-Unix-socket protocol the
-// IpcRouter speaks. The router, IpcClient and the phosphorctl program of
-// Lambent share them, so the constants and parsers stay in lockstep.
+// IpcRouter speaks. The router, IpcClient and the phosphorctl program
+// share them, so the constants and parsers stay in lockstep.
 // Mirrors the split of libs/phosphor-protocol (PhosphorProtocol/
 // WindowTypes.h and WindowMarshalling.h). JSON is self-describing, so
 // the header holds the type constants only, no Qt-marshalling code.

@@ -23,7 +23,6 @@
 #include <QMetaMethod>
 #include <QMetaObject>
 #include <QMetaType>
-#include <QProcessEnvironment>
 #include <QScopeGuard>
 #include <QString>
 #include <QThread>
@@ -40,7 +39,7 @@
 
 #include <sys/socket.h> // getsockopt, SO_PEERCRED
 #include <sys/stat.h> // chmod, lstat
-#include <unistd.h> // getuid, link, unlink, rmdir
+#include <unistd.h> // geteuid, link, unlink, rmdir
 
 namespace PhosphorIpc {
 
@@ -202,28 +201,48 @@ QString errnoMessage(int error)
     return QString::fromStdString(std::generic_category().message(error));
 }
 
-// The process ID of the client at the other end of `socket`, from the
-// kernel's credentials of the process that connected; 0 when the platform
-// or the socket gives none. struct ucred is Linux's: the BSDs that have
-// SO_PEERCRED answer it with another struct.
-qint64 peerPid(const QLocalSocket& socket)
+// What the kernel tells about the process at the other end of `socket`
+// (SO_PEERCRED): its process ID, 0 when the platform or the socket gives
+// none, and whether it runs as another user than this process. struct
+// ucred is Linux's: the BSDs that have SO_PEERCRED answer it with another
+// struct, and there the socket mode is the only check.
+struct PeerCredentials
+{
+    qint64 pid = 0;
+    bool otherUser = false;
+};
+
+PeerCredentials peerCredentials(const QLocalSocket& socket)
 {
 #if defined(__linux__) && defined(SO_PEERCRED)
     const qintptr fd = socket.socketDescriptor();
     if (fd < 0) {
-        return 0;
+        return {};
     }
     struct ucred credentials{};
     socklen_t length = sizeof(credentials);
     if (::getsockopt(static_cast<int>(fd), SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0
         || length != sizeof(credentials)) {
-        return 0;
+        return {};
     }
-    return credentials.pid;
+    return {credentials.pid, credentials.uid != ::geteuid()};
 #else
     Q_UNUSED(socket)
-    return 0;
+    return {};
 #endif
+}
+
+// Lower-case ASCII letters, digits and '-', starting with a letter: a
+// name that is safe in a file name and in an environment variable.
+bool isAppName(const QString& name)
+{
+    if (name.isEmpty() || name.front() < QLatin1Char('a') || name.front() > QLatin1Char('z')) {
+        return false;
+    }
+    return std::all_of(name.cbegin(), name.cend(), [](QChar c) {
+        return (c >= QLatin1Char('a') && c <= QLatin1Char('z')) || (c >= QLatin1Char('0') && c <= QLatin1Char('9'))
+            || c == QLatin1Char('-');
+    });
 }
 
 // Listens on `path` with a socket file of mode 0600, without the umask:
@@ -298,13 +317,41 @@ IpcRouter::~IpcRouter()
     announceClosedConnections();
 }
 
-QString IpcRouter::defaultSocketPath()
+QString IpcRouter::defaultSocketPath(const QString& appName)
 {
-    const QString xdg = QProcessEnvironment::systemEnvironment().value(QStringLiteral("XDG_RUNTIME_DIR"));
+    if (!isAppName(appName)) {
+        qWarning("PhosphorIpc::IpcRouter: '%s' is not an app name", qPrintable(appName));
+        return {};
+    }
+    const QString xdg = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (xdg.isEmpty()) {
         return {};
     }
-    return QDir(xdg).filePath(QStringLiteral("phosphor.sock"));
+    return QDir(xdg).filePath(appName + QStringLiteral(".sock"));
+}
+
+QString IpcRouter::socketEnvironmentVariable(const QString& appName)
+{
+    if (!isAppName(appName)) {
+        qWarning("PhosphorIpc::IpcRouter: '%s' is not an app name", qPrintable(appName));
+        return {};
+    }
+    QString name = appName.toUpper();
+    name.replace(QLatin1Char('-'), QLatin1Char('_'));
+    return name + QStringLiteral("_SOCKET");
+}
+
+QString IpcRouter::socketPathForApp(const QString& appName)
+{
+    const QString variable = socketEnvironmentVariable(appName);
+    if (variable.isEmpty()) {
+        return {};
+    }
+    const QString fromEnvironment = qEnvironmentVariable(variable.toLatin1().constData());
+    if (!fromEnvironment.isEmpty()) {
+        return fromEnvironment;
+    }
+    return defaultSocketPath(appName);
 }
 
 bool IpcRouter::start(const QString& socketPath)
@@ -314,9 +361,9 @@ bool IpcRouter::start(const QString& socketPath)
         qWarning("PhosphorIpc::IpcRouter::start: already started on '%s'", qPrintable(m_socketPath));
         return false;
     }
-    const QString resolved = socketPath.isEmpty() ? defaultSocketPath() : socketPath;
+    const QString& resolved = socketPath;
     if (resolved.isEmpty()) {
-        qWarning("PhosphorIpc::IpcRouter::start: no socket path (XDG_RUNTIME_DIR unset and no explicit path)");
+        qWarning("PhosphorIpc::IpcRouter::start: no socket path");
         return false;
     }
     // We do NOT use setSocketOptions(UserAccessOption): with it
@@ -741,9 +788,21 @@ void IpcRouter::handleNewConnection()
         if (!socket) {
             continue;
         }
+        // A refused socket has no handlers yet and nothing to clean up
+        // but itself. A peer of another user can reach the socket only
+        // where its mode does not protect it; it is refused before it
+        // counts against the cap.
+        const PeerCredentials peer = peerCredentials(*socket);
+        if (peer.otherUser) {
+            qWarning("PhosphorIpc::IpcRouter: refused a connection from process %lld of another user",
+                     static_cast<long long>(peer.pid));
+            socket->abort();
+            socket->deleteLater();
+            Q_EMIT connectionRefused();
+            continue;
+        }
         // A connection leaves m_connectionBySocket as it closes (stop()
-        // clears it), so its size is the count of open ones. A refused
-        // socket has no handlers yet and nothing to clean up but itself.
+        // clears it), so its size is the count of open ones.
         if (m_maxConnections > 0 && m_connectionBySocket.size() >= m_maxConnections) {
             socket->abort();
             socket->deleteLater();
@@ -757,7 +816,7 @@ void IpcRouter::handleNewConnection()
         // enforces the same cap at the userspace-buffer layer.
         socket->setReadBufferSize(detail::MaxLineBytes);
         const quint64 connectionId = nextConnectionId();
-        m_connectionBySocket.insert(socket, Connection{connectionId, peerPid(*socket)});
+        m_connectionBySocket.insert(socket, Connection{connectionId, peer.pid});
         m_socketByConnectionId.insert(connectionId, socket);
         // Explicit Qt::DirectConnection: both signals fire from the
         // router's own thread (same thread as the QLocalServer), and

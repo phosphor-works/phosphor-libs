@@ -323,6 +323,9 @@ private Q_SLOTS:
     void schemaFor_listsAHiddenNameOnce();
     void schemaFor_charTypesAreIntegers();
     void defaultSocketPath_isInTheRuntimeDirectory();
+    void start_needsAPath();
+    void socketPathForApp_takesTheVariableFirst();
+    void appName_rejectsUnsafeNames();
 };
 
 void TestPhosphorIpcRouter::register_addsAndEmits()
@@ -1040,21 +1043,73 @@ void TestPhosphorIpcRouter::defaultSocketPath_isInTheRuntimeDirectory()
     const QByteArray before = qgetenv("XDG_RUNTIME_DIR");
 
     qputenv("XDG_RUNTIME_DIR", QByteArrayLiteral("/run/user/phosphor-ipc-test"));
-    const QString set = IpcRouter::defaultSocketPath();
+    const QString set = IpcRouter::defaultSocketPath(QStringLiteral("my-app2"));
     qunsetenv("XDG_RUNTIME_DIR");
-    const QString unset = IpcRouter::defaultSocketPath();
-    // A router has no path to start on then.
-    IpcRouter router;
-    QTest::ignoreMessage(QtWarningMsg,
-                         "PhosphorIpc::IpcRouter::start: no socket path (XDG_RUNTIME_DIR unset and no explicit path)");
-    const bool started = router.start();
+    const QString unset = IpcRouter::defaultSocketPath(QStringLiteral("my-app2"));
 
     if (wasSet) {
         qputenv("XDG_RUNTIME_DIR", before);
     }
-    QCOMPARE(set, QStringLiteral("/run/user/phosphor-ipc-test/phosphor.sock"));
+    QCOMPARE(set, QStringLiteral("/run/user/phosphor-ipc-test/my-app2.sock"));
     QCOMPARE(unset, QString());
-    QVERIFY(!started);
+}
+
+void TestPhosphorIpcRouter::start_needsAPath()
+{
+    // There is no default socket: each app names its own.
+    IpcRouter router;
+    QTest::ignoreMessage(QtWarningMsg, "PhosphorIpc::IpcRouter::start: no socket path");
+    QVERIFY(!router.start(QString()));
+    QCOMPARE(router.socketPath(), QString());
+}
+
+void TestPhosphorIpcRouter::socketPathForApp_takesTheVariableFirst()
+{
+    const bool runtimeWasSet = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    const QByteArray runtimeBefore = qgetenv("XDG_RUNTIME_DIR");
+    qputenv("XDG_RUNTIME_DIR", QByteArrayLiteral("/run/user/phosphor-ipc-test"));
+    qunsetenv("MY_APP2_SOCKET");
+
+    const QString variable = IpcRouter::socketEnvironmentVariable(QStringLiteral("my-app2"));
+    const QString fallback = IpcRouter::socketPathForApp(QStringLiteral("my-app2"));
+    qputenv("MY_APP2_SOCKET", QByteArrayLiteral("/tmp/elsewhere.sock"));
+    const QString overridden = IpcRouter::socketPathForApp(QStringLiteral("my-app2"));
+    // An empty variable counts as not set.
+    qputenv("MY_APP2_SOCKET", QByteArray());
+    const QString empty = IpcRouter::socketPathForApp(QStringLiteral("my-app2"));
+    qunsetenv("MY_APP2_SOCKET");
+
+    if (runtimeWasSet) {
+        qputenv("XDG_RUNTIME_DIR", runtimeBefore);
+    } else {
+        qunsetenv("XDG_RUNTIME_DIR");
+    }
+    QCOMPARE(variable, QStringLiteral("MY_APP2_SOCKET"));
+    QCOMPARE(fallback, QStringLiteral("/run/user/phosphor-ipc-test/my-app2.sock"));
+    QCOMPARE(overridden, QStringLiteral("/tmp/elsewhere.sock"));
+    QCOMPARE(empty, fallback);
+}
+
+void TestPhosphorIpcRouter::appName_rejectsUnsafeNames()
+{
+    // A name goes into a file name and a variable name: no path parts,
+    // no upper case, no characters that the shell or a variable takes
+    // differently.
+    const QStringList bad{QString(),
+                          QStringLiteral("../x"),
+                          QStringLiteral("a/b"),
+                          QStringLiteral("App"),
+                          QStringLiteral("1app"),
+                          QStringLiteral("-app"),
+                          QStringLiteral("a.b"),
+                          QStringLiteral("a_b")};
+    for (const QString& name : bad) {
+        const QByteArray warning = "PhosphorIpc::IpcRouter: '" + name.toUtf8() + "' is not an app name";
+        QTest::ignoreMessage(QtWarningMsg, warning.constData());
+        QTest::ignoreMessage(QtWarningMsg, warning.constData());
+        QVERIFY2(IpcRouter::defaultSocketPath(name).isEmpty(), qPrintable(name));
+        QVERIFY2(IpcRouter::socketEnvironmentVariable(name).isEmpty(), qPrintable(name));
+    }
 }
 
 QTEST_GUILESS_MAIN(TestPhosphorIpcRouter)

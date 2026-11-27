@@ -214,7 +214,7 @@ public:
 
     // Starts to connect to the router's socket at `path`. Give an absolute
     // path, as from IpcRouter::socketPath() or
-    // IpcRouter::defaultSocketPath(): a name that does not start with '/'
+    // IpcRouter::socketPathForApp(): a name that does not start with '/'
     // is a file in the temporary directory, as QLocalSocket takes it.
     // connected() comes when the connection is made, closed() when it
     // fails, both from the event loop. A connection that fails

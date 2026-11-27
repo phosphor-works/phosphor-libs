@@ -12,6 +12,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Added
 
+- phosphor-ipc: `IpcRouter::defaultSocketPath(appName)`, `socketEnvironmentVariable(appName)` and
+  `socketPathForApp(appName)` give each app its own socket, `$XDG_RUNTIME_DIR/<app>.sock`, which the variable
+  `<APP>_SOCKET` overrides. (phosphor-works/workspace#76)
+- phosphor-ipc: the router closes a connection from a process of another user at accept, with a warning, and emits
+  `connectionRefused()`. (phosphor-works/workspace#36)
 - An app can embed the libraries: with `PHOSPHOR_EMBED_APP` set to its name before it adds the tree, and its programs
   and plugins named with `phosphor_install_embedded(FOR ...)`, the install holds only the shared libraries that those
   link, with the Qt plugins, licence notices and user data of their directories, in `<libdir>/phosphor-works/<app>`,
@@ -38,6 +43,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Changed
 
+- **Breaking:** phosphor-ipc has no default socket. `IpcRouter::start()` needs a path and fails with an empty one,
+  and `IpcRouter::defaultSocketPath()` takes the app name. The name `phosphor.sock` belongs to the Phosphor compositor.
+  (phosphor-works/workspace#76)
 - The libraries' tests build only in this repository's own build, or in a library configured on its own. An app or
   the workspace superbuild that adds the tree with `BUILD_TESTING` on no longer builds them.
 - `PhosphorWayland::ClipboardDevice` uses `ext-data-control-v1` when the compositor has it, and the older
