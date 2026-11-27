@@ -16,7 +16,7 @@ necessary.
 
 The library owns these parts:
 
-- **`IpcRouter`** is the central dispatcher. A `QLocalServer` listens on `$XDG_RUNTIME_DIR/phosphor.sock`. The router
+- **`IpcRouter`** is the central dispatcher. A `QLocalServer` listens on the socket of the app (see [Socket names](#socket-names)). The router
   registers QObject "targets" by name. It walks their `QMetaObject` to make JSON schemas. It dispatches calls through
   `QMetaMethod::invoke`, and answers when the method returns or later through a deferred reply. It routes
   signal-broadcast events to the subscribers of each target, and it sends events to one client connection.
@@ -32,6 +32,24 @@ The library owns these parts:
 
 The **`phosphorctl`** CLI of Lambent (`lambent/cli/phosphorctl/`) is a client for the command line. It has the
 subcommands `call`, `list`, `schema` and `subscribe`.
+
+### Socket names
+
+Each app has its own socket, named after the app. An app name has lower-case ASCII letters, digits and `-`, and
+starts with a letter.
+
+| Function | Result for the app `lambent` |
+|---|---|
+| `IpcRouter::defaultSocketPath(app)` | `$XDG_RUNTIME_DIR/lambent.sock` |
+| `IpcRouter::socketEnvironmentVariable(app)` | `LAMBENT_SOCKET` |
+| `IpcRouter::socketPathForApp(app)` | `$LAMBENT_SOCKET` when it is set and not empty, else the default path |
+
+The server and its clients use `socketPathForApp()`, so that they agree on the path. The variable lets a test session
+or a nested session use a private socket. An app with more than one instance gives each instance its own path (for
+example Afterglow's `afterglow-<id>.sock`).
+
+The name `phosphor` belongs to the Phosphor compositor. Its socket is `$XDG_RUNTIME_DIR/phosphor.$WAYLAND_DISPLAY.sock`,
+one for each compositor instance, and the compositor exports the path as `PHOSPHOR_SOCKET` to its clients.
 
 ## Key types
 
@@ -63,7 +81,8 @@ int main(int argc, char** argv) {
     // first, and each IpcTarget unregisters from a router that is
     // still alive.
     PhosphorIpc::IpcRouter router;
-    if (!router.start()) {  // binds $XDG_RUNTIME_DIR/phosphor.sock
+    // $MYAPP_SOCKET, or $XDG_RUNTIME_DIR/myapp.sock
+    if (!router.start(PhosphorIpc::IpcRouter::socketPathForApp(QStringLiteral("myapp")))) {
         qWarning("IPC router failed to start "
                  "(XDG_RUNTIME_DIR unset, another live listener on "
                  "the same path, or insufficient permissions)");
@@ -304,8 +323,8 @@ phosphorctl schema theme | jq
 phosphorctl subscribe theme.modeChanged    # stays connected, streams events
 ```
 
-The CLI finds the socket path in this order: `--socket PATH`, then `$PHOSPHOR_SOCKET`, then
-`$XDG_RUNTIME_DIR/phosphor.sock`.
+`phosphorctl` finds the socket of the app that `--app NAME` selects, as `IpcRouter::socketPathForApp()` does.
+`--socket PATH` overrides it. See the Lambent documentation for its default app.
 
 By default, `phosphorctl call` waits two seconds for the answer. `--timeout SECONDS` changes that time.
 `--timeout 0` waits without a limit, for a deferred call that answers when its work ends. Events that the target sends
@@ -321,9 +340,8 @@ events show in the demo window in real time. You do not need a separate `phospho
 # terminal 1
 ./bin/phosphor-ipc-demo --socket /tmp/p.sock
 # terminal 2
-export PHOSPHOR_SOCKET=/tmp/p.sock
-phosphorctl call count.increment        # demo's event log gains an entry
-phosphorctl subscribe count.countChanged   # optional: same events on stdout
+phosphorctl --socket /tmp/p.sock call count.increment        # demo's event log gains an entry
+phosphorctl --socket /tmp/p.sock subscribe count.countChanged   # optional: same events on stdout
 ```
 
 ## Wire protocol
@@ -424,7 +442,7 @@ PhosphorIpc::IpcClient client;
 QObject::connect(&client, &PhosphorIpc::IpcClient::closed, [](const QString& reason) {
     qWarning() << "IPC connection ended:" << reason;
 });
-client.connectToServer(PhosphorIpc::IpcRouter::defaultSocketPath());
+client.connectToServer(PhosphorIpc::IpcRouter::socketPathForApp(QStringLiteral("myapp")));
 client.call(QStringLiteral("theme"), QStringLiteral("setMode"), {QStringLiteral("dark")},
             [](const PhosphorIpc::IpcReply& reply) {
                 if (reply.isError()) {
@@ -467,8 +485,8 @@ apart.
 
 ### Connection
 
-- `connectToServer(path)` takes an absolute path. `IpcRouter::defaultSocketPath()` gives the path that a router
-  takes by default. A name without a leading `/` is a file in the temporary directory, as `QLocalSocket` takes it.
+- `connectToServer(path)` takes an absolute path. `IpcRouter::socketPathForApp()` gives the path of an app's
+  router (see [Socket names](#socket-names)). A name without a leading `/` is a file in the temporary directory, as `QLocalSocket` takes it.
 - `connectToServer` returns `false` while a connection is open or in progress.
 - `connected()` and `closed(reason)` come from the event loop. A connection that fails immediately (no socket at the
   path) leaves the client unconnected when `connectToServer` returns.
@@ -528,8 +546,8 @@ apart.
   on the stack.
 - **Disconnect removes subscriptions.** When a subscriber socket disconnects, the router drops all its subscriptions
   and the deferred calls of the connection. `connectionClosed(id)` follows.
-- **Socket path.** `start()` without a path takes `IpcRouter::defaultSocketPath()`, which is
-  `$XDG_RUNTIME_DIR/phosphor.sock`. Give `start(socketPath)` an absolute path. A name without a leading `/` is a file
+- **Socket path.** `start()` has no default path. An app gives its own, usually `IpcRouter::socketPathForApp()`, and
+  an empty path makes `start()` fail. Give `start(socketPath)` an absolute path. A name without a leading `/` is a file
   in the temporary directory, as `QLocalServer` takes it.
 - **Stale socket files.** On `start`, if a file is at the socket path, the router tries a quick connect. If the
   connect is refused, the router unlinks the stale path and takes it. The router does not change a live listener
@@ -537,6 +555,13 @@ apart.
 - **Socket mode without the umask.** The socket file has mode 0600. The router binds it in a new 0700 directory next
   to the path, sets the mode there and links it into place. Thus it never changes the umask, which all threads of the
   process share. `stop()` removes the socket file, unless a different file has taken the path since.
+- **Peers of the same user only.** On Linux, the router reads the credentials of each peer (`SO_PEERCRED`) when it
+  accepts the connection. A peer that runs as another user is closed at once, with a warning, and
+  `connectionRefused()` follows. The socket mode already keeps other users out. This check is a second defense, for a
+  socket in a directory that others can reach.
+- **No idle timeout.** The router does not close a connection that sends nothing. A subscriber and a long-lived
+  client send nothing for a long time, and a timeout would close them. Only the same user can connect, and
+  `setMaxConnections()` limits the descriptors that idle peers can hold.
 - **No automatic broadcast from Qt signals.** Plugin authors call `IpcTarget.emitEvent("name", args)` explicitly. A
   QML signal (for example `modeChanged(...)`) only tells subscribers in QML, NOT wire subscribers. This split is by
   design. Introspection of all Qt signals through `qt_metacall` collides with the code that moc generates for
