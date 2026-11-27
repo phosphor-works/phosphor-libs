@@ -5,7 +5,7 @@
 # (the shader_validate entries in plasmazones/src/CMakeLists.txt apply the XDG half by
 # hand because they share one command target; see the comment there).
 #
-# LGPL-2.1-or-later, matching `PhosphorLibTesting.cmake`: every consumer is an
+# LGPL-2.1-or-later: every consumer is an
 # `LGPL` library's own test tree, and CLAUDE.md's test-license split exists so a
 # library's build tree is not tainted with GPL.
 #

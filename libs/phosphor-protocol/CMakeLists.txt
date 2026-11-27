@@ -184,7 +184,7 @@ set_target_properties(PhosphorProtocol PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorProtocol" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorProtocol" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -193,14 +193,12 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorProtocolTypes PhosphorProtocol
-    EXPORT PhosphorProtocolTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorProtocolTypes PhosphorProtocol EXPORT PhosphorProtocolTargets)
 
-install(FILES
+phosphor_install_devel(FILES
     ${phosphorprotocol_types_HDRS}
     ${phosphorprotocol_public_HDRS}
     ${CMAKE_CURRENT_BINARY_DIR}/PhosphorProtocol/phosphorprotocoltypes_export.h
@@ -208,7 +206,7 @@ install(FILES
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorProtocol
 )
 
-install(EXPORT PhosphorProtocolTargets
+phosphor_install_devel(EXPORT PhosphorProtocolTargets
     FILE PhosphorProtocolTargets.cmake
     NAMESPACE PhosphorProtocol::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorProtocol
@@ -225,7 +223,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORPROTOCOL_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorProtocolConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorProtocolConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorProtocol

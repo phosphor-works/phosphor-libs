@@ -169,22 +169,19 @@ set_target_properties(PhosphorRegistry PROPERTIES
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorRegistry
-    EXPORT PhosphorRegistryTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    INCLUDES DESTINATION ${KDE_INSTALL_INCLUDEDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorRegistry EXPORT PhosphorRegistryTargets)
 
-install(FILES ${phosphorregistry_public_HDRS}
+phosphor_install_devel(FILES ${phosphorregistry_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRegistry
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorRegistry/phosphorregistry_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorRegistry/phosphorregistry_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRegistry
 )
 
-install(EXPORT PhosphorRegistryTargets
+phosphor_install_devel(EXPORT PhosphorRegistryTargets
     FILE PhosphorRegistryTargets.cmake
     NAMESPACE PhosphorRegistry::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRegistry
@@ -201,7 +198,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORREGISTRY_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRegistryConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRegistryConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRegistry
@@ -211,15 +208,7 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Shared standalone-or-tests gate. Lives in the repo's cmake/ helpers so
-# every phosphor library can drop the boilerplate. The relative path
-# resolves under both an in-tree configure (root CMakeLists.txt drives
-# us) and a standalone configure of this subproject (the lib's own
-# project() takes effect; the helper still resolves via the three-level-
-# up cmake/ dir in the repo checkout). EXISTS-guarded so a tarball
-# missing the helper still builds the library itself (just without the
-# tests gate).
-if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorLibTesting.cmake")
-    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorLibTesting.cmake)
-    phosphor_lib_enable_tests(PhosphorRegistry)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorRegistry" OR PHOSPHOR_LIBS_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

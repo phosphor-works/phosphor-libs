@@ -155,6 +155,9 @@ set(phosphorscripting_SRCS
     src/luaumarshal.h
 )
 
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
 add_library(PhosphorScripting SHARED
     ${phosphorscripting_public_HDRS}
     ${phosphorscripting_SRCS}
@@ -199,7 +202,7 @@ set_target_properties(PhosphorScripting PROPERTIES
     UNITY_BUILD OFF
 )
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScripting" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScripting" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -234,20 +237,17 @@ if(NOT PHOSPHOR_SYSTEM_LUAU)
     # unconditional rule would then fail at `cmake --install` time against
     # a path that was never created.
     if(EXISTS "${_p_luau_src}/LICENSE.txt")
-        install(FILES ${_p_luau_src}/LICENSE.txt
-            DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs
-            RENAME LICENSE.Luau)
+        phosphor_install_notice(${_p_luau_src}/LICENSE.txt RENAME LICENSE.Luau)
+    endif()
+    # Luau derives from Lua, whose MIT notice it carries beside its own.
+    if(EXISTS "${_p_luau_src}/lua_LICENSE.txt")
+        phosphor_install_notice(${_p_luau_src}/lua_LICENSE.txt RENAME LICENSE.Lua)
     endif()
 endif()
 
-install(TARGETS PhosphorScripting
-    EXPORT PhosphorScriptingTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+phosphor_install_targets(TARGETS PhosphorScripting EXPORT PhosphorScriptingTargets)
 
-install(EXPORT PhosphorScriptingTargets
+phosphor_install_devel(EXPORT PhosphorScriptingTargets
     FILE PhosphorScriptingTargets.cmake
     NAMESPACE PhosphorScripting::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScripting
@@ -264,16 +264,16 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSCRIPTING_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScriptingConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScriptingConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScripting
 )
 
-install(DIRECTORY include/PhosphorScripting/
+phosphor_install_devel(DIRECTORY include/PhosphorScripting/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorScripting
     FILES_MATCHING PATTERN "*.h"
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorscripting_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorscripting_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorScripting
 )

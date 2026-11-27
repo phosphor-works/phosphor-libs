@@ -49,16 +49,3 @@ phosphorpointer_add_test(test_pointershaderregistry)
 phosphorpointer_add_test(test_pointeruniformextension)
 phosphorpointer_add_test(test_pointerhistory)
 phosphorpointer_add_test(test_pointercurve)
-
-# The registry test checks the entry prologue against the shared helper it
-# includes, and the curve test pins its mirror of the smoothing kernel and the
-# Catmull-Rom tension against the same helper. The helper ships with the app's
-# packs (PlasmaZones' data/pointer/shared), not with this library, so both
-# cases run in the app's build, which sets PHOSPHOR_LIBS_BUNDLED_PACKS_DIR, and
-# skip in a build of this tree alone.
-if(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR)
-    foreach(_p_test test_pointershaderregistry test_pointercurve)
-        target_compile_definitions(${_p_test} PRIVATE
-            "PHOSPHOR_BUNDLED_PACKS_DIR=\"${PHOSPHOR_LIBS_BUNDLED_PACKS_DIR}\"")
-    endforeach()
-endif()

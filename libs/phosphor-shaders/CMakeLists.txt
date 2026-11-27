@@ -232,7 +232,7 @@ set_target_properties(PhosphorShaders PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorShaders" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorShaders" OR PHOSPHOR_LIBS_TESTS)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
         enable_testing()
         add_subdirectory(tests)
@@ -250,30 +250,28 @@ endif()
 
 # The C++ library exports + installs as a normal find_package target.
 
-install(TARGETS PhosphorShaders
-    EXPORT PhosphorShadersTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorShaders EXPORT PhosphorShadersTargets)
 
 # Public headers — split between regular .h files and extensionless Qt-style
 # camelcase forwarders. FILES_MATCHING with PATTERN doesn't pair well with
 # non-".h" filenames, so install the forwarders explicitly.
-install(DIRECTORY include/PhosphorShaders/
+phosphor_install_devel(DIRECTORY include/PhosphorShaders/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShaders
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES ${phosphorshaders_camelcase_HDRS}
+phosphor_install_devel(FILES ${phosphorshaders_camelcase_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShaders
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorShaders/phosphorshaders_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorShaders/phosphorshaders_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShaders
 )
 
-install(EXPORT PhosphorShadersTargets
+phosphor_install_devel(EXPORT PhosphorShadersTargets
     FILE PhosphorShadersTargets.cmake
     NAMESPACE PhosphorShaders::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShaders
@@ -290,7 +288,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSHADERS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShadersConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShadersConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShaders

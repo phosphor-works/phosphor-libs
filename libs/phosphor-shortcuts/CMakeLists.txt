@@ -163,14 +163,12 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorShortcuts
-    EXPORT PhosphorShortcutsTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorShortcuts EXPORT PhosphorShortcutsTargets)
 
-install(EXPORT PhosphorShortcutsTargets
+phosphor_install_devel(EXPORT PhosphorShortcutsTargets
     FILE PhosphorShortcutsTargets.cmake
     NAMESPACE PhosphorShortcuts::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShortcuts
@@ -190,18 +188,18 @@ write_basic_package_version_file(
     # correct signalling channel, not the cmake version-file policy.
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShortcutsConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorShortcutsConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorShortcuts
 )
 
-install(DIRECTORY include/PhosphorShortcuts/
+phosphor_install_devel(DIRECTORY include/PhosphorShortcuts/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShortcuts
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorshortcuts_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorshortcuts_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorShortcuts
 )
 
@@ -209,6 +207,6 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorshortcuts_export.h
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
+if((CMAKE_PROJECT_NAME STREQUAL "PhosphorShortcuts" OR PHOSPHOR_LIBS_TESTS) AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
     add_subdirectory(tests)
 endif()

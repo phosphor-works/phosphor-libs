@@ -128,7 +128,7 @@ set_target_properties(PhosphorSurfaces PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaces" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaces" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -137,21 +137,19 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorSurfaces
-    EXPORT PhosphorSurfacesTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorSurfaces EXPORT PhosphorSurfacesTargets)
 
-install(FILES ${phosphorsurfaces_public_HDRS}
+phosphor_install_devel(FILES ${phosphorsurfaces_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurfaces
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaces/phosphorsurfaces_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaces/phosphorsurfaces_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurfaces
 )
 
-install(EXPORT PhosphorSurfacesTargets
+phosphor_install_devel(EXPORT PhosphorSurfacesTargets
     FILE PhosphorSurfacesTargets.cmake
     NAMESPACE PhosphorSurfaces::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurfaces
@@ -168,7 +166,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSURFACES_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfacesConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfacesConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurfaces

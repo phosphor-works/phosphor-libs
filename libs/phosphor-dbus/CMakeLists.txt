@@ -114,7 +114,7 @@ set_target_properties(PhosphorDBus PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorDBus" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorDBus" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -123,21 +123,19 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorDBus
-    EXPORT PhosphorDBusTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorDBus EXPORT PhosphorDBusTargets)
 
-install(FILES ${phosphordbus_public_HDRS}
+phosphor_install_devel(FILES ${phosphordbus_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorDBus
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorDBus/phosphordbus_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorDBus/phosphordbus_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorDBus
 )
 
-install(EXPORT PhosphorDBusTargets
+phosphor_install_devel(EXPORT PhosphorDBusTargets
     FILE PhosphorDBusTargets.cmake
     NAMESPACE PhosphorDBus::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorDBus
@@ -154,7 +152,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORDBUS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorDBusConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorDBusConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorDBus

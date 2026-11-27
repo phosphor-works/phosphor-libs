@@ -135,14 +135,12 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorConfig
-    EXPORT PhosphorConfigTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorConfig EXPORT PhosphorConfigTargets)
 
-install(EXPORT PhosphorConfigTargets
+phosphor_install_devel(EXPORT PhosphorConfigTargets
     FILE PhosphorConfigTargets.cmake
     NAMESPACE PhosphorConfig::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorConfig
@@ -159,18 +157,18 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORCONFIG_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorConfigConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorConfigConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorConfig
 )
 
-install(DIRECTORY include/PhosphorConfig/
+phosphor_install_devel(DIRECTORY include/PhosphorConfig/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorConfig
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorconfig_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorconfig_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorConfig
 )
 
@@ -178,7 +176,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorconfig_export.h
 # Tests (only when PhosphorConfig is the top-level project or BUILD_TESTING is on)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorConfig" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorConfig" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

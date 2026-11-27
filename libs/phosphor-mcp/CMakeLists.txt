@@ -199,22 +199,19 @@ set_target_properties(PhosphorMcp PROPERTIES
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorMcp
-    EXPORT PhosphorMcpTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    INCLUDES DESTINATION ${KDE_INSTALL_INCLUDEDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorMcp EXPORT PhosphorMcpTargets)
 
-install(FILES ${phosphormcp_public_HDRS}
+phosphor_install_devel(FILES ${phosphormcp_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorMcp
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcp/phosphormcp_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcp/phosphormcp_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorMcp
 )
 
-install(EXPORT PhosphorMcpTargets
+phosphor_install_devel(EXPORT PhosphorMcpTargets
     FILE PhosphorMcpTargets.cmake
     NAMESPACE PhosphorMcp::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorMcp
@@ -231,7 +228,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORMCP_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorMcp
@@ -241,7 +238,7 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorMcp" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorMcp" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
         add_subdirectory(tests)

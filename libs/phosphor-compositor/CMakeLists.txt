@@ -117,21 +117,20 @@ set_target_properties(PhosphorCompositor PROPERTIES
     VERSION ${PHOSPHORCOMPOSITOR_VERSION}
 )
 
-install(TARGETS PhosphorCompositor
-    EXPORT PhosphorCompositorTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorCompositor EXPORT PhosphorCompositorTargets)
 
-install(DIRECTORY include/PhosphorCompositor
+phosphor_install_devel(DIRECTORY include/PhosphorCompositor
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorcompositor_export.h"
+phosphor_install_devel(FILES "${CMAKE_CURRENT_BINARY_DIR}/phosphorcompositor_export.h"
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorCompositor
 )
 
-install(EXPORT PhosphorCompositorTargets
+phosphor_install_devel(EXPORT PhosphorCompositorTargets
     FILE PhosphorCompositorTargets.cmake
     NAMESPACE PhosphorCompositor::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorCompositor
@@ -148,7 +147,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORCOMPOSITOR_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorCompositorConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorCompositorConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorCompositor
@@ -158,7 +157,7 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorCompositor" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorCompositor" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

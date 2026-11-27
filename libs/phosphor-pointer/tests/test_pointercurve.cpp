@@ -5,17 +5,16 @@
 // samples; what the packs put on screen is a Catmull-Rom curve through those
 // samples after an inverse-time smoothing kernel, and both of those live in
 // data/pointer/shared/pointer_lib.glsl rather than in any C++ this library
-// compiles. These tests mirror the two shared functions, pin the behaviour the
-// mirror is supposed to have, and then pin the mirror itself against the
-// shipped GLSL so a retune of the curve cannot leave them measuring the old one.
+// compiles. These tests mirror the two shared functions and pin the behavior
+// the mirror must have. PlasmaZones' test_pointer_shared_helper pins the
+// mirror's constants against the shipped GLSL, so a retune of the curve
+// cannot leave these tests measuring the old one.
 
 #include <PhosphorPointer/PointerFrameState.h>
 #include <PhosphorPointer/PointerHistory.h>
 #include <PhosphorPointer/PointerShaderContract.h>
 
-#include <QFile>
 #include <QLineF>
-#include <QRegularExpression>
 #include <QtTest/QtTest>
 
 #include <algorithm>
@@ -32,7 +31,6 @@ private Q_SLOTS:
     void testSmoothingWeightsNeighboursByInverseTimeDistance();
     void testSpanIsACurveAtTheDeclaredTension();
     void testHeadRefreshTracksThePointerWithoutSpendingASlot();
-    void testCurveConstantsMatchTheShippedShader();
 };
 
 namespace {
@@ -265,44 +263,6 @@ void TestPointerCurve::testHeadRefreshTracksThePointerWithoutSpendingASlot()
     const QPointF afterMid = DrawnPath{&after, after.trailSize(), 0.0}.curve(0, 0.5);
     QVERIFY2(QLineF(beforeMid, afterMid).length() > 20.0,
              "span 0 is redrawn every frame by design; the never-moves invariant starts at span 1");
-}
-
-void TestPointerCurve::testCurveConstantsMatchTheShippedShader()
-{
-    // The mirror above reconstructs what the packs draw, but nothing compiles
-    // it against the GLSL the compositor actually runs. Retune the curve in
-    // the shader and every guard here would stay green while measuring the old
-    // one, so pin the handful of facts the mirror depends on to the file.
-#ifndef PHOSPHOR_BUNDLED_PACKS_DIR
-    QSKIP("the shared pointer helper ships with the app's packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset");
-#else
-    QFile file(QStringLiteral(PHOSPHOR_BUNDLED_PACKS_DIR "/pointer/shared/pointer_lib.glsl"));
-    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(file.fileName()));
-    const QString source = QString::fromUtf8(file.readAll());
-
-    const QRegularExpression tension(QStringLiteral(R"(const\s+float\s+kPointerCurveTension\s*=\s*([0-9.]+)\s*;)"));
-    const QRegularExpressionMatch tensionMatch = tension.match(source);
-    QVERIFY2(tensionMatch.hasMatch(), "kPointerCurveTension not found in pointer_lib.glsl");
-    QCOMPARE(tensionMatch.captured(1).toDouble(), PointerShaderContract::kPointerCurveTension);
-
-    const QRegularExpression steps(QStringLiteral(R"(const\s+int\s+kPointerCurveSteps\s*=\s*([0-9]+)\s*;)"));
-    const QRegularExpressionMatch stepsMatch = steps.match(source);
-    QVERIFY2(stepsMatch.hasMatch(), "kPointerCurveSteps not found in pointer_lib.glsl");
-    QCOMPARE(stepsMatch.captured(1).toInt(), PointerShaderContract::kPointerCurveSteps);
-
-    // The one textual fact that separates inverse-time weighting from equal or
-    // direct-time weighting. A swap of these two is caught by nothing else.
-    QVERIFY2(source.contains(QLatin1String("prev.xy * dtNext")),
-             "the smoothing kernel no longer weights the previous neighbour by the FORWARD gap");
-    QVERIFY2(source.contains(QLatin1String("next.xy * dtPrev")),
-             "the smoothing kernel no longer weights the next neighbour by the BACKWARD gap");
-    // Both gap floors the arithmetic above depends on. Matched as the two
-    // specific expressions rather than counted across the file, so an
-    // unrelated epsilon elsewhere in the shared helper cannot fail this with a
-    // message that blames the smoothing kernel.
-    QVERIFY2(source.contains(QLatin1String("max(here.z - prev.z, 0.0) + 1e-4")), "the backward gap lost its floor");
-    QVERIFY2(source.contains(QLatin1String("max(next.z - here.z, 0.0) + 1e-4")), "the forward gap lost its floor");
-#endif
 }
 
 QTEST_MAIN(TestPointerCurve)

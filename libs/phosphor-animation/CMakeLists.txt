@@ -224,6 +224,9 @@ set(_phosphor_animation_qml_sources
 # PhosphorAnimation Library
 # ===============================================================================
 
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
 add_library(PhosphorAnimation SHARED
     ${phosphoranimation_public_HDRS}
     ${phosphoranimation_SRCS}
@@ -302,7 +305,7 @@ if(PHOSPHOR_ANIMATION_QUICK)
         src/qtquickclock.cpp
         include/PhosphorAnimation/QtQuickClock.h
     )
-    install(FILES include/PhosphorAnimation/QtQuickClock.h
+    phosphor_install_devel(FILES include/PhosphorAnimation/QtQuickClock.h
             DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorAnimation)
 endif()
 
@@ -429,7 +432,7 @@ endif()
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAnimation" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAnimation" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -443,21 +446,16 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorAnimation
-    EXPORT PhosphorAnimationTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+phosphor_install_targets(TARGETS PhosphorAnimation EXPORT PhosphorAnimationTargets)
 
-install(FILES ${phosphoranimation_public_HDRS} ${phosphoranimation_qml_HDRS}
+phosphor_install_devel(FILES ${phosphoranimation_public_HDRS} ${phosphoranimation_qml_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorAnimation
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorAnimation/phosphoranimation_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorAnimation/phosphoranimation_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorAnimation
 )
 
-install(EXPORT PhosphorAnimationTargets
+phosphor_install_devel(EXPORT PhosphorAnimationTargets
     FILE PhosphorAnimationTargets.cmake
     NAMESPACE PhosphorAnimation::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorAnimation
@@ -474,7 +472,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORANIMATION_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorAnimationConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorAnimationConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorAnimation
@@ -484,14 +482,14 @@ install(FILES
 if(PHOSPHOR_ANIMATION_QML_INSTALL)
     set(_phosphor_animation_qml_install_dir "${KDE_INSTALL_QMLDIR}/org/phosphor/animation")
 
-    install(TARGETS PhosphorAnimationQmlShared ${_phosphor_animation_qml_shared_plugin_target}
+    phosphor_install_devel(TARGETS PhosphorAnimationQmlShared ${_phosphor_animation_qml_shared_plugin_target}
         EXPORT PhosphorAnimationQmlTargets
         RUNTIME DESTINATION ${_phosphor_animation_qml_install_dir}
         LIBRARY DESTINATION ${_phosphor_animation_qml_install_dir}
         ARCHIVE DESTINATION ${_phosphor_animation_qml_install_dir}
     )
 
-    install(FILES
+    phosphor_install_devel(FILES
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/animation/qmldir
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/animation/PhosphorAnimationQmlShared.qmltypes
         DESTINATION ${_phosphor_animation_qml_install_dir}

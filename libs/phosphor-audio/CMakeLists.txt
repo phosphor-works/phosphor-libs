@@ -114,7 +114,7 @@ set_target_properties(PhosphorAudio PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAudio" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAudio" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -123,21 +123,19 @@ endif()
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorAudio
-    EXPORT PhosphorAudioTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorAudio EXPORT PhosphorAudioTargets)
 
-install(FILES ${phosphoraudio_public_HDRS}
+phosphor_install_devel(FILES ${phosphoraudio_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorAudio
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorAudio/phosphoraudio_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorAudio/phosphoraudio_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorAudio
 )
 
-install(EXPORT PhosphorAudioTargets
+phosphor_install_devel(EXPORT PhosphorAudioTargets
     FILE PhosphorAudioTargets.cmake
     NAMESPACE PhosphorAudio::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorAudio
@@ -154,7 +152,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORAUDIO_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorAudioConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorAudioConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorAudio

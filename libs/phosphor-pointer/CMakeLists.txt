@@ -154,7 +154,7 @@ set_target_properties(PhosphorPointer PROPERTIES
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorPointer" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorPointer" OR PHOSPHOR_LIBS_TESTS)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
         enable_testing()
         add_subdirectory(tests)
@@ -170,21 +170,19 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorPointer
-    EXPORT PhosphorPointerTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorPointer EXPORT PhosphorPointerTargets)
 
-install(FILES ${phosphorpointer_public_HDRS}
+phosphor_install_devel(FILES ${phosphorpointer_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorPointer
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorPointer/phosphorpointer_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorPointer/phosphorpointer_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorPointer
 )
 
-install(EXPORT PhosphorPointerTargets
+phosphor_install_devel(EXPORT PhosphorPointerTargets
     FILE PhosphorPointerTargets.cmake
     NAMESPACE PhosphorPointer::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorPointer
@@ -201,7 +199,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORPOINTER_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorPointerConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorPointerConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorPointer

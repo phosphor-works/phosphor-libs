@@ -3,14 +3,25 @@
 
 #pragma once
 
+#include "phosphorwayland_export.h"
+
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QFile>
 #include <QString>
 
 namespace PhosphorWayland {
 
+/// The plugin directory that sits beside this library, when an app embeds the
+/// libraries (phosphor-libs' PHOSPHOR_EMBED_APP) or runs from its build
+/// tree: <library directory>/plugins, which holds wayland-shell-integration/.
+/// Empty for a developer install, whose plugin is in Qt's own plugin directory.
+PHOSPHORWAYLAND_EXPORT QString bundledPluginDirectory();
+
 /// Call before QGuiApplication to register the phosphorwayland QPA plugin.
 /// Lightweight header — does not pull in Qt Wayland private headers.
+/// Adds bundledPluginDirectory() to Qt's library paths, so an app that embeds
+/// the libraries, or runs from its build tree, finds the plugin beside them.
 /// Respects any existing QT_WAYLAND_SHELL_INTEGRATION value (e.g. for debugging).
 /// Only sets the env var when there is a Wayland connection to make: WAYLAND_SOCKET
 /// is set, WAYLAND_DISPLAY is set, or a wayland-0 or wayland-1 socket exists in
@@ -23,6 +34,9 @@ namespace PhosphorWayland {
 /// is running before the application starts.
 inline void registerLayerShellPlugin()
 {
+    if (const QString plugins = bundledPluginDirectory(); !plugins.isEmpty()) {
+        QCoreApplication::addLibraryPath(plugins);
+    }
     if (qEnvironmentVariableIsEmpty("QT_WAYLAND_SHELL_INTEGRATION")) {
         // WAYLAND_DISPLAY proves a compositor is actually running. We do NOT fall
         // back to XDG_SESSION_TYPE because it can be "wayland" on systemd machines

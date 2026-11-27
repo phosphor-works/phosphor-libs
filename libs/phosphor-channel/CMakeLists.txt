@@ -100,22 +100,20 @@ set_target_properties(PhosphorChannel PROPERTIES
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorChannel
-    EXPORT PhosphorChannelTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorChannel EXPORT PhosphorChannelTargets)
 
-install(DIRECTORY include/PhosphorChannel
+phosphor_install_devel(DIRECTORY include/PhosphorChannel
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/PhosphorChannel/phosphorchannel_export.h"
+phosphor_install_devel(FILES "${CMAKE_CURRENT_BINARY_DIR}/PhosphorChannel/phosphorchannel_export.h"
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorChannel
 )
 
-install(EXPORT PhosphorChannelTargets
+phosphor_install_devel(EXPORT PhosphorChannelTargets
     FILE PhosphorChannelTargets.cmake
     NAMESPACE PhosphorChannel::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorChannel
@@ -132,7 +130,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORCHANNEL_VERSION}
     COMPATIBILITY ${PHOSPHORCHANNEL_COMPATIBILITY}
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorChannelConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorChannelConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorChannel
@@ -142,7 +140,9 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorChannel" OR BUILD_TESTING)
+# The tests use Qt Test. A tree built without Qt (PHOSPHOR_LIBS_QT=OFF, for a
+# program with no Qt) builds the library without them.
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorChannel" OR (PHOSPHOR_LIBS_TESTS AND PHOSPHOR_LIBS_QT))
     enable_testing()
     add_subdirectory(tests)
 endif()

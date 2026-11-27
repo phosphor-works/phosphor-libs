@@ -149,14 +149,12 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorLayoutApi
-    EXPORT PhosphorLayoutApiTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorLayoutApi EXPORT PhosphorLayoutApiTargets)
 
-install(EXPORT PhosphorLayoutApiTargets
+phosphor_install_devel(EXPORT PhosphorLayoutApiTargets
     FILE PhosphorLayoutApiTargets.cmake
     NAMESPACE PhosphorLayoutApi::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorLayoutApi
@@ -173,17 +171,17 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORLAYOUTAPI_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayoutApiConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorLayoutApiConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorLayoutApi
 )
 
-install(DIRECTORY include/PhosphorLayoutApi/
+phosphor_install_devel(DIRECTORY include/PhosphorLayoutApi/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayoutApi
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorlayoutapi_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorlayoutapi_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorLayoutApi
 )

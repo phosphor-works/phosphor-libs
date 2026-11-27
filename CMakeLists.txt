@@ -99,6 +99,24 @@ if(PHOSPHOR_LIBS_TOP_LEVEL)
     kde_clang_format(${PHOSPHOR_LIBS_CLANG_FORMAT_FILES})
 endif()
 
+# The libraries' tests build only in this repository's own build, or in a
+# library configured on its own. An app or the workspace superbuild that adds
+# the tree never builds them: each repository runs only its own tests.
+if(BUILD_TESTING AND PHOSPHOR_LIBS_TOP_LEVEL)
+    set(PHOSPHOR_LIBS_TESTS ON)
+else()
+    set(PHOSPHOR_LIBS_TESTS OFF)
+endif()
+
+# A program built with no Qt (Afterglow's aglow and aglow-mux on their own)
+# adds the tree like any app, and gets only the libraries that do not use Qt.
+option(PHOSPHOR_LIBS_QT "Build the libraries that use Qt. Off: only the ones without Qt (phosphor-channel)" ON)
+if(NOT PHOSPHOR_LIBS_QT)
+    include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
+    add_subdirectory(libs/phosphor-channel)
+    return()
+endif()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Shared lookups. find_package is idempotent, so these also run as a subproject.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -149,21 +167,11 @@ endforeach()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PhosphorDependencies.cmake")
 
 # The surface decoration packs, for phosphor-surface's tests that load them.
-# Test data only, so fetched only when the tests are built. An app that has
-# already fetched the packs and included their PhosphorSurfacePacks.cmake has
-# set PHOSPHOR_SURFACE_PACKS_DIR, and its copy is the one tested.
-if(BUILD_TESTING AND NOT PHOSPHOR_SURFACE_PACKS_DIR)
+# Test data only, so fetched only when this repository's tests are built.
+if(PHOSPHOR_LIBS_TESTS)
     phosphor_fetch_dependency(phosphor-surface-packs)
     include("${phosphor-surface-packs_SOURCE_DIR}/cmake/PhosphorSurfacePacks.cmake")
 endif()
-
-# Where the app's bundled animation and pointer packs live, for the library
-# tests that check a library constant against them (phosphor-animation's
-# built-in effects, phosphor-pointer's shared helper). Empty when this tree is
-# built on its own: those tests then skip and say why. PlasmaZones sets it to
-# its data/ tree, so they run in its build.
-set(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR "" CACHE PATH
-    "Directory holding bundled animations/ and pointer/ packs, for the tests that check them. Empty: those tests skip")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Libraries
@@ -172,6 +180,10 @@ set(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR "" CACHE PATH
 # Declaration order matters where a library find_package()s a sibling: the
 # in-tree target must exist before the consumer configures, or the lookup
 # resolves a stale installed copy.
+
+# The suite folder name and the install functions every library calls
+# (phosphor_install_targets and the others). Embedding, see the functions.
+include("${PHOSPHOR_LIBS_CMAKE_DIR}/PhosphorSuite.cmake")
 
 add_subdirectory(libs/phosphor-channel)     # ordered byte frames between two processes with backpressure (shared-memory ring, multiplexed stream) - no Qt
 add_subdirectory(libs/phosphor-identity)    # stable cross-process window identity (composite ids, app-id matching)

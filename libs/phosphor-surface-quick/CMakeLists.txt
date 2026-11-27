@@ -309,7 +309,7 @@ endif()
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaceQuick" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaceQuick" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -323,21 +323,19 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorSurfaceQuick
-    EXPORT PhosphorSurfaceQuickTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorSurfaceQuick EXPORT PhosphorSurfaceQuickTargets)
 
-install(FILES ${phosphorsurfacequick_public_HDRS}
+phosphor_install_devel(FILES ${phosphorsurfacequick_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurfaceQuick
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceQuick/phosphorsurfacequick_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceQuick/phosphorsurfacequick_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurfaceQuick
 )
 
-install(EXPORT PhosphorSurfaceQuickTargets
+phosphor_install_devel(EXPORT PhosphorSurfaceQuickTargets
     FILE PhosphorSurfaceQuickTargets.cmake
     NAMESPACE PhosphorSurfaceQuick::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurfaceQuick
@@ -354,7 +352,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSURFACEQUICK_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceQuickConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceQuickConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurfaceQuick
@@ -367,7 +365,7 @@ if(PHOSPHOR_SURFACE_QUICK_QML_INSTALL)
     # import path at runtime, not through find_package, and an export set
     # that is never install(EXPORT)ed leaves a dangling reference (the same
     # correction phosphor-control made).
-    install(TARGETS PhosphorSurfaceQuickQmlShared
+    phosphor_install_devel(TARGETS PhosphorSurfaceQuickQmlShared
         RUNTIME DESTINATION ${_phosphor_surface_quick_qml_install_dir}
         LIBRARY DESTINATION ${_phosphor_surface_quick_qml_install_dir}
         ARCHIVE DESTINATION ${_phosphor_surface_quick_qml_install_dir}
@@ -376,14 +374,14 @@ if(PHOSPHOR_SURFACE_QUICK_QML_INSTALL)
     # existence so the module install succeeds even when it has not
     # materialised yet (the rpath helper above warns in the same condition).
     if(TARGET ${_phosphor_surface_quick_qml_shared_plugin_target})
-        install(TARGETS ${_phosphor_surface_quick_qml_shared_plugin_target}
+        phosphor_install_devel(TARGETS ${_phosphor_surface_quick_qml_shared_plugin_target}
             RUNTIME DESTINATION ${_phosphor_surface_quick_qml_install_dir}
             LIBRARY DESTINATION ${_phosphor_surface_quick_qml_install_dir}
             ARCHIVE DESTINATION ${_phosphor_surface_quick_qml_install_dir}
         )
     endif()
 
-    install(FILES
+    phosphor_install_devel(FILES
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/surface/qmldir
             ${CMAKE_BINARY_DIR}/qml_install/org/phosphor/surface/PhosphorSurfaceQuickQmlShared.qmltypes
         DESTINATION ${_phosphor_surface_quick_qml_install_dir}

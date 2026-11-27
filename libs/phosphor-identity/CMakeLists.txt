@@ -102,14 +102,17 @@ if(NOT DEFINED KDE_INSTALL_LIBDIR)
     set(KDE_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
 endif()
 
-install(TARGETS PhosphorIdentity
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_devel(TARGETS PhosphorIdentity
     EXPORT PhosphorIdentityTargets
     # The set's base is include/, so each header keeps its PhosphorIdentity/
     # directory under the destination.
     FILE_SET HEADERS DESTINATION ${KDE_INSTALL_INCLUDEDIR}
 )
 
-install(EXPORT PhosphorIdentityTargets
+phosphor_install_devel(EXPORT PhosphorIdentityTargets
     FILE PhosphorIdentityTargets.cmake
     NAMESPACE PhosphorIdentity::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorIdentity
@@ -126,7 +129,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORIDENTITY_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorIdentityConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorIdentityConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorIdentity

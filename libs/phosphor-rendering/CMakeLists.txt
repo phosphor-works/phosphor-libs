@@ -172,29 +172,27 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorRendering
-    EXPORT PhosphorRenderingTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorRendering EXPORT PhosphorRenderingTargets)
 
 # Headers (the regular .h files via DIRECTORY pattern, then the extensionless
 # camelcase forwarders via explicit FILES — FILES_MATCHING with PATTERN doesn't
 # pair well with non-".h" filenames and is easy to break by accident).
-install(DIRECTORY include/PhosphorRendering/
+phosphor_install_devel(DIRECTORY include/PhosphorRendering/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRendering
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES
+phosphor_install_devel(FILES
     include/PhosphorRendering/ShaderCompiler
     include/PhosphorRendering/ShaderNodeRhi
     include/PhosphorRendering/ShaderEffect
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRendering
 )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorRendering/phosphorrendering_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorRendering/phosphorrendering_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorRendering
 )
 
@@ -209,7 +207,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorRendering/phosphorrendering_ex
 
 include(CMakePackageConfigHelpers)
 
-install(EXPORT PhosphorRenderingTargets
+phosphor_install_devel(EXPORT PhosphorRenderingTargets
     FILE PhosphorRenderingTargets.cmake
     NAMESPACE PhosphorRendering::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRendering
@@ -227,7 +225,7 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRenderingConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorRenderingConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorRendering

@@ -61,12 +61,6 @@ relative to a `GenericDataLocation` directory. PlasmaZones passes `phosphor-work
 | Declared parameters | 48 | `PointerShaderContract::kMaxDeclaredParameters` |
 | Minimum gap between ring samples | 8 ms | `PointerHistory::kMinSampleGapMs` |
 
-## Tests
-
-Some cases of `test_pointershaderregistry` and `test_pointercurve` check against the shared shader helper. That helper
-ships with the packs of the app, not with this library. The cases run in the build of the app, which sets
-`PHOSPHOR_LIBS_BUNDLED_PACKS_DIR`. In a build of this tree alone, they skip.
-
 ## Dependencies
 
 - `Qt6::Core`, `Qt6::Gui`

@@ -149,13 +149,10 @@ if(UNIX AND NOT APPLE AND NOT CMAKE_INSTALL_RPATH AND NOT CMAKE_SKIP_RPATH AND N
     endif()
 endif()
 
-install(TARGETS PhosphorMcpIpc
-    EXPORT PhosphorMcpIpcTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    INCLUDES DESTINATION ${KDE_INSTALL_INCLUDEDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorMcpIpc EXPORT PhosphorMcpIpcTargets)
 # The program is in the export set too. A project that finds the installed
 # package gets PhosphorMcpIpc::phosphor-mcp-ipc with the installed path, for
 # the MCP configuration that it writes. A project that builds this tree as
@@ -165,19 +162,16 @@ install(TARGETS PhosphorMcpIpc
 # installed together, or find_package(PhosphorMcpIpc) fails on the missing
 # file, as for phosphor-control-metadata. The rule has no INCLUDES, because
 # a program has no headers for its users.
-install(TARGETS phosphor-mcp-ipc
-    EXPORT PhosphorMcpIpcTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+phosphor_install_targets(TARGETS phosphor-mcp-ipc EXPORT PhosphorMcpIpcTargets)
 
-install(FILES ${phosphormcpipc_public_HDRS}
+phosphor_install_devel(FILES ${phosphormcpipc_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorMcpIpc
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpIpc/phosphormcpipc_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpIpc/phosphormcpipc_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorMcpIpc
 )
 
-install(EXPORT PhosphorMcpIpcTargets
+phosphor_install_devel(EXPORT PhosphorMcpIpcTargets
     FILE PhosphorMcpIpcTargets.cmake
     NAMESPACE PhosphorMcpIpc::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorMcpIpc
@@ -194,7 +188,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORMCPIPC_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpIpcConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorMcpIpcConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorMcpIpc
@@ -204,7 +198,7 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorMcpIpc" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorMcpIpc" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
         add_subdirectory(tests)

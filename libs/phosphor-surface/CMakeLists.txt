@@ -195,7 +195,7 @@ set_target_properties(PhosphorSurface PROPERTIES
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurface" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurface" OR PHOSPHOR_LIBS_TESTS)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
         enable_testing()
         add_subdirectory(tests)
@@ -211,21 +211,19 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
     set(KDE_INSTALL_BINDIR ${CMAKE_INSTALL_BINDIR})
 endif()
 
-install(TARGETS PhosphorSurface
-    EXPORT PhosphorSurfaceTargets
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorSurface EXPORT PhosphorSurfaceTargets)
 
-install(FILES ${phosphorsurface_public_HDRS}
+phosphor_install_devel(FILES ${phosphorsurface_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurface
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurface/phosphorsurface_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurface/phosphorsurface_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorSurface
 )
 
-install(EXPORT PhosphorSurfaceTargets
+phosphor_install_devel(EXPORT PhosphorSurfaceTargets
     FILE PhosphorSurfaceTargets.cmake
     NAMESPACE PhosphorSurface::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurface
@@ -242,7 +240,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSURFACE_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorSurfaceConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorSurface

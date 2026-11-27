@@ -132,19 +132,12 @@ function(_phosphorscreens_target_defaults _target)
         UNITY_BUILD OFF
         AUTOMOC ON
         POSITION_INDEPENDENT_CODE ON
-        # The shipped libraries link in a chain via their public interfaces:
-        # PhosphorScreens.so → PhosphorScreensRuntime.so → PhosphorScreensCore.so.
-        # On distros that don't add KDE_INSTALL_LIBDIR to the default loader
-        # search path (e.g. /usr/local/lib), runtime load of a downstream .so
-        # would fail with "...Core.so: cannot open shared object file". $ORIGIN
-        # tells the dynamic linker to look beside the loading .so first, which is
-        # exactly where all three shipped libs live. BUILD_WITH_INSTALL_RPATH lets
-        # ctest dlopen the in-tree binaries without an explicit
-        # LD_LIBRARY_PATH — without it, in-tree consumers (the demo,
-        # the test runner) inherit CMake's empty build-tree rpath and
-        # fail at sibling-lib resolution before install lands.
+        # The installed libraries link in a chain through their public
+        # interfaces (PhosphorScreens, Runtime, Core) and sit in one directory.
+        # $ORIGIN finds the next one there when the loader does not search the
+        # library directory (for example /usr/local/lib). In the build tree,
+        # CMake's own run path names the directory of each linked library.
         INSTALL_RPATH "$ORIGIN"
-        BUILD_WITH_INSTALL_RPATH ON
     )
     target_compile_features(${_target} PUBLIC cxx_std_20)
 endfunction()
@@ -322,14 +315,12 @@ _phosphorscreens_target_defaults(PhosphorScreens)
 # Install
 # ═══════════════════════════════════════════════════════════════════════════════
 
-install(TARGETS PhosphorScreensCore PhosphorScreensRuntime PhosphorScreens
-    EXPORT PhosphorScreensTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorScreensCore PhosphorScreensRuntime PhosphorScreens EXPORT PhosphorScreensTargets)
 
-install(EXPORT PhosphorScreensTargets
+phosphor_install_devel(EXPORT PhosphorScreensTargets
     FILE PhosphorScreensTargets.cmake
     NAMESPACE PhosphorScreens::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScreens
@@ -346,18 +337,18 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORSCREENS_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScreensConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorScreensConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorScreens
 )
 
-install(DIRECTORY include/PhosphorScreens/
+phosphor_install_devel(DIRECTORY include/PhosphorScreens/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorScreens
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(FILES
+phosphor_install_devel(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreenscore_export.h
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreensruntime_export.h
     ${CMAKE_CURRENT_BINARY_DIR}/phosphorscreens_export.h
@@ -368,7 +359,7 @@ install(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScreens" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScreens" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

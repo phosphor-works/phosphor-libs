@@ -247,6 +247,7 @@ set(phosphorwayland_layershell_SRCS
     src/locksurface.cpp
     src/compositorlost.cpp
     src/compositorlost_internal.h
+    src/pluginlocation.cpp
     src/backgroundeffect.cpp
     src/backgroundeffect_internal.h
     src/qpa/layershellintegration.cpp
@@ -318,6 +319,8 @@ target_link_libraries(PhosphorWayland
         Qt6::GuiPrivate
         Qt6::WaylandClientPrivate
         Wayland::Client
+        # dladdr, for bundledPluginDirectory()
+        ${CMAKE_DL_LIBS}
 )
 
 set_target_properties(PhosphorWayland PROPERTIES
@@ -336,7 +339,7 @@ set_target_properties(PhosphorWayland PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
 
     # test_plugin_layout's stand-in for a newer build of this library: the
@@ -365,6 +368,7 @@ if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR BUILD_TESTING)
             Qt6::GuiPrivate
             Qt6::WaylandClientPrivate
             Wayland::Client
+            ${CMAKE_DL_LIBS}
     )
     set_target_properties(PhosphorWaylandGrownLayout PROPERTIES
         OUTPUT_NAME PhosphorWayland
@@ -391,8 +395,10 @@ target_link_libraries(phosphorwayland-qpa PRIVATE
     Wayland::Client
 )
 target_include_directories(phosphorwayland-qpa PRIVATE ${_ps_gen_dir})
+# Below the library in the build tree as in an embedded install, so
+# PhosphorWayland::bundledPluginDirectory() finds it in both.
 set_target_properties(phosphorwayland-qpa PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins/wayland-shell-integration
+    LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:PhosphorWayland>/plugins/wayland-shell-integration"
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -416,19 +422,17 @@ if(NOT DEFINED KDE_INSTALL_BINDIR)
 endif()
 
 # Library
-install(TARGETS PhosphorWayland
-    EXPORT PhosphorWaylandTargets
-    LIBRARY DESTINATION ${KDE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${KDE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${KDE_INSTALL_BINDIR}
-)
+if(NOT COMMAND phosphor_install_targets)
+    include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
+endif()
+phosphor_install_targets(TARGETS PhosphorWayland EXPORT PhosphorWaylandTargets)
 
 # Export the targets file so downstream find_package(PhosphorWayland) works AND
 # so dependent libraries (PhosphorRendering) can install their own export sets
 # that reference PhosphorWayland::PhosphorWayland. Without this, install(EXPORT) on
 # any consumer fails: "target requires target PhosphorWayland that is not in any
 # export set."
-install(EXPORT PhosphorWaylandTargets
+phosphor_install_devel(EXPORT PhosphorWaylandTargets
     FILE PhosphorWaylandTargets.cmake
     NAMESPACE PhosphorWayland::
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorWayland
@@ -454,7 +458,7 @@ write_basic_package_version_file(
     VERSION ${PHOSPHORWAYLAND_VERSION}
     COMPATIBILITY SameMajorVersion
 )
-install(FILES
+phosphor_install_devel(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorWaylandConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/PhosphorWaylandConfigVersion.cmake"
     DESTINATION ${KDE_INSTALL_LIBDIR}/cmake/PhosphorWayland
@@ -467,7 +471,7 @@ install(FILES
 # writing #include <PhosphorWayland/LayerSurface> builds in-tree, where
 # BUILD_INTERFACE points at the source include directory and the file is
 # present, and then fails against the installed package.
-install(DIRECTORY include/PhosphorWayland/
+phosphor_install_devel(DIRECTORY include/PhosphorWayland/
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorWayland
     FILES_MATCHING
         PATTERN "*.h"
@@ -478,7 +482,7 @@ install(DIRECTORY include/PhosphorWayland/
 )
 
 # Export header
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorwayland_export.h
+phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorwayland_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorWayland
 )
 
@@ -489,17 +493,15 @@ if(NOT DEFINED QT6_INSTALL_PLUGINS)
         set(QT6_INSTALL_PLUGINS "${KDE_INSTALL_LIBDIR}/qt6/plugins")
     endif()
 endif()
-install(TARGETS phosphorwayland-qpa
-    DESTINATION ${QT6_INSTALL_PLUGINS}/wayland-shell-integration
-)
+phosphor_install_qt_plugin(phosphorwayland-qpa wayland-shell-integration)
 
 # The licence notices of the vendored protocols. wayland-scanner's private-code
 # compiles each protocol's interface tables into libPhosphorWayland and the QPA
 # plugin, and every protocol's <copyright> block asks for its notice to go with
 # copies of the software: MIT for most, HPND-sell-variant for the wlroots ones
 # and the data-control protocols. LICENSE.wayland-protocols holds each notice
-# under the protocol's name and SPDX identifier, in this tree's own licence
-# directory beside the Luau and jsoncons notices. Read from the XML at configure
+# under the protocol's name and SPDX identifier, and installs beside the Luau
+# and jsoncons notices (phosphor_install_notice). Read from the XML at configure
 # time, so the file follows the vendored protocols. A protocol whose notice is
 # missing, or whose licence is neither of the two, stops the configure rather
 # than shipping without its notice (phosphor-works/PlasmaZones#1193).
@@ -540,15 +542,10 @@ file(WRITE "${_ps_license_file}" "${_ps_license_text}")
 # The XMLs are inputs of the file above: a protocol changed re-runs the
 # configure, and the CONFIGURE_DEPENDS glob catches one added or removed.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_ps_proto_files})
-install(FILES "${_ps_license_file}" DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs)
-# For a project that builds phosphor-wayland in-tree and installs it on its own
-# terms instead of through these install rules: the notices it has to ship
-# with the library and the plugin.
-set(PHOSPHORWAYLAND_LICENSE_FILES "${_ps_license_file}" CACHE INTERNAL
-    "Licence notices that must ship with libPhosphorWayland and the phosphorwayland-qpa plugin")
+phosphor_install_notice("${_ps_license_file}")
 
 # Protocol XML (for downstream development)
-install(DIRECTORY protocols/
+phosphor_install_devel(DIRECTORY protocols/
     DESTINATION ${KDE_INSTALL_DATADIR}/phosphorwayland/protocols
     FILES_MATCHING PATTERN "*.xml"
 )
