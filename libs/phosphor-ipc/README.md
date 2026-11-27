@@ -347,6 +347,10 @@ The program finds the socket as the router does, with `IpcRouter::socketPathForA
 `$XDG_RUNTIME_DIR/myapp.sock`. `--socket PATH`, before or after the subcommand, overrides it. An app whose socket
 follows another rule fills a `Program` with its own `defaultSocket`.
 
+A program that parses its own command line, such as `afterglow ctl`, runs one generic subcommand with
+`PhosphorIpcCli::runCommand(programName, command, args, socketPath)` in its own `QCoreApplication`.
+`isCommand()` tells whether a word is one of them. The messages then start with `programName`.
+
 ```
 myappctl call theme.setMode --arg mode=dark
 myappctl call pkg.install --arg name=foo --timeout 0   # waits for a deferred answer

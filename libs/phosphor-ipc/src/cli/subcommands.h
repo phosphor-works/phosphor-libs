@@ -21,8 +21,10 @@ namespace PhosphorIpcCli {
 // `--socket` as a positional argument.
 [[nodiscard]] QString stripSocketFlag(QStringList& args, QString* errorMessage = nullptr);
 
-// The name of the running program (Program::name), for messages.
+// The name of the running program, for messages: the one that runCommand()
+// got, else the application name (Program::name).
 [[nodiscard]] QString programName();
+void setProgramName(const QString& name);
 
 // Sanitise a server-supplied string for safe stdout printing.
 // Server-side targets may return / broadcast strings that originated

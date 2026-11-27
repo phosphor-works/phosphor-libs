@@ -104,21 +104,36 @@ int run(const Program& program, int argc, char** argv)
     const QString socketPath =
         !socketPathCli.isEmpty() ? socketPathCli : (program.defaultSocket ? program.defaultSocket() : QString());
 
-    if (subcommand == QLatin1String("call")) {
+    if (!isCommand(subcommand)) {
+        err << programName() << ": unknown subcommand '" << sanitiseForSingleLine(subcommand) << "'\n";
+        printUsage(program, err);
+        return 1;
+    }
+    return runCommand(program.name, subcommand, args, socketPath);
+}
+
+bool isCommand(const QString& command)
+{
+    return command == QLatin1String("call") || command == QLatin1String("list") || command == QLatin1String("schema")
+        || command == QLatin1String("subscribe");
+}
+
+int runCommand(const QString& programName, const QString& command, const QStringList& args, const QString& socketPath)
+{
+    setProgramName(programName);
+    if (command == QLatin1String("call")) {
         return runCall(args, socketPath);
     }
-    if (subcommand == QLatin1String("list")) {
+    if (command == QLatin1String("list")) {
         return runList(args, socketPath);
     }
-    if (subcommand == QLatin1String("schema")) {
+    if (command == QLatin1String("schema")) {
         return runSchema(args, socketPath);
     }
-    if (subcommand == QLatin1String("subscribe")) {
+    if (command == QLatin1String("subscribe")) {
         return runSubscribe(args, socketPath);
     }
-
-    err << programName() << ": unknown subcommand '" << sanitiseForSingleLine(subcommand) << "'\n";
-    printUsage(program, err);
+    QTextStream(stderr) << programName << ": unknown subcommand '" << sanitiseForSingleLine(command) << "'\n";
     return 1;
 }
 

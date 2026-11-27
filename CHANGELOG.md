@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Added
 
+- phosphor-ipc: `PhosphorIpcCli::runCommand()` and `isCommand()` run one generic subcommand in a program that has
+  its own command line and `QCoreApplication`, such as `afterglow ctl`.
 - phosphor-ipc: `PhosphorIpcCli`, the command-line client of a socket (`call`, `list`, `schema`, `subscribe`) as a
   library. An app's program, such as `lambentctl`, calls `PhosphorIpcCli::run()` with `programForApp()`. It came
   from Lambent's `phosphorctl`. (phosphor-works/workspace#76)

@@ -123,9 +123,23 @@ QString stripSocketFlag(QStringList& args, QString* errorMessage)
                        errorMessage);
 }
 
+namespace {
+QString& programNameOverride()
+{
+    static QString name;
+    return name;
+}
+} // namespace
+
 QString programName()
 {
-    return QCoreApplication::applicationName();
+    const QString& name = programNameOverride();
+    return name.isEmpty() ? QCoreApplication::applicationName() : name;
+}
+
+void setProgramName(const QString& name)
+{
+    programNameOverride() = name;
 }
 
 } // namespace PhosphorIpcCli

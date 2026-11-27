@@ -9,6 +9,7 @@
 #include "ipctesthelpers.h"
 
 #include <PhosphorIpc/IpcRouter.h>
+#include <PhosphorIpcCli/PhosphorIpcCli.h>
 
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -139,6 +140,37 @@ private Q_SLOTS:
         const Result unknown = runCli({QStringLiteral("frobnicate")}, none, dir.path());
         QCOMPARE(unknown.exitCode, 1);
         QVERIFY(unknown.err.startsWith(QStringLiteral("ipc-cli-test-ctl: unknown subcommand 'frobnicate'")));
+    }
+
+    void runCommand_worksInAnAppThatParsesItsOwnLine()
+    {
+        // As afterglow ctl uses it: in this process, with its own
+        // QCoreApplication. The client waits in a local event loop, in which
+        // the router of this process answers.
+        QVERIFY(PhosphorIpcCli::isCommand(QStringLiteral("call")));
+        QVERIFY(PhosphorIpcCli::isCommand(QStringLiteral("subscribe")));
+        QVERIFY(!PhosphorIpcCli::isCommand(QStringLiteral("ls")));
+
+        RouterFixture fixture;
+        QVERIFY(fixture.valid());
+        Greeter greeter;
+        QVERIFY(fixture.router.registerTarget(QStringLiteral("greeter"), &greeter));
+        QVERIFY(fixture.router.start(fixture.sockPath));
+
+        QCOMPARE(PhosphorIpcCli::runCommand(
+                     QStringLiteral("host ctl"), QStringLiteral("call"),
+                     {QStringLiteral("greeter.greet"), QStringLiteral("--arg"), QStringLiteral("name=x")},
+                     fixture.sockPath),
+                 0);
+        // --socket in the words overrides the path that the program found.
+        QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("list"),
+                                            {QStringLiteral("--socket"), fixture.sockPath},
+                                            QDir(fixture.dir.path()).filePath(QStringLiteral("none.sock"))),
+                 0);
+        QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("list"), {},
+                                            QDir(fixture.dir.path()).filePath(QStringLiteral("none.sock"))),
+                 2);
+        QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("ls"), {}, fixture.sockPath), 1);
     }
 };
 
