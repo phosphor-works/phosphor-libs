@@ -309,7 +309,7 @@ endif()
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaceQuick" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaceQuick" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

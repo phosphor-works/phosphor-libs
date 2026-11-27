@@ -259,7 +259,7 @@ phosphor_install_devel(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorIpc" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorIpc" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
         add_subdirectory(tests)

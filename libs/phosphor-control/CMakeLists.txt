@@ -675,7 +675,7 @@ endif()
 # enable_testing() here too, like the sibling libraries: a parent project
 # that vendors this one with BUILD_TESTING on but never calls it would
 # otherwise build the tests and register none of them.
-if(BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorControl" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
         add_subdirectory(tests)

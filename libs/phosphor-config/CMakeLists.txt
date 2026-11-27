@@ -176,7 +176,7 @@ phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorconfig_export.h
 # Tests (only when PhosphorConfig is the top-level project or BUILD_TESTING is on)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorConfig" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorConfig" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

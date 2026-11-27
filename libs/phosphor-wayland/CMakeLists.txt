@@ -339,7 +339,7 @@ set_target_properties(PhosphorWayland PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorWayland" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
 
     # test_plugin_layout's stand-in for a newer build of this library: the

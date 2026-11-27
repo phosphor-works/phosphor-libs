@@ -140,7 +140,7 @@ set_target_properties(PhosphorOverlay PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorOverlay" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorOverlay" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

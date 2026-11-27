@@ -184,7 +184,7 @@ set_target_properties(PhosphorProtocol PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorProtocol" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorProtocol" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

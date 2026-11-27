@@ -432,7 +432,7 @@ endif()
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAnimation" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAnimation" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

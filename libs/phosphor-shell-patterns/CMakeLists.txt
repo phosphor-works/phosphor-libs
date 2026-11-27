@@ -119,7 +119,7 @@ set_target_properties(PhosphorShellPatterns PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorShellPatterns" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorShellPatterns" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

@@ -163,16 +163,6 @@ pa_add_test(pa_test_shaderparamtranslation test_shaderparamtranslation.cpp)
 set_tests_properties(pa_test_shaderparamtranslation PROPERTIES
     LABELS "phosphoranimation;phosphoranimationshaders")
 
-# Integration test against an app's bundled animations/ packs. The packs ship
-# with the app (PlasmaZones), so the test runs in its build, which sets
-# PHOSPHOR_LIBS_BUNDLED_PACKS_DIR, and skips in a build of this tree alone.
-pas_add_test(pas_test_builtin_effects test_builtin_effects.cpp)
-if(PHOSPHOR_LIBS_BUNDLED_PACKS_DIR)
-    target_compile_definitions(pas_test_builtin_effects PRIVATE
-        "PHOSPHOR_BUNDLED_PACKS_DIR=\"${PHOSPHOR_LIBS_BUNDLED_PACKS_DIR}\""
-    )
-endif()
-
 # ---- Layer animator tests (ex phosphor-animation-layer) ----
 
 function(pal_add_test _name)

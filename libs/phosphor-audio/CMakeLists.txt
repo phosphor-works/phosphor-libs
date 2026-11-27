@@ -114,7 +114,7 @@ set_target_properties(PhosphorAudio PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAudio" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorAudio" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

@@ -154,7 +154,7 @@ set_target_properties(PhosphorPointer PROPERTIES
 # Tests
 # ===============================================================================
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorPointer" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorPointer" OR PHOSPHOR_LIBS_TESTS)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
         enable_testing()
         add_subdirectory(tests)

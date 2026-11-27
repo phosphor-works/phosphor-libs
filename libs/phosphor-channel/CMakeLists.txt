@@ -142,7 +142,7 @@ phosphor_install_devel(FILES
 
 # The tests use Qt Test. A tree built without Qt (PHOSPHOR_LIBS_QT=OFF, for a
 # program with no Qt) builds the library without them.
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorChannel" OR (BUILD_TESTING AND (NOT DEFINED PHOSPHOR_LIBS_QT OR PHOSPHOR_LIBS_QT)))
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorChannel" OR (PHOSPHOR_LIBS_TESTS AND PHOSPHOR_LIBS_QT))
     enable_testing()
     add_subdirectory(tests)
 endif()

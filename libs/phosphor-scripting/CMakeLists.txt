@@ -202,7 +202,7 @@ set_target_properties(PhosphorScripting PROPERTIES
     UNITY_BUILD OFF
 )
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScripting" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorScripting" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

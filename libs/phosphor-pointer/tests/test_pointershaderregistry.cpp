@@ -590,11 +590,12 @@ void TestPointerShaderRegistry::testInvalidParameterIdConsumesNoLane()
 
 void TestPointerShaderRegistry::testEntryPointScaffoldMatchesTheSharedContract()
 {
-    // Both hosts and the validator assemble a pack the same way, and the
-    // pieces have to agree with data/pointer/shared/pointer_lib.glsl: the
-    // prologue names an include that really ships, and the generated main
-    // calls the entry point the pack defines and writes through the colour
-    // hook the compositor overrides.
+    // Both hosts and the validator assemble a pack the same way. The prologue
+    // includes the shared helper, and the generated main calls the entry point
+    // the pack defines and writes through the color hook the compositor
+    // overrides. PlasmaZones ships the helper, so its test_pointer_shared_helper
+    // checks that the include ships and that the helper agrees with this
+    // scaffold.
     const QString prologue = PointerShaderRegistry::pointerEntryPrologue();
     QVERIFY(prologue.startsWith(QStringLiteral("#version 450")));
     QVERIFY(prologue.contains(QStringLiteral("in vec2 vTexCoord")));
@@ -607,32 +608,10 @@ void TestPointerShaderRegistry::testEntryPointScaffoldMatchesTheSharedContract()
     QVERIFY(
         candidates.at(0).generatedMain.contains(QStringLiteral("fragColor = PZ_FINALIZE_COLOR(pPointer(vTexCoord))")));
 
-    // The include directive resolves against the shipped shared dir.
+    // The prologue includes the shared helper.
     static const QRegularExpression includeRe(QStringLiteral("#include <([^>]+)>"));
     const QRegularExpressionMatch include = includeRe.match(prologue);
     QVERIFY2(include.hasMatch(), "the prologue no longer includes the shared helper");
-#ifndef PHOSPHOR_BUNDLED_PACKS_DIR
-    QSKIP("the shared pointer helper ships with the app's packs: PHOSPHOR_LIBS_BUNDLED_PACKS_DIR is unset");
-#else
-    const QString sharedDir = QStringLiteral(PHOSPHOR_BUNDLED_PACKS_DIR "/pointer/shared");
-    const QString included = sharedDir + QLatin1Char('/') + include.captured(1);
-    QVERIFY2(QFile::exists(included),
-             qPrintable(QStringLiteral("prologue includes %1 which does not ship").arg(included)));
-
-    // That helper is where the entry point's contract lives, and the pack,
-    // not the helper, defines pPointer: a helper that defined it would clash
-    // with every pack.
-    QFile lib(included);
-    QVERIFY(lib.open(QIODevice::ReadOnly));
-    const QString libSource = QString::fromUtf8(lib.readAll());
-    QVERIFY(!libSource.contains(QStringLiteral("vec4 pPointer(vec2")));
-    // The helper also pulls in the uniform contract the generated main's
-    // finalize hook is declared by.
-    QVERIFY(libSource.contains(QStringLiteral("#include <pointer_uniforms.glsl>")));
-    QFile uniforms(sharedDir + QStringLiteral("/pointer_uniforms.glsl"));
-    QVERIFY(uniforms.open(QIODevice::ReadOnly));
-    QVERIFY(QString::fromUtf8(uniforms.readAll()).contains(QStringLiteral("PZ_FINALIZE_COLOR")));
-#endif
 }
 
 void TestPointerShaderRegistry::testIncludePathsResolveTheSharedDirectory()

@@ -187,7 +187,7 @@ set_target_properties(PhosphorRules PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorRules" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorRules" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

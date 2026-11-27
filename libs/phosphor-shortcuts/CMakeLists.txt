@@ -207,6 +207,6 @@ phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/phosphorshortcuts_expor
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(BUILD_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
+if((CMAKE_PROJECT_NAME STREQUAL "PhosphorShortcuts" OR PHOSPHOR_LIBS_TESTS) AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
     add_subdirectory(tests)
 endif()

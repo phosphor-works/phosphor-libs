@@ -29,11 +29,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Removed
 
+- `cmake/PhosphorLibTesting.cmake` (`phosphor_lib_enable_tests()`). Each library gates its tests on
+  `PHOSPHOR_LIBS_TESTS`.
+- `PHOSPHOR_LIBS_BUNDLED_PACKS_DIR` and the animation and pointer test cases that read an app's bundled packs.
+  PlasmaZones checks its packs against the library constants in its own tests.
 - `PhosphorProtocol::Service::Apps`, the single-instance identities of PlasmaZones' settings app (Facet) and layout
   editor. They belong to those programs: PlasmaZones keeps them as `PlasmaZones::AppIdentity`.
 
 ### Changed
 
+- The libraries' tests build only in this repository's own build, or in a library configured on its own. An app or
+  the workspace superbuild that adds the tree with `BUILD_TESTING` on no longer builds them.
 - `PhosphorWayland::ClipboardDevice` uses `ext-data-control-v1` when the compositor has it, and the older
   `wlr-data-control-unstable-v1` only when it does not. KWin advertises only the ext protocol, so clipboard history
   now works there.

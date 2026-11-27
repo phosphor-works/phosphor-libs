@@ -314,6 +314,6 @@ phosphor_install_devel(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorLayer" OR PHOSPHOR_LIBS_TESTS)
     add_subdirectory(tests)
 endif()

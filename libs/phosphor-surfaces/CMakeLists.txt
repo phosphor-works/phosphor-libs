@@ -128,7 +128,7 @@ set_target_properties(PhosphorSurfaces PROPERTIES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaces" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorSurfaces" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

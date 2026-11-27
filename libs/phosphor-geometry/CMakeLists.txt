@@ -131,7 +131,7 @@ phosphor_install_devel(FILES
 # Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(CMAKE_PROJECT_NAME STREQUAL "PhosphorGeometry" OR BUILD_TESTING)
+if(CMAKE_PROJECT_NAME STREQUAL "PhosphorGeometry" OR PHOSPHOR_LIBS_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
