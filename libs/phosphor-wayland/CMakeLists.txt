@@ -493,6 +493,60 @@ install(TARGETS phosphorwayland-qpa
     DESTINATION ${QT6_INSTALL_PLUGINS}/wayland-shell-integration
 )
 
+# The licence notices of the vendored protocols. wayland-scanner's private-code
+# compiles each protocol's interface tables into libPhosphorWayland and the QPA
+# plugin, and every protocol's <copyright> block asks for its notice to go with
+# copies of the software: MIT for most, HPND-sell-variant for the wlroots ones
+# and the data-control protocols. LICENSE.wayland-protocols holds each notice
+# under the protocol's name and SPDX identifier, in this tree's own licence
+# directory beside the Luau and jsoncons notices. Read from the XML at configure
+# time, so the file follows the vendored protocols. A protocol whose notice is
+# missing, or whose licence is neither of the two, stops the configure rather
+# than shipping without its notice (phosphor-works/PlasmaZones#1193).
+file(GLOB _ps_proto_files LIST_DIRECTORIES false CONFIGURE_DEPENDS "${_ps_proto_dir}/*.xml")
+list(SORT _ps_proto_files)
+string(CONCAT _ps_license_text
+    "The licence notices of the Wayland protocols that phosphor-wayland compiles into libPhosphorWayland\n"
+    "and the phosphorwayland-qpa plugin, from the <copyright> block of each protocol XML in\n"
+    "libs/phosphor-wayland/protocols.\n")
+foreach(_ps_proto_file IN LISTS _ps_proto_files)
+    get_filename_component(_ps_proto_name "${_ps_proto_file}" NAME)
+    file(READ "${_ps_proto_file}" _ps_proto_xml)
+    string(REGEX MATCH "<copyright>(.*)</copyright>" _ps_proto_match "${_ps_proto_xml}")
+    if(NOT _ps_proto_match)
+        message(FATAL_ERROR
+            "The protocol ${_ps_proto_name} has no <copyright> block, and its licence notice must ship in "
+            "LICENSE.wayland-protocols. Add the notice of its upstream to the XML.")
+    endif()
+    set(_ps_proto_notice "${CMAKE_MATCH_1}")
+    # Indented in the XML: drop each line's leading whitespace and the blank
+    # lines at either end.
+    string(REGEX REPLACE "\n[ \t]+" "\n" _ps_proto_notice "${_ps_proto_notice}")
+    string(STRIP "${_ps_proto_notice}" _ps_proto_notice)
+    string(REGEX REPLACE "[ \t\n]+" " " _ps_proto_flat "${_ps_proto_notice}")
+    if(_ps_proto_flat MATCHES "Permission is hereby granted, free of charge, to any person obtaining a copy")
+        set(_ps_proto_spdx "MIT")
+    elseif(_ps_proto_flat MATCHES "Permission to use, copy, modify, distribute, and sell this software and its documentation for any purpose is hereby granted without fee")
+        set(_ps_proto_spdx "HPND-sell-variant")
+    else()
+        message(FATAL_ERROR
+            "The licence of the protocol ${_ps_proto_name} is neither MIT nor HPND-sell-variant. Name it in "
+            "libs/phosphor-wayland/CMakeLists.txt and in the licence lists of the packaging recipes.")
+    endif()
+    string(APPEND _ps_license_text "\n----\n\n${_ps_proto_name} (${_ps_proto_spdx}):\n\n${_ps_proto_notice}\n")
+endforeach()
+set(_ps_license_file "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.wayland-protocols")
+file(WRITE "${_ps_license_file}" "${_ps_license_text}")
+# The XMLs are inputs of the file above: a protocol changed re-runs the
+# configure, and the CONFIGURE_DEPENDS glob catches one added or removed.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_ps_proto_files})
+install(FILES "${_ps_license_file}" DESTINATION ${KDE_INSTALL_DATADIR}/licenses/phosphor-libs)
+# For a project that builds phosphor-wayland in-tree and installs it on its own
+# terms instead of through these install rules: the notices it has to ship
+# with the library and the plugin.
+set(PHOSPHORWAYLAND_LICENSE_FILES "${_ps_license_file}" CACHE INTERNAL
+    "Licence notices that must ship with libPhosphorWayland and the phosphorwayland-qpa plugin")
+
 # Protocol XML (for downstream development)
 install(DIRECTORY protocols/
     DESTINATION ${KDE_INSTALL_DATADIR}/phosphorwayland/protocols

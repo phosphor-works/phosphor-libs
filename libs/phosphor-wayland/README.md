@@ -97,6 +97,11 @@ int main(int argc, char** argv) {
 - `wayland-client`, `Qt6::WaylandClientPrivate`, and the protocols vendored in `protocols/` (wlr-layer-shell,
   ext-session-lock, ext-background-effect and the others)
 
+The generated protocol code is compiled into the library and the QPA plugin, so each protocol's licence notice
+(MIT or HPND-sell-variant) ships with them. The install puts the notices in
+`share/licenses/phosphor-libs/LICENSE.wayland-protocols`. A project that builds this library in-tree and installs it
+on its own terms finds that file in `PHOSPHORWAYLAND_LICENSE_FILES`.
+
 ## See also
 
 - [`phosphor-layer`](../phosphor-layer/README.md): the policy layer (roles, registry for each screen, topology coordinator) on `LayerSurface`.

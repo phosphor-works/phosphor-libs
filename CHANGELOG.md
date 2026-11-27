@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ## [Unreleased]
 
+### Added
+
+- `phosphor-wayland` installs the licence notices of the Wayland protocols it compiles in, as
+  `share/licenses/phosphor-libs/LICENSE.wayland-protocols`: each protocol's notice under its name and SPDX identifier
+  (MIT or HPND-sell-variant), read from the vendored XML at configure time. A protocol with no notice, or with another
+  licence, stops the configure. `PHOSPHORWAYLAND_LICENSE_FILES` names the file for a project that builds the library
+  in-tree and installs it on its own terms. (phosphor-works/PlasmaZones#1193)
+
 ### Removed
 
 - `PhosphorProtocol::Service::Apps`, the single-instance identities of PlasmaZones' settings app (Facet) and layout

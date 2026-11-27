@@ -144,6 +144,7 @@ stdenv.mkDerivation {
       lgpl21Plus
       mit
       boost
+      hpndSellVariant
     ];
     platforms = [
       "x86_64-linux"
