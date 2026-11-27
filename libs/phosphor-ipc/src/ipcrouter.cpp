@@ -39,6 +39,7 @@
 
 #include <sys/socket.h> // getsockopt, SO_PEERCRED
 #include <sys/stat.h> // chmod, lstat
+#include <sys/un.h> // sockaddr_un
 #include <unistd.h> // geteuid, link, unlink, rmdir
 
 namespace PhosphorIpc {
@@ -339,6 +340,58 @@ QString IpcRouter::socketEnvironmentVariable(const QString& appName)
     QString name = appName.toUpper();
     name.replace(QLatin1Char('-'), QLatin1Char('_'));
     return name + QStringLiteral("_SOCKET");
+}
+
+QString IpcRouter::displayName(const QString& waylandDisplay, const QString& runtimeDirectory)
+{
+    QString display = waylandDisplay;
+    if (!runtimeDirectory.isEmpty()) {
+        const QString prefix =
+            runtimeDirectory.endsWith(QLatin1Char('/')) ? runtimeDirectory : runtimeDirectory + QLatin1Char('/');
+        if (display.startsWith(prefix)) {
+            display.remove(0, prefix.size());
+        }
+    }
+    QByteArray bytes = display.toUtf8();
+    if (bytes.startsWith('/')) {
+        bytes.remove(0, 1);
+    }
+    for (char& c : bytes) {
+        const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
+            || c == '_' || c == '.';
+        if (!plain) {
+            c = '_';
+        }
+    }
+    return bytes.isEmpty() ? QStringLiteral("wayland-0") : QString::fromLatin1(bytes);
+}
+
+QString IpcRouter::displaySocketPath(const QString& appName)
+{
+    if (!isAppName(appName)) {
+        qWarning("PhosphorIpc::IpcRouter: '%s' is not an app name", qPrintable(appName));
+        return {};
+    }
+    // As the XDG base directory specification asks, a relative runtime
+    // directory is ignored: it would follow the working directory.
+    QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (!runtime.startsWith(QLatin1Char('/'))) {
+        return {};
+    }
+    while (runtime.size() > 1 && runtime.endsWith(QLatin1Char('/'))) {
+        runtime.chop(1);
+    }
+    const QString name = appName + QLatin1Char('-') + displayName(qEnvironmentVariable("WAYLAND_DISPLAY"), runtime)
+        + QStringLiteral(".sock");
+    // The trimmed runtime directory ends with '/' only when it is "/".
+    if (!runtime.endsWith(QLatin1Char('/'))) {
+        runtime += QLatin1Char('/');
+    }
+    const QString path = runtime + name;
+    if (static_cast<size_t>(path.toUtf8().size()) >= sizeof(sockaddr_un::sun_path)) {
+        return {};
+    }
+    return path;
 }
 
 QString IpcRouter::socketPathForApp(const QString& appName)

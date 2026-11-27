@@ -12,6 +12,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 
 ### Added
 
+- phosphor-ipc: `PhosphorIpcCli`, the command-line client of a socket (`call`, `list`, `schema`, `subscribe`) as a
+  library. An app's program, such as `lambentctl`, calls `PhosphorIpcCli::run()` with `programForApp()`. It came
+  from Lambent's `phosphorctl`. (phosphor-works/workspace#76)
+- phosphor-ipc: `IpcRouter::displayName()` and `displaySocketPath(appName)` give the socket of an app with one
+  instance on each Wayland display, `$XDG_RUNTIME_DIR/<app>-<display>.sock`, by Afterglow's rule for its sockets.
 - phosphor-ipc: `IpcRouter::defaultSocketPath(appName)`, `socketEnvironmentVariable(appName)` and
   `socketPathForApp(appName)` give each app its own socket, `$XDG_RUNTIME_DIR/<app>.sock`, which the variable
   `<APP>_SOCKET` overrides. (phosphor-works/workspace#76)

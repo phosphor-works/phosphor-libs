@@ -10,7 +10,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-set(PHOSPHORIPC_VERSION "0.4.0")
+set(PHOSPHORIPC_VERSION "0.5.0")
 
 # The Qt floor this library requires AND advertises in its generated
 # PhosphorIpcConfig.cmake. Taken from the top-level QT_MIN_VERSION when built in-tree so
@@ -151,6 +151,65 @@ set_target_properties(PhosphorIpc PROPERTIES
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Command-line client
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# PhosphorIpcCli is the command-line client of a socket (call, list, schema,
+# subscribe) as a library. Each app has a small program of its own
+# (lambentctl, phosphorctl) that names its socket and calls
+# PhosphorIpcCli::run(). It needs QtCore and QtNetwork only, but links
+# PhosphorIpc for the wire format and the socket names.
+
+set(phosphoripccli_public_HDRS
+    include/PhosphorIpcCli/PhosphorIpcCli.h
+)
+
+add_library(PhosphorIpcCli SHARED
+    ${phosphoripccli_public_HDRS}
+    src/cli/client.cpp
+    src/cli/client.h
+    src/cli/run.cpp
+    src/cli/subcommand_call.cpp
+    src/cli/subcommand_list.cpp
+    src/cli/subcommand_schema.cpp
+    src/cli/subcommand_subscribe.cpp
+    src/cli/subcommands.h
+    src/cli/subcommands_common.cpp
+)
+
+add_library(PhosphorIpc::PhosphorIpcCli ALIAS PhosphorIpcCli)
+
+generate_export_header(PhosphorIpcCli
+    EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpcCli/phosphoripccli_export.h
+    EXPORT_MACRO_NAME PHOSPHORIPCCLI_EXPORT
+)
+
+target_include_directories(PhosphorIpcCli
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+        $<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR}>
+)
+
+target_compile_features(PhosphorIpcCli PUBLIC cxx_std_20)
+
+target_link_libraries(PhosphorIpcCli
+    PUBLIC
+        Qt6::Core
+    PRIVATE
+        PhosphorIpc::PhosphorIpc
+        Qt6::Network
+)
+
+set_target_properties(PhosphorIpcCli PROPERTIES
+    VERSION ${PHOSPHORIPC_VERSION}
+    SOVERSION 0
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    UNITY_BUILD OFF
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # QML module registrar
 # ═══════════════════════════════════════════════════════════════════════════════
 #
@@ -224,12 +283,17 @@ if(NOT COMMAND phosphor_install_targets)
     include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/PhosphorSuite.cmake")
 endif()
 phosphor_install_targets(TARGETS PhosphorIpc EXPORT PhosphorIpcTargets)
+phosphor_install_targets(TARGETS PhosphorIpcCli EXPORT PhosphorIpcTargets)
 
 phosphor_install_devel(FILES ${phosphoripc_public_HDRS}
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIpc
 )
 phosphor_install_devel(FILES ${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpc/phosphoripc_export.h
     DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIpc
+)
+phosphor_install_devel(FILES ${phosphoripccli_public_HDRS}
+        ${CMAKE_CURRENT_BINARY_DIR}/PhosphorIpcCli/phosphoripccli_export.h
+    DESTINATION ${KDE_INSTALL_INCLUDEDIR}/PhosphorIpcCli
 )
 
 phosphor_install_devel(EXPORT PhosphorIpcTargets

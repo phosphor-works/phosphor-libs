@@ -5,7 +5,7 @@
 
 phosphor-ipc is a typed JSON channel over a Unix socket for Phosphor applications such as phosphor-shell. With it,
 compositor keybinds, external scripts and other shells start Phosphor actions by verb
-(`phosphorctl call launcher.toggle`). The existing D-Bus interface does not change.
+(`lambentctl call launcher.toggle`). The existing D-Bus interface does not change.
 
 ## Responsibility
 
@@ -30,8 +30,9 @@ The library owns these parts:
 - **`IpcEngine::install`** is a small bridge. It stores the application's `IpcRouter` on the `QQmlEngine`, so that
   `IpcTarget` instances find it in `componentComplete`.
 
-The **`phosphorctl`** CLI of Lambent (`lambent/cli/phosphorctl/`) is a client for the command line. It has the
-subcommands `call`, `list`, `schema` and `subscribe`.
+- **`PhosphorIpcCli`** is the client for the command line, as a second library. It has the subcommands `call`,
+  `list`, `schema` and `subscribe`. Each app has a small program of its own that names its socket, such as Lambent's
+  `lambentctl` and the compositor's `phosphorctl`. See [Command-line program](#command-line-program).
 
 ### Socket names
 
@@ -46,10 +47,22 @@ starts with a letter.
 
 The server and its clients use `socketPathForApp()`, so that they agree on the path. The variable lets a test session
 or a nested session use a private socket. An app with more than one instance gives each instance its own path (for
-example Afterglow's `afterglow-<id>.sock`).
+example Afterglow's `afterglow-<display>-<pid>.sock`).
 
-The name `phosphor` belongs to the Phosphor compositor. Its socket is `$XDG_RUNTIME_DIR/phosphor.$WAYLAND_DISPLAY.sock`,
-one for each compositor instance, and the compositor exports the path as `PHOSPHOR_SOCKET` to its clients.
+An app with one instance on each Wayland display names its socket after the display:
+
+| Function | Result for the app `phosphor` with `WAYLAND_DISPLAY=wayland-1` |
+|---|---|
+| `IpcRouter::displayName(display, runtime)` | `wayland-1` |
+| `IpcRouter::displaySocketPath(app)` | `$XDG_RUNTIME_DIR/phosphor-wayland-1.sock` |
+
+`displayName()` follows Afterglow's rule for `afterglow-<display>.sock`. A display in the runtime directory loses that
+directory, and then a leading `/`. Each byte that is not an ASCII letter, a digit, `-`, `_` or `.` becomes `_`. An
+empty display is `wayland-0`. `displaySocketPath()` gives nothing when `XDG_RUNTIME_DIR` is not an absolute path, or
+when the path is longer than 107 bytes, the limit of a socket address on Linux.
+
+The name `phosphor` belongs to the Phosphor compositor. Its socket is `displaySocketPath("phosphor")`, and the
+compositor exports the path as `PHOSPHOR_SOCKET` to its clients.
 
 ## Key types
 
@@ -57,8 +70,9 @@ one for each compositor instance, and the compositor exports the path as `PHOSPH
 |------|---------|
 | `PhosphorIpc::IpcRouter` | The dispatcher of one application. It owns one `QLocalServer`, the registry of named targets, and the subscription set of each socket. It is single-threaded and runs on the thread that owns it, normally the GUI thread. |
 | `PhosphorIpc::IpcTarget` | QML element. Each instance binds to one target name. The functions declared on the instance become callable. The explicit `emitEvent(name, args)` sends wire events. |
-| `IpcProtocol.h` | The wire-format constants, the parser and the serializer, in the namespace `PhosphorIpc`. The router, `IpcClient` and the `phosphorctl` binary share them. |
+| `IpcProtocol.h` | The wire-format constants, the parser and the serializer, in the namespace `PhosphorIpc`. The router, `IpcClient` and `PhosphorIpcCli` share them. |
 | `PhosphorIpc::IpcEngine` | Bridge between an `IpcRouter` that the application owns and the `IpcTarget` instances in QML. |
+| `PhosphorIpcCli::run` | Runs the command-line client for a `PhosphorIpcCli::Program`: its name, its version and how it finds its socket. `programForApp()` makes the program of an app. |
 | `PhosphorIpc::IpcSchemaGenerator` | Converts a `QMetaObject` to a JSON Schema. The schema response uses it, and the CLI uses it to validate arguments on the client side. |
 | `PhosphorIpc::IpcCallContext` | Mixin for a C++ target. `sendErrorReply(message)` fails the running wire call with `CALL_FAILED`, as `QDBusContext` does for D-Bus. `deferReply()` gives the answer to an `IpcPendingReply` for later. `connectionId()` names the client connection that made the call, and `connectionPid()` names the process that opened it. |
 | `PhosphorIpc::IpcClient` | Asynchronous client over one `QLocalSocket`: calls, the target list, schemas and subscriptions. It never blocks the event loop. |
@@ -121,7 +135,7 @@ IpcTarget {
 }
 ```
 
-The schema generator shows both `Q_INVOKABLE` methods and declared signals. Thus `phosphorctl schema theme` shows
+The schema generator shows both `Q_INVOKABLE` methods and declared signals. Thus `myappctl schema theme` shows
 the signals that a client can subscribe to.
 
 **A call to the QML signal (for example `modeChanged(mode)`) does NOT broadcast to wire subscribers**. It only starts
@@ -256,7 +270,7 @@ the kernel gives no answer.
 connection subscribed to something. Use it to send the output of a call to the client that made the call. The frame
 names the event with `target` and `signal`, and has no `subscriptionId`.
 
-Declare the event as a signal on the target, as for broadcast events, so that `phosphorctl schema` lists it. The
+Declare the event as a signal on the target, as for broadcast events, so that `myappctl schema` lists it. The
 schema then also offers the signal for subscription. A subscriber gets only what `broadcastEvent` sends under that
 name. Thus a target that wants both kinds of listener calls both.
 
@@ -286,8 +300,8 @@ The router's destructor sends `connectionClosed` for the connections that it clo
 the router as a member is partly destroyed. Thus the receiver declares the router after the state that its slot
 uses, or disconnects first.
 
-A client that gets an event that it did not subscribe to can ignore it. `phosphorctl call` prints the events sent to
-its call on stderr. `phosphorctl subscribe` prints every event that it receives.
+A client that gets an event that it did not subscribe to can ignore it. `myappctl call` prints the events sent to
+its call on stderr. `myappctl subscribe` prints every event that it receives.
 
 `IpcRouter::connectionOpened(id)` comes when the router accepts a connection, before it reads from it.
 `connectionCount()` returns the number of connections that are open now. `setMaxConnections(max)` sets a limit on
@@ -313,35 +327,59 @@ its connections immediately, as `stop()` does. Each connection closes when the c
 to it. A client that does not read within the timeout (`DefaultFlushTimeoutMs`, 5 seconds, or the second argument)
 loses the rest. The delivery does not need the router, so you can destroy the router immediately after the call.
 
-### CLI side
+### Command-line program
+
+An app gets its command-line client with one call. Link `PhosphorIpc::PhosphorIpcCli`:
+
+```cpp
+#include <PhosphorIpcCli/PhosphorIpcCli.h>
+
+int main(int argc, char** argv)
+{
+    return PhosphorIpcCli::run(PhosphorIpcCli::programForApp(QStringLiteral("myappctl"), QStringLiteral("myapp"),
+                                                             QStringLiteral("1.0.0"),
+                                                             QStringLiteral("Controls a running MyApp.")),
+                               argc, argv);
+}
+```
+
+The program finds the socket as the router does, with `IpcRouter::socketPathForApp()`: `$MYAPP_SOCKET`, else
+`$XDG_RUNTIME_DIR/myapp.sock`. `--socket PATH`, before or after the subcommand, overrides it. An app whose socket
+follows another rule fills a `Program` with its own `defaultSocket`.
 
 ```
-phosphorctl call theme.setMode --arg mode=dark
-phosphorctl call pkg.install --arg name=foo --timeout 0   # waits for a deferred answer
-phosphorctl list
-phosphorctl schema theme | jq
-phosphorctl subscribe theme.modeChanged    # stays connected, streams events
+myappctl call theme.setMode --arg mode=dark
+myappctl call pkg.install --arg name=foo --timeout 0   # waits for a deferred answer
+myappctl list
+myappctl schema theme | jq
+myappctl subscribe theme.modeChanged    # stays connected, streams events
 ```
 
-`phosphorctl` finds the socket of the app that `--app NAME` selects, as `IpcRouter::socketPathForApp()` does.
-`--socket PATH` overrides it. See the Lambent documentation for its default app.
+| Exit code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | A usage error |
+| 2 | A connection or I/O error, or no socket path |
+| 3 | An error from the server, such as `NO_SUCH_TARGET` |
+| 4 | A setup failure, such as the signal handlers of `subscribe` |
 
-By default, `phosphorctl call` waits two seconds for the answer. `--timeout SECONDS` changes that time.
+By default, `myappctl call` waits two seconds for the answer. `--timeout SECONDS` changes that time.
 `--timeout 0` waits without a limit, for a deferred call that answers when its work ends. Events that the target sends
 to the call go to stderr when they arrive, one compact JSON line each. Thus stdout has only the result.
 
 ### Acceptance harness
 
 `phosphor-shell-libs/examples/phosphor-ipc-demo/` is the canonical end-to-end test. The demo window has a live event
-log panel that shows the broadcast stream. Run `phosphorctl call count.increment` from one other terminal, and the
-events show in the demo window in real time. You do not need a separate `phosphorctl subscribe` terminal:
+log panel that shows the broadcast stream. Run `call count.increment` with any program of `PhosphorIpcCli`, such as
+`lambentctl`, from one other terminal, and the events show in the demo window in real time. You do not need a
+separate `subscribe` terminal:
 
 ```
 # terminal 1
 ./bin/phosphor-ipc-demo --socket /tmp/p.sock
 # terminal 2
-phosphorctl --socket /tmp/p.sock call count.increment        # demo's event log gains an entry
-phosphorctl --socket /tmp/p.sock subscribe count.countChanged   # optional: same events on stdout
+lambentctl --socket /tmp/p.sock call count.increment        # demo's event log gains an entry
+lambentctl --socket /tmp/p.sock subscribe count.countChanged   # optional: same events on stdout
 ```
 
 ## Wire protocol
@@ -579,7 +617,7 @@ The library does not use QtGui, and the static QML module `PhosphorIpcQml` does 
 
 ## See also
 
-- `lambent/cli/phosphorctl/` in Lambent: the typed CLI for the socket.
+- `lambent/cli/lambentctl/` in Lambent: the program of `PhosphorIpcCli` for Lambent's socket.
 - [phosphor-mcp-ipc](../phosphor-mcp-ipc/README.md): an MCP server that offers the calls of a socket to an agent,
   built on `IpcClient`.
 - `phosphor-shell-libs/examples/phosphor-ipc-demo/`: the acceptance harness. Three `IpcTarget` instances

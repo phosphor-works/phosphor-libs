@@ -127,6 +127,24 @@ public:
     // not empty, else defaultSocketPath(appName).
     [[nodiscard]] static QString socketPathForApp(const QString& appName);
 
+    // An app with one instance on each Wayland display, such as the
+    // compositor, names its socket after the display too. The rule is the
+    // one of Afterglow's afterglow-<display>.sock (AfterglowProto::
+    // displayName), so that the suite agrees on it.
+
+    // `waylandDisplay` (WAYLAND_DISPLAY), safe in a file name. A display in
+    // `runtimeDirectory` loses that directory first, because Wayland reads
+    // a relative display there: both spellings name one display. Then a
+    // leading '/' goes, and each byte that is not an ASCII letter, a digit,
+    // '-', '_' or '.' becomes '_'. "wayland-0" when nothing is left.
+    [[nodiscard]] static QString displayName(const QString& waylandDisplay, const QString& runtimeDirectory = {});
+
+    // $XDG_RUNTIME_DIR/<appName>-<display>.sock, with displayName() of
+    // $WAYLAND_DISPLAY. Empty when XDG_RUNTIME_DIR is not an absolute path,
+    // or when the path is longer than a socket address takes (107 bytes on
+    // Linux).
+    [[nodiscard]] static QString displaySocketPath(const QString& appName);
+
     // Bind the listening socket at `socketPath`. There is no default
     // path: an app gives its own, usually socketPathForApp(). An empty
     // path makes start() fail. Give an absolute path: a name that does
