@@ -78,3 +78,13 @@ phosphoripc_add_test(test_phosphor_ipc_umask)
 # libPhosphorIpc too, which a definition that stays inside the executable
 # is not.
 set_target_properties(test_phosphor_ipc_umask PROPERTIES ENABLE_EXPORTS ON)
+
+# The command-line client runs as a child process, as an app's program
+# (lambentctl) runs, against the router of the test.
+add_executable(phosphor_ipc_cli_fixture phosphor_ipc_cli_fixture.cpp)
+target_link_libraries(phosphor_ipc_cli_fixture PRIVATE PhosphorIpc::PhosphorIpcCli)
+phosphoripc_add_test(test_phosphor_ipc_cli)
+target_compile_definitions(test_phosphor_ipc_cli
+    PRIVATE PHOSPHOR_IPC_CLI_FIXTURE="$<TARGET_FILE:phosphor_ipc_cli_fixture>"
+)
+add_dependencies(test_phosphor_ipc_cli phosphor_ipc_cli_fixture)

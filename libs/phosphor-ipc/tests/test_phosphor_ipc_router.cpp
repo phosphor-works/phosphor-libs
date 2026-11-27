@@ -326,6 +326,8 @@ private Q_SLOTS:
     void start_needsAPath();
     void socketPathForApp_takesTheVariableFirst();
     void appName_rejectsUnsafeNames();
+    void displayName_followsAfterglow();
+    void displaySocketPath_namesTheDisplay();
 };
 
 void TestPhosphorIpcRouter::register_addsAndEmits()
@@ -1110,6 +1112,61 @@ void TestPhosphorIpcRouter::appName_rejectsUnsafeNames()
         QVERIFY2(IpcRouter::defaultSocketPath(name).isEmpty(), qPrintable(name));
         QVERIFY2(IpcRouter::socketEnvironmentVariable(name).isEmpty(), qPrintable(name));
     }
+}
+
+void TestPhosphorIpcRouter::displayName_followsAfterglow()
+{
+    // The cases of Afterglow's SocketTest (AfterglowProto::displayName), so
+    // that the two rules stay one.
+    QCOMPARE(IpcRouter::displayName(QStringLiteral("wayland-1")), QStringLiteral("wayland-1"));
+    QCOMPARE(IpcRouter::displayName(QString()), QStringLiteral("wayland-0"));
+    QCOMPARE(IpcRouter::displayName(QStringLiteral("/")), QStringLiteral("wayland-0"));
+    QCOMPARE(IpcRouter::displayName(QStringLiteral("/run/user/1000/wayland-2")),
+             QStringLiteral("run_user_1000_wayland-2"));
+    QCOMPARE(IpcRouter::displayName(QStringLiteral("a b..c_d")), QStringLiteral("a_b..c_d"));
+    // Each byte of a character that is not ASCII.
+    QCOMPARE(IpcRouter::displayName(QString::fromUtf8("\xc3\xa9")), QStringLiteral("__"));
+    // Both spellings of a display in the runtime directory name one socket.
+    for (const QString& runtime : {QStringLiteral("/run/user/1000"), QStringLiteral("/run/user/1000/")}) {
+        QCOMPARE(IpcRouter::displayName(QStringLiteral("/run/user/1000/wayland-1"), runtime),
+                 QStringLiteral("wayland-1"));
+    }
+    QCOMPARE(IpcRouter::displayName(QStringLiteral("/tmp/wl"), QStringLiteral("/run/user/1000")),
+             QStringLiteral("tmp_wl"));
+}
+
+void TestPhosphorIpcRouter::displaySocketPath_namesTheDisplay()
+{
+    const bool runtimeWasSet = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    const QByteArray runtimeBefore = qgetenv("XDG_RUNTIME_DIR");
+    const bool displayWasSet = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
+    const QByteArray displayBefore = qgetenv("WAYLAND_DISPLAY");
+
+    qputenv("XDG_RUNTIME_DIR", QByteArrayLiteral("/run/user/1000/"));
+    qputenv("WAYLAND_DISPLAY", QByteArrayLiteral("/run/user/1000/wayland-1"));
+    const QString absolute = IpcRouter::displaySocketPath(QStringLiteral("phosphor"));
+    qunsetenv("WAYLAND_DISPLAY");
+    const QString noDisplay = IpcRouter::displaySocketPath(QStringLiteral("phosphor"));
+    qputenv("XDG_RUNTIME_DIR", QByteArrayLiteral("relative"));
+    const QString relative = IpcRouter::displaySocketPath(QStringLiteral("phosphor"));
+    // 107 bytes is the most that a socket address takes on Linux.
+    qputenv("XDG_RUNTIME_DIR", QByteArray(QByteArray("/") + QByteArray(120, 'x')));
+    const QString tooLong = IpcRouter::displaySocketPath(QStringLiteral("phosphor"));
+
+    if (runtimeWasSet) {
+        qputenv("XDG_RUNTIME_DIR", runtimeBefore);
+    } else {
+        qunsetenv("XDG_RUNTIME_DIR");
+    }
+    if (displayWasSet) {
+        qputenv("WAYLAND_DISPLAY", displayBefore);
+    } else {
+        qunsetenv("WAYLAND_DISPLAY");
+    }
+    QCOMPARE(absolute, QStringLiteral("/run/user/1000/phosphor-wayland-1.sock"));
+    QCOMPARE(noDisplay, QStringLiteral("/run/user/1000/phosphor-wayland-0.sock"));
+    QCOMPARE(relative, QString());
+    QCOMPARE(tooLong, QString());
 }
 
 QTEST_GUILESS_MAIN(TestPhosphorIpcRouter)
