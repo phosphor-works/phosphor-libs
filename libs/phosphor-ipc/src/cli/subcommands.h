@@ -7,6 +7,14 @@
 
 namespace PhosphorIpcCli {
 
+// The exit codes. They are those of afterglow ctl, so that it can run these
+// subcommands with no change to its own codes.
+inline constexpr int ExitSuccess = 0;
+// No socket, a connection or I/O error, an error from the server
+// (NO_SUCH_TARGET...), or a setup failure such as the signal handlers.
+inline constexpr int ExitError = 1;
+inline constexpr int ExitUsage = 2;
+
 // Strip `--socket PATH` / `--socket=PATH` / `-s PATH` from the
 // passed-in arg list and return the resolved path (or empty if no
 // flag was supplied). Called by both the top-level dispatcher and
@@ -47,12 +55,7 @@ void setProgramName(const QString& name);
 
 // Subcommand entry points. Each takes the post-subcommand argument
 // list (after the subcommand name itself), plus the resolved socket
-// path. Returns the process exit code:
-//   0 - success
-//   1 - usage error
-//   2 - connection / I/O error
-//   3 - server-side error (NO_SUCH_TARGET, etc.)
-//   4 - internal setup failure (e.g. signal-handler install)
+// path. Returns the process exit code, one of those below.
 [[nodiscard]] int runCall(QStringList args, QString socketPath);
 [[nodiscard]] int runList(QStringList args, QString socketPath);
 [[nodiscard]] int runSchema(QStringList args, QString socketPath);

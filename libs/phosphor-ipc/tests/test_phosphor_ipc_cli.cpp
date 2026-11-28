@@ -124,11 +124,11 @@ private Q_SLOTS:
         const QString none = QDir(dir.path()).filePath(QStringLiteral("none.sock"));
 
         const Result noServer = runCli({QStringLiteral("list")}, none, dir.path());
-        QCOMPARE(noServer.exitCode, 2);
+        QCOMPARE(noServer.exitCode, 1);
         QVERIFY2(noServer.err.startsWith(QStringLiteral("ipc-cli-test-ctl list: ")), qPrintable(noServer.err));
 
         const Result usage = runCli({}, none, dir.path());
-        QCOMPARE(usage.exitCode, 1);
+        QCOMPARE(usage.exitCode, 2);
         QVERIFY(usage.err.startsWith(QStringLiteral("usage: ipc-cli-test-ctl [--socket PATH]")));
         QVERIFY(usage.err.contains(QStringLiteral("Controls the test router.")));
         QVERIFY(usage.err.contains(QStringLiteral("$IPC_CLI_TEST_SOCKET")));
@@ -138,7 +138,7 @@ private Q_SLOTS:
         QCOMPARE(version.out.trimmed(), QStringLiteral("ipc-cli-test-ctl 1.2.3"));
 
         const Result unknown = runCli({QStringLiteral("frobnicate")}, none, dir.path());
-        QCOMPARE(unknown.exitCode, 1);
+        QCOMPARE(unknown.exitCode, 2);
         QVERIFY(unknown.err.startsWith(QStringLiteral("ipc-cli-test-ctl: unknown subcommand 'frobnicate'")));
     }
 
@@ -169,8 +169,8 @@ private Q_SLOTS:
                  0);
         QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("list"), {},
                                             QDir(fixture.dir.path()).filePath(QStringLiteral("none.sock"))),
-                 2);
-        QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("ls"), {}, fixture.sockPath), 1);
+                 1);
+        QCOMPARE(PhosphorIpcCli::runCommand(QStringLiteral("host ctl"), QStringLiteral("ls"), {}, fixture.sockPath), 2);
     }
 };
 

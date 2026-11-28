@@ -362,10 +362,10 @@ myappctl subscribe theme.modeChanged    # stays connected, streams events
 | Exit code | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | A usage error |
-| 2 | A connection or I/O error, or no socket path |
-| 3 | An error from the server, such as `NO_SUCH_TARGET` |
-| 4 | A setup failure, such as the signal handlers of `subscribe` |
+| 1 | An error: no socket path, a connection or I/O error, an error from the server such as `NO_SUCH_TARGET`, or a setup failure such as the signal handlers of `subscribe` |
+| 2 | A usage error |
+
+These are the exit codes of `afterglow ctl`, so that it runs the subcommands with its own codes.
 
 By default, `myappctl call` waits two seconds for the answer. `--timeout SECONDS` changes that time.
 `--timeout 0` waits without a limit, for a deferred call that answers when its work ends. Events that the target sends

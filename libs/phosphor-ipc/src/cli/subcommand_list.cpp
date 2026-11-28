@@ -26,7 +26,7 @@ int runList(QStringList args, QString socketPath)
     const QString lateSocket = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << " list: " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
     if (!lateSocket.isEmpty()) {
         socketPath = lateSocket;
@@ -34,13 +34,13 @@ int runList(QStringList args, QString socketPath)
 
     if (!args.isEmpty()) {
         err << programName() << " list: takes no arguments\n";
-        return 1;
+        return ExitUsage;
     }
 
     Client client;
     if (!client.connectTo(socketPath)) {
         err << programName() << " list: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
 
     QJsonObject req;
@@ -50,7 +50,7 @@ int runList(QStringList args, QString socketPath)
     const auto resp = client.request(req);
     if (!resp.has_value()) {
         err << programName() << " list: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
     if (resp->value(QLatin1String(PhosphorIpc::Field::Type)).toString()
         == QLatin1String(PhosphorIpc::ResponseType::Error)) {
@@ -58,7 +58,7 @@ int runList(QStringList args, QString socketPath)
             << " list: " << sanitiseForSingleLine(resp->value(QLatin1String(PhosphorIpc::Field::Code)).toString())
             << ": " << sanitiseForSingleLine(resp->value(QLatin1String(PhosphorIpc::Field::Message)).toString())
             << "\n";
-        return 3;
+        return ExitError;
     }
     const QJsonArray names = resp->value(QLatin1String(PhosphorIpc::Field::Result)).toArray();
     QStringList sorted;
@@ -83,7 +83,7 @@ int runList(QStringList args, QString socketPath)
         // target output framing.
         out << sanitiseForSingleLine(name) << "\n";
     }
-    return 0;
+    return ExitSuccess;
 }
 
 } // namespace PhosphorIpcCli

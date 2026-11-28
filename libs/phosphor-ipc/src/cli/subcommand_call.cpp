@@ -70,7 +70,7 @@ std::optional<int> parseTimeoutMs(const QString& raw)
         return std::nullopt;
     }
     if (seconds == 0) {
-        return 0;
+        return ExitSuccess;
     }
     // A positive value never rounds down to "no limit".
     return std::max(1, static_cast<int>(std::lround(seconds * 1000)));
@@ -86,7 +86,7 @@ int runCall(QStringList args, QString socketPath)
     const QString lateSocket = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << " call: " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
     if (!lateSocket.isEmpty()) {
         socketPath = lateSocket;
@@ -94,13 +94,13 @@ int runCall(QStringList args, QString socketPath)
 
     if (args.isEmpty()) {
         err << programName() << " call: expects <target>.<fn> [--arg name=value ...] [--timeout SECONDS]\n";
-        return 1;
+        return ExitUsage;
     }
     const QString targetDotFn = args.first();
     const int dotIdx = targetDotFn.indexOf(QLatin1Char('.'));
     if (dotIdx <= 0 || dotIdx == targetDotFn.size() - 1) {
         err << programName() << " call: first argument must be in the form <target>.<fn>\n";
-        return 1;
+        return ExitUsage;
     }
     const QString target = targetDotFn.left(dotIdx);
     const QString fn = targetDotFn.mid(dotIdx + 1);
@@ -116,7 +116,7 @@ int runCall(QStringList args, QString socketPath)
             if (a == QLatin1String("--timeout")) {
                 if (i + 1 >= args.size()) {
                     err << programName() << " call: --timeout requires a number of seconds\n";
-                    return 1;
+                    return ExitUsage;
                 }
                 value = args.at(++i);
             } else {
@@ -126,7 +126,7 @@ int runCall(QStringList args, QString socketPath)
             if (!parsed) {
                 err << programName() << " call: --timeout expects seconds from 0 to " << MaxTimeoutSeconds
                     << " (0 waits without a limit), got '" << sanitiseForSingleLine(value) << "'\n";
-                return 1;
+                return ExitUsage;
             }
             timeoutMs = *parsed;
             continue;
@@ -135,7 +135,7 @@ int runCall(QStringList args, QString socketPath)
         if (a == QLatin1String("--arg") || a == QLatin1String("-a")) {
             if (i + 1 >= args.size()) {
                 err << programName() << " call: --arg requires name=value\n";
-                return 1;
+                return ExitUsage;
             }
             pair = args.at(++i);
         } else if (a.startsWith(QLatin1String("--arg="))) {
@@ -143,12 +143,12 @@ int runCall(QStringList args, QString socketPath)
         } else {
             err << programName() << " call: unexpected argument '" << a
                 << "' (use --arg name=value or --timeout SECONDS)\n";
-            return 1;
+            return ExitUsage;
         }
         const int eq = pair.indexOf(QLatin1Char('='));
         if (eq <= 0) {
             err << programName() << " call: --arg expects name=value, got '" << pair << "'\n";
-            return 1;
+            return ExitUsage;
         }
         // `name` is metadata for the user; the wire only carries
         // positional args (this matches Qt's invokeMethod model).
@@ -159,7 +159,7 @@ int runCall(QStringList args, QString socketPath)
     Client client;
     if (!client.connectTo(socketPath)) {
         err << programName() << " call: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
 
     QJsonObject req;
@@ -177,7 +177,7 @@ int runCall(QStringList args, QString socketPath)
     });
     if (!resp.has_value()) {
         err << programName() << " call: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
     if (resp->value(QLatin1String(PhosphorIpc::Field::Type)).toString()
         == QLatin1String(PhosphorIpc::ResponseType::Error)) {
@@ -196,7 +196,7 @@ int runCall(QStringList args, QString socketPath)
                 << QString::fromUtf8(QJsonDocument(detail.toObject()).toJson(QJsonDocument::Compact).trimmed()) << ")";
         }
         err << "\n";
-        return 3;
+        return ExitError;
     }
 
     const QJsonValue result = resp->value(QLatin1String(PhosphorIpc::Field::Result));
@@ -241,7 +241,7 @@ int runCall(QStringList args, QString socketPath)
             out << d << "\n";
         }
     }
-    return 0;
+    return ExitSuccess;
 }
 
 } // namespace PhosphorIpcCli

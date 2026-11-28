@@ -16,7 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
   its own command line and `QCoreApplication`, such as `afterglow ctl`.
 - phosphor-ipc: `PhosphorIpcCli`, the command-line client of a socket (`call`, `list`, `schema`, `subscribe`) as a
   library. An app's program, such as `lambentctl`, calls `PhosphorIpcCli::run()` with `programForApp()`. It came
-  from Lambent's `phosphorctl`. (phosphor-works/workspace#76)
+  from Lambent's `phosphorctl`. Its exit codes are those of `afterglow ctl`: 0 for success, 1 for an error, 2 for a
+  usage error. (phosphor-works/workspace#76)
 - phosphor-ipc: `IpcRouter::displayName()` and `displaySocketPath(appName)` give the socket of an app with one
   instance on each Wayland display, `$XDG_RUNTIME_DIR/<app>-<display>.sock`, by Afterglow's rule for its sockets.
 - phosphor-ipc: `IpcRouter::defaultSocketPath(appName)`, `socketEnvironmentVariable(appName)` and
