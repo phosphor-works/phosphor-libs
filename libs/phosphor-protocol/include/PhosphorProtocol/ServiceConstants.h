@@ -880,6 +880,15 @@ inline constexpr QLatin1String Id("id");
 //       overview (a signal and its replay method) is removed before release:
 //       nothing read it.
 //
+//       Autotile gains toggleMaximizeToEdges (ss) -> b, on the exact shape of
+//       Scrolling.toggleMaximizeToEdges, and the TileRequestEntry
+//       maximizedToEdges flag gains the tile engine as a second producer. The
+//       KWin effect's maximize interception sends the verb for a window on a
+//       tiling screen, and the batch arm mirrors the flag onto the maximize
+//       bit there as it does on a scrolling screen. It folds in here because
+//       v11 has not shipped. A v10 peer cannot pass the handshake, and no
+//       released peer speaks a v11 without it.
+//
 //       Arguments the daemon accepted and ignored only to keep an old
 //       signature are dropped in the same unreleased cycle, so they fold in
 //       here. Snap.resolveWindowRestore loses windowKind, minWidth and
