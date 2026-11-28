@@ -83,8 +83,10 @@ set_target_properties(test_phosphor_ipc_umask PROPERTIES ENABLE_EXPORTS ON)
 # (lambentctl) runs, against the router of the test.
 add_executable(phosphor_ipc_cli_fixture phosphor_ipc_cli_fixture.cpp)
 target_link_libraries(phosphor_ipc_cli_fixture PRIVATE PhosphorIpc::PhosphorIpcCli)
+# The test also calls runCommand() in its own process.
 phosphoripc_add_test(test_phosphor_ipc_cli)
 target_compile_definitions(test_phosphor_ipc_cli
     PRIVATE PHOSPHOR_IPC_CLI_FIXTURE="$<TARGET_FILE:phosphor_ipc_cli_fixture>"
 )
 add_dependencies(test_phosphor_ipc_cli phosphor_ipc_cli_fixture)
+target_link_libraries(test_phosphor_ipc_cli PRIVATE PhosphorIpc::PhosphorIpcCli)

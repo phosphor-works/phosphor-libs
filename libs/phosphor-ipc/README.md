@@ -347,6 +347,10 @@ The program finds the socket as the router does, with `IpcRouter::socketPathForA
 `$XDG_RUNTIME_DIR/myapp.sock`. `--socket PATH`, before or after the subcommand, overrides it. An app whose socket
 follows another rule fills a `Program` with its own `defaultSocket`.
 
+A program that parses its own command line, such as `afterglow ctl`, runs one generic subcommand with
+`PhosphorIpcCli::runCommand(programName, command, args, socketPath)` in its own `QCoreApplication`.
+`isCommand()` tells whether a word is one of them. The messages then start with `programName`.
+
 ```
 myappctl call theme.setMode --arg mode=dark
 myappctl call pkg.install --arg name=foo --timeout 0   # waits for a deferred answer
@@ -358,10 +362,10 @@ myappctl subscribe theme.modeChanged    # stays connected, streams events
 | Exit code | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | A usage error |
-| 2 | A connection or I/O error, or no socket path |
-| 3 | An error from the server, such as `NO_SUCH_TARGET` |
-| 4 | A setup failure, such as the signal handlers of `subscribe` |
+| 1 | An error: no socket path, a connection or I/O error, an error from the server such as `NO_SUCH_TARGET`, or a setup failure such as the signal handlers of `subscribe` |
+| 2 | A usage error |
+
+These are the exit codes of `afterglow ctl`, so that it runs the subcommands with its own codes.
 
 By default, `myappctl call` waits two seconds for the answer. `--timeout SECONDS` changes that time.
 `--timeout 0` waits without a limit, for a deferred call that answers when its work ends. Events that the target sends

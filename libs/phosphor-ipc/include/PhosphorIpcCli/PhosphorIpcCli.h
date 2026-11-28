@@ -6,6 +6,7 @@
 #include <PhosphorIpcCli/phosphoripccli_export.h>
 
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -43,8 +44,21 @@ struct Program
                                                           const QString& version, const QString& description);
 
 // Runs the program on the command line: makes the QCoreApplication, runs the
-// subcommand and returns the exit code. 0: success. 1: a usage error. 2: a
-// connection or I/O error. 3: an error from the server. 4: a setup failure.
+// subcommand and returns the exit code, as afterglow ctl has them. 0:
+// success. 1: an error, such as no socket, a failed connection or an error
+// from the server. 2: a usage error.
 [[nodiscard]] PHOSPHORIPCCLI_EXPORT int run(const Program& program, int argc, char** argv);
+
+// Whether `command` is one of the generic subcommands: call, list, schema or
+// subscribe.
+[[nodiscard]] PHOSPHORIPCCLI_EXPORT bool isCommand(const QString& command);
+
+// Runs one generic subcommand in a program that parses its own command line
+// and has its QCoreApplication already, such as `afterglow ctl`. `args` are
+// the words after the command. A --socket among them overrides `socketPath`.
+// The messages start with `programName`, for example "afterglow ctl". The
+// exit codes are those of run(). 2 for a command that isCommand() refuses.
+[[nodiscard]] PHOSPHORIPCCLI_EXPORT int runCommand(const QString& programName, const QString& command,
+                                                   const QStringList& args, const QString& socketPath);
 
 } // namespace PhosphorIpcCli

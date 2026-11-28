@@ -149,7 +149,7 @@ int runSubscribe(QStringList args, QString socketPath)
     const QString lateSocket = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << " subscribe: " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
     if (!lateSocket.isEmpty()) {
         socketPath = lateSocket;
@@ -157,13 +157,13 @@ int runSubscribe(QStringList args, QString socketPath)
 
     if (args.size() != 1) {
         err << programName() << " subscribe: expects exactly one argument: <target>.<signal>\n";
-        return 1;
+        return ExitUsage;
     }
     const QString targetDotSig = args.first();
     const int dotIdx = targetDotSig.indexOf(QLatin1Char('.'));
     if (dotIdx <= 0 || dotIdx == targetDotSig.size() - 1) {
         err << programName() << " subscribe: argument must be in the form <target>.<signal>\n";
-        return 1;
+        return ExitUsage;
     }
     const QString target = targetDotSig.left(dotIdx);
     const QString signalName = targetDotSig.mid(dotIdx + 1);
@@ -171,7 +171,7 @@ int runSubscribe(QStringList args, QString socketPath)
     Client client;
     if (!client.connectTo(socketPath)) {
         err << programName() << " subscribe: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
 
     constexpr qint64 SubscriptionId = 1;
@@ -184,19 +184,19 @@ int runSubscribe(QStringList args, QString socketPath)
     const auto firstResp = client.request(req);
     if (!firstResp.has_value()) {
         err << programName() << " subscribe: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
     if (firstResp->value(QLatin1String(PhosphorIpc::Field::Type)).toString()
         == QLatin1String(PhosphorIpc::ResponseType::Error)) {
         err << programName() << " subscribe: "
             << sanitiseForSingleLine(firstResp->value(QLatin1String(PhosphorIpc::Field::Code)).toString()) << ": "
             << sanitiseForSingleLine(firstResp->value(QLatin1String(PhosphorIpc::Field::Message)).toString()) << "\n";
-        return 3;
+        return ExitError;
     }
 
     if (!installSignalHandlers()) {
         err << programName() << " subscribe: failed to install signal handlers (errno=" << errno << ")\n";
-        return 4;
+        return ExitError;
     }
 
     QLocalSocket* socket = client.socket();
@@ -385,7 +385,7 @@ int runSubscribe(QStringList args, QString socketPath)
     }
     // Server-initiated disconnect exits 2 so scripts driving us
     // can distinguish "Ctrl+C clean stop" from "server died".
-    return serverDisconnected ? 2 : 0;
+    return serverDisconnected ? ExitError : ExitSuccess;
 }
 
 } // namespace PhosphorIpcCli

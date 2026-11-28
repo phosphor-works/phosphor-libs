@@ -23,7 +23,7 @@ int runSchema(QStringList args, QString socketPath)
     const QString lateSocket = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << " schema: " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
     if (!lateSocket.isEmpty()) {
         socketPath = lateSocket;
@@ -31,14 +31,14 @@ int runSchema(QStringList args, QString socketPath)
 
     if (args.size() != 1) {
         err << programName() << " schema: expects exactly one argument: <target>\n";
-        return 1;
+        return ExitUsage;
     }
     const QString target = args.first();
 
     Client client;
     if (!client.connectTo(socketPath)) {
         err << programName() << " schema: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
 
     QJsonObject req;
@@ -49,7 +49,7 @@ int runSchema(QStringList args, QString socketPath)
     const auto resp = client.request(req);
     if (!resp.has_value()) {
         err << programName() << " schema: " << client.errorMessage() << "\n";
-        return 2;
+        return ExitError;
     }
     if (resp->value(QLatin1String(PhosphorIpc::Field::Type)).toString()
         == QLatin1String(PhosphorIpc::ResponseType::Error)) {
@@ -57,7 +57,7 @@ int runSchema(QStringList args, QString socketPath)
             << " schema: " << sanitiseForSingleLine(resp->value(QLatin1String(PhosphorIpc::Field::Code)).toString())
             << ": " << sanitiseForSingleLine(resp->value(QLatin1String(PhosphorIpc::Field::Message)).toString())
             << "\n";
-        return 3;
+        return ExitError;
     }
     const QJsonValue resultValue = resp->value(QLatin1String(PhosphorIpc::Field::Result));
     if (!resultValue.isObject()) {
@@ -66,7 +66,7 @@ int runSchema(QStringList args, QString socketPath)
         // would otherwise pretty-print as `{}` with exit 0,
         // silently misleading. Exit 3 so scripts can tell.
         err << programName() << " schema: protocol error: server returned non-object result\n";
-        return 3;
+        return ExitError;
     }
     // QJsonDocument::toJson escapes ASCII control bytes per the JSON
     // spec, so the indented output is terminal-safe without further
@@ -74,7 +74,7 @@ int runSchema(QStringList args, QString socketPath)
     // so no explicit newline suffix is needed (Compact would
     // require one, but we use Indented here).
     out << QString::fromUtf8(QJsonDocument(resultValue.toObject()).toJson(QJsonDocument::Indented));
-    return 0;
+    return ExitSuccess;
 }
 
 } // namespace PhosphorIpcCli

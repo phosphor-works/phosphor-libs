@@ -76,17 +76,17 @@ int run(const Program& program, int argc, char** argv)
     QString socketPathCli = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << ": " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
 
     if (args.isEmpty() || args.front() == QLatin1String("--help") || args.front() == QLatin1String("-h")
         || args.front() == QLatin1String("help")) {
         printUsage(program, args.isEmpty() ? err : out);
-        return args.isEmpty() ? 1 : 0;
+        return args.isEmpty() ? ExitUsage : ExitSuccess;
     }
     if (args.front() == QLatin1String("--version") || args.front() == QLatin1String("-v")) {
         out << program.name << " " << program.version << "\n";
-        return 0;
+        return ExitSuccess;
     }
 
     const QString subcommand = args.takeFirst();
@@ -96,7 +96,7 @@ int run(const Program& program, int argc, char** argv)
     const QString postSubcommandSocket = stripSocketFlag(args, &socketErr);
     if (!socketErr.isEmpty()) {
         err << programName() << ": " << socketErr << "\n";
-        return 1;
+        return ExitUsage;
     }
     if (!postSubcommandSocket.isEmpty()) {
         socketPathCli = postSubcommandSocket;
@@ -104,22 +104,37 @@ int run(const Program& program, int argc, char** argv)
     const QString socketPath =
         !socketPathCli.isEmpty() ? socketPathCli : (program.defaultSocket ? program.defaultSocket() : QString());
 
-    if (subcommand == QLatin1String("call")) {
+    if (!isCommand(subcommand)) {
+        err << programName() << ": unknown subcommand '" << sanitiseForSingleLine(subcommand) << "'\n";
+        printUsage(program, err);
+        return ExitUsage;
+    }
+    return runCommand(program.name, subcommand, args, socketPath);
+}
+
+bool isCommand(const QString& command)
+{
+    return command == QLatin1String("call") || command == QLatin1String("list") || command == QLatin1String("schema")
+        || command == QLatin1String("subscribe");
+}
+
+int runCommand(const QString& programName, const QString& command, const QStringList& args, const QString& socketPath)
+{
+    setProgramName(programName);
+    if (command == QLatin1String("call")) {
         return runCall(args, socketPath);
     }
-    if (subcommand == QLatin1String("list")) {
+    if (command == QLatin1String("list")) {
         return runList(args, socketPath);
     }
-    if (subcommand == QLatin1String("schema")) {
+    if (command == QLatin1String("schema")) {
         return runSchema(args, socketPath);
     }
-    if (subcommand == QLatin1String("subscribe")) {
+    if (command == QLatin1String("subscribe")) {
         return runSubscribe(args, socketPath);
     }
-
-    err << programName() << ": unknown subcommand '" << sanitiseForSingleLine(subcommand) << "'\n";
-    printUsage(program, err);
-    return 1;
+    QTextStream(stderr) << programName << ": unknown subcommand '" << sanitiseForSingleLine(command) << "'\n";
+    return ExitUsage;
 }
 
 } // namespace PhosphorIpcCli
