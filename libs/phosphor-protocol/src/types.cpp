@@ -189,11 +189,11 @@ QString TileRequestEntry::validationError() const
     if (maximizedToEdges && floating) {
         return QStringLiteral("TileRequestEntry: maximizedToEdges on a floating entry (windowId=%1)").arg(windowId);
     }
-    // Disjoint producers again: monocle only from the autotile engine's
-    // layout_apply, maximizedToEdges only from the scroll engine's applyLayout.
-    // Acted on, the pair would hand one window's maximize bit to two
-    // membership sets with independent exits — precisely the monocle ledger's
-    // failure mode.
+    // Never together from a producer: the scroll engine sends no monocle, and
+    // the autotile engine's layout_apply drops a window's maximize when its
+    // stack becomes monocle. Acted on, the pair would hand one window's
+    // maximize bit to two membership sets with independent exits, precisely
+    // the monocle ledger's failure mode.
     if (maximizedToEdges && monocle) {
         return QStringLiteral("TileRequestEntry: maximizedToEdges on a monocle entry (windowId=%1)").arg(windowId);
     }

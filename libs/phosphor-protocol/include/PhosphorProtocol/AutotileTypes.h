@@ -34,12 +34,15 @@ struct PHOSPHORPROTOCOLTYPES_EXPORT TileRequestEntry
     /// while committing the column rect above — the tile never leaves its
     /// slot. False for every other placement.
     bool windowedFullscreen = false;
-    /// Scrolling mode: this window's column is maximized to the screen edges
-    /// (niri maximize-window-to-edges, generalized to the column) — the
-    /// column fills the raw work area on BOTH axes, gap-free, while staying
-    /// tiled. DECLARED engine state driven by the toggleMaximizeToEdges verb,
-    /// never measured from the rendered rect, so an incidentally full-width
-    /// column (maximize-column, a preset, a clamp) does not carry it. The
+    /// Scrolling and tiling modes: the window is maximized to the screen edges.
+    /// It fills the raw work area on BOTH axes, gap-free, while staying tiled.
+    /// In scrolling the state is the column's (niri maximize-window-to-edges,
+    /// generalized to the column). In tiling it is the tile engine's override
+    /// of one window's tile, applied after the algorithm, so the other tiles
+    /// keep their rects. DECLARED engine state driven by the
+    /// toggleMaximizeToEdges verb of each engine's interface, never measured
+    /// from the rendered rect, so an incidentally full-width column
+    /// (maximize-column, a preset, a clamp) does not carry it. The
     /// effect mirrors it onto KWin's maximize bit so the titlebar button
     /// reflects the engine's state; it is NOT a geometry input, since the
     /// committed rect above already carries the full geometry. False for
